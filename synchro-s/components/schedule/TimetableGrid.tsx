@@ -1,7 +1,7 @@
 import { ScheduleBlock } from "@/components/schedule/ScheduleBlock";
 import { timeToMinutes } from "@/lib/time";
 import type { RoleView, ScheduleEvent, Weekday } from "@/types/schedule";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
 type TimetableGridProps = {
@@ -37,7 +37,7 @@ function addMinutes(time: string, durationMinutes: number): string {
 }
 
 export function TimetableGrid({ roleView, days, timeSlots, events, highlightCellTints, onCellClick, onEventMove }: TimetableGridProps) {
-  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
@@ -106,6 +106,23 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
     });
   };
 
+  useEffect(() => {
+    const clearDragState = () => {
+      dragPayloadRef.current = null;
+      setDragOverCell(null);
+      setDraggingKey(null);
+    };
+
+    window.addEventListener("dragend", clearDragState);
+    window.addEventListener("drop", clearDragState);
+    window.addEventListener("mouseup", clearDragState);
+    return () => {
+      window.removeEventListener("dragend", clearDragState);
+      window.removeEventListener("drop", clearDragState);
+      window.removeEventListener("mouseup", clearDragState);
+    };
+  }, []);
+
   const handleDrop = async (event: DragEvent<HTMLElement>, weekday: Weekday, startTime: string) => {
     if (!onEventMove) return;
     event.preventDefault();
@@ -124,7 +141,7 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
     } finally {
       dragPayloadRef.current = null;
       setDragOverCell(null);
-      setDraggingId(null);
+      setDraggingKey(null);
     }
   };
 
@@ -217,7 +234,8 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                               key={`${event.id}-${event.classDate}`}
                               draggable
                               onDragStart={(dragEvent) => {
-                                setDraggingId(event.id);
+                                const eventKey = `${event.id}-${event.classDate}-${event.startTime}`;
+                                setDraggingKey(eventKey);
                                 dropHandledRef.current = false;
                                 const payload = JSON.stringify({
                                   classId: event.id,
@@ -243,9 +261,9 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                                 }
                                 dragPayloadRef.current = null;
                                 setDragOverCell(null);
-                                setDraggingId(null);
+                                setDraggingKey(null);
                               }}
-                              className={draggingId === event.id ? "opacity-60" : ""}
+                              className={draggingKey === `${event.id}-${event.classDate}-${event.startTime}` ? "opacity-60" : ""}
                               style={
                                 highlightCellTints?.[cellKey]
                                   ? {
