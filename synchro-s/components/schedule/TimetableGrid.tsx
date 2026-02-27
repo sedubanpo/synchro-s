@@ -43,12 +43,14 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
   const dropHandledRef = useRef(false);
   const progressByEventKey = new Map<string, { index: number; total: number }>();
   const eventMap = new Map<string, ScheduleEvent[]>();
+  const activeDaySet = new Set<Weekday>();
 
   for (const event of events) {
     const key = `${event.weekday}-${event.startTime}`;
     const bucket = eventMap.get(key) ?? [];
     bucket.push(event);
     eventMap.set(key, bucket);
+    activeDaySet.add(event.weekday);
   }
 
   const chainBaseKey = (event: ScheduleEvent): string => {
@@ -137,7 +139,11 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
             {days.map((day) => (
               <th
                 key={day.key}
-                className="sticky top-0 z-20 border-b border-r border-slate-200 bg-slate-50 px-3 py-3 text-center text-sm font-bold text-slate-700"
+                className={`sticky top-0 z-20 border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
+                  activeDaySet.has(day.key)
+                    ? "border-sky-200 bg-gradient-to-b from-sky-50 to-white text-sky-700 shadow-[inset_0_-1px_0_rgba(56,189,248,0.3),0_0_18px_rgba(59,130,246,0.18)]"
+                    : "border-slate-200 bg-slate-50 text-slate-700"
+                }`}
               >
                 {day.label}
               </th>

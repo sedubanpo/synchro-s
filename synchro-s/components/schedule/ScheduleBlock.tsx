@@ -1,5 +1,4 @@
 import { getSubjectColorClass } from "@/lib/subjectColors";
-import { timeToMinutes } from "@/lib/time";
 import type { RoleView, ScheduleEvent } from "@/types/schedule";
 
 type ScheduleBlockProps = {
@@ -13,7 +12,6 @@ type ScheduleBlockProps = {
 
 export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockProps) {
   const subjectColorClass = getSubjectColorClass(event.subjectCode);
-  const durationMinutes = Math.max(30, timeToMinutes(event.endTime) - timeToMinutes(event.startTime));
   const title =
     roleView === "instructor"
       ? `${event.studentNames.join(", ") || "학생없음"} ${event.classTypeLabel}`
@@ -21,14 +19,18 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
   const timeBubble = `${event.startTime}-${event.endTime}`;
   const totalSegments = chainProgress?.total ?? 1;
   const currentSegment = chainProgress?.index ?? 1;
+  const isRoyalClass =
+    event.classTypeCode === "ONE_TO_ONE" ||
+    event.classTypeCode === "TWO_TO_ONE" ||
+    event.classTypeLabel.includes("1:1") ||
+    event.classTypeLabel.includes("2:1");
 
   return (
     <div className={`${subjectColorClass} relative rounded-lg px-2 py-1.5 text-white shadow-sm`}>
-      {roleView !== "student" && event.note ? (
-        <div className="absolute -top-2 left-2 z-20 inline-flex max-w-[88%] items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 shadow-sm">
-          <span className="truncate">{event.note}</span>
-          <span className="absolute -bottom-1 left-3 h-2 w-2 rotate-45 border-b border-r border-amber-300 bg-amber-100" />
-        </div>
+      {isRoyalClass ? (
+        <span className="absolute -top-1.5 -left-1.5 z-20 inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-200 bg-gradient-to-b from-amber-200 to-amber-400 text-[11px] shadow-[0_4px_12px_rgba(251,191,36,0.45)]">
+          👑
+        </span>
       ) : null}
 
       <div className="mb-1 flex items-start justify-between gap-1">
@@ -48,7 +50,6 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
               className={`h-1.5 w-2 rounded-sm ${idx + 1 <= currentSegment ? "bg-white/95" : "bg-white/30"}`}
             />
           ))}
-          <span className="ml-1 text-[10px] font-medium opacity-90">{Math.floor(durationMinutes / 60)}h</span>
         </div>
       </div>
     </div>
