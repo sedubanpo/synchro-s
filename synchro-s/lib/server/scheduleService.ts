@@ -171,6 +171,16 @@ function resolveCompatibility(
   candidateType: string,
   existingType: string
 ): { isCompatible: boolean; reason: string } {
+  const isStrictType = (code: string) => code === "ONE_TO_ONE" || code === "TWO_TO_ONE";
+  // Business rule: 다대일(개별/개별정규/특강 등)은 시간 중복 허용.
+  // 충돌 차단은 1:1, 2:1 수업끼리 겹칠 때만 적용한다.
+  if (!isStrictType(candidateType) || !isStrictType(existingType)) {
+    return {
+      isCompatible: true,
+      reason: "multi-class overlap allowed"
+    };
+  }
+
   const direct = compatibilityMap.get(`${candidateType}:${existingType}`);
   if (direct) {
     return {

@@ -276,13 +276,13 @@ function resolveClassTypeOption(rawLabel: string, classTypes: ClassTypeOption[])
       keys.some((key) => normalizeLookupToken(entry.code).includes(key) || normalizeLookupToken(entry.label).includes(key))
     );
 
-  if (["11", "1대1", "일대일", "개별", "개인"].some((key) => target.includes(normalizeLookupToken(key)))) {
+  if (["11", "1대1", "일대일", "one", "onetoone"].some((key) => target.includes(normalizeLookupToken(key)))) {
     return pick(["onetoone", "one", "11", "개별", "개인"]);
   }
   if (["21", "2대1", "이대일"].some((key) => target.includes(normalizeLookupToken(key)))) {
     return pick(["twotoone", "two", "21", "2대1"]);
   }
-  if (["개별정규", "정규", "regular"].some((key) => target.includes(normalizeLookupToken(key)))) {
+  if (["개별정규", "개별", "정규", "regular", "multi"].some((key) => target.includes(normalizeLookupToken(key)))) {
     return pick(["regular", "multi", "정규"]);
   }
   if (["특강", "special"].some((key) => target.includes(normalizeLookupToken(key)))) {
@@ -451,6 +451,19 @@ function moveEventInList(
 
 function hasTimeOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
   return timeToMinutes(aStart) < timeToMinutes(bEnd) && timeToMinutes(aEnd) > timeToMinutes(bStart);
+}
+
+function isStrictConflictClassType(code: string, label?: string): boolean {
+  const normalizedCode = normalizeLookupToken(code);
+  const normalizedLabel = normalizeLookupToken(label ?? "");
+  if (normalizedCode.includes("onetone") || normalizedCode.includes("onetoone") || normalizedCode.includes("11")) return true;
+  if (normalizedCode.includes("twotone") || normalizedCode.includes("twotoone") || normalizedCode.includes("21")) return true;
+  return (
+    normalizedLabel.includes(normalizeLookupToken("1:1")) ||
+    normalizedLabel.includes(normalizeLookupToken("1대1")) ||
+    normalizedLabel.includes(normalizeLookupToken("2:1")) ||
+    normalizedLabel.includes(normalizeLookupToken("2대1"))
+  );
 }
 
 export default function SynchroSPage() {
@@ -1090,6 +1103,9 @@ export default function SynchroSPage() {
             const otherInstructorKey = other.instructorId || normalizePersonName(other.instructorName);
             if (!otherInstructorKey || otherInstructorKey !== targetInstructorKey) continue;
             if (!hasTimeOverlap(ctx.startTime, ctx.endTime, other.startTime, other.endTime)) continue;
+            const movingIsStrict = isStrictConflictClassType(targetEvent.classTypeCode, targetEvent.classTypeLabel);
+            const existingIsStrict = isStrictConflictClassType(other.classTypeCode, other.classTypeLabel);
+            if (!(movingIsStrict && existingIsStrict)) continue;
 
             const dayLabel = DAYS.find((day) => day.key === ctx.weekday)?.label ?? `${ctx.weekday}`;
             conflictMessages.push(

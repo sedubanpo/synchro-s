@@ -10,11 +10,10 @@ type ScheduleBlockProps = {
 export function ScheduleBlock({ event, roleView }: ScheduleBlockProps) {
   const subjectColorClass = getSubjectColorClass(event.subjectCode);
   const durationMinutes = Math.max(30, timeToMinutes(event.endTime) - timeToMinutes(event.startTime));
-  const personLabel =
-    roleView === "student"
-      ? event.instructorName || "강사없음"
-      : event.studentNames.join(", ") || "학생없음";
-  const title = `${event.subjectName} ${personLabel} ${event.classTypeLabel}`;
+  const title =
+    roleView === "instructor"
+      ? `${event.studentNames.join(", ") || "학생없음"} ${event.classTypeLabel}`
+      : `${event.subjectName} ${event.instructorName || "강사없음"} ${event.classTypeLabel}`;
   const timeBubble = `${event.startTime}-${event.endTime}`;
 
   return (
