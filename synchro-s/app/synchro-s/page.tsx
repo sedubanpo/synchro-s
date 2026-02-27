@@ -64,6 +64,13 @@ type TimetableGroup = {
   createdAt: string;
 };
 
+type ImportProgress = {
+  active: boolean;
+  total: number;
+  done: number;
+  label: string;
+};
+
 function formatDateISOInKST(date: Date): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(date);
 }
@@ -455,6 +462,12 @@ export default function SynchroSPage() {
   const [notionInput, setNotionInput] = useState<string>("");
   const [parsedNotionItems, setParsedNotionItems] = useState<ParsedNotionItem[]>([]);
   const [importingNotion, setImportingNotion] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress>({
+    active: false,
+    total: 0,
+    done: 0,
+    label: ""
+  });
   const [memoByEventId, setMemoByEventId] = useState<Record<string, string>>({});
   const [timetableGroups, setTimetableGroups] = useState<TimetableGroup[]>([]);
   const [groupPage, setGroupPage] = useState(1);
@@ -463,6 +476,8 @@ export default function SynchroSPage() {
   const [groupsHydrated, setGroupsHydrated] = useState(false);
   const [conflictDialog, setConflictDialog] = useState<{ open: boolean; message: string }>({ open: false, message: "" });
   const movingLockRef = useRef(false);
+  const importingNotionRef = useRef(false);
+  const pendingRealtimeReloadRef = useRef(false);
   const notionTextValue = notionInput !== "" ? notionInput : notionPreview;
 
   const weekEnd = useMemo(() => shiftDate(weekStart, 6), [weekStart]);
@@ -566,9 +581,9 @@ export default function SynchroSPage() {
         instructorName,
         studentIds: selectedStudentId ? [selectedStudentId] : [],
         studentNames,
-        subjectCode: subjectMatch?.code ?? "MATH",
+        subjectCode: subjectMatch?.code ?? `UNMAPPED:${normalizeLookupToken(item.subjectLabel) || "unknown"}`,
         subjectName: subjectMatch?.label ?? item.subjectLabel,
-        classTypeCode: classTypeMatch?.code ?? "REGULAR_MULTI",
+        classTypeCode: classTypeMatch?.code ?? `UNMAPPED:${normalizeLookupToken(item.classTypeLabel) || "unknown"}`,
         classTypeLabel: classTypeMatch?.label ?? item.classTypeLabel,
         badgeText: classTypeMatch?.badgeText ?? `[${item.classTypeLabel}]`,
         weekday: item.weekday,
@@ -1198,6 +1213,13 @@ export default function SynchroSPage() {
     }
 
     setImportingNotion(true);
+    importingNotionRef.current = true;
+    setImportProgress({
+      active: true,
+      total: parsedNotionItems.length,
+      done: 0,
+      label: "노션 시간표를 서버에 저장 중입니다..."
+    });
     setError(null);
 
     const normalize = (value: string) => value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
@@ -1214,6 +1236,7 @@ export default function SynchroSPage() {
     let skipped = 0;
     const importedClassIds: string[] = [];
     const conflictDetails: string[] = [];
+    const noSubjectDetails: string[] = [];
     const skipReasons: Record<string, number> = {
       noInstructor: 0,
       noStudent: 0,
@@ -1223,7 +1246,9 @@ export default function SynchroSPage() {
       requestFailed: 0
     };
 
-    for (const item of parsedNotionItems) {
+    try {
+      for (let idx = 0; idx < parsedNotionItems.length; idx += 1) {
+        const item = parsedNotionItems[idx] as ParsedNotionItem;
       const subject = resolveSubjectOption(item.subjectLabel, subjects);
       const classType = resolveClassTypeOption(item.classTypeLabel, classTypes);
 
@@ -1250,11 +1275,15 @@ export default function SynchroSPage() {
       if (!subject) {
         skipped += 1;
         skipReasons.noSubject += 1;
+        const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
+        noSubjectDetails.push(`${weekdayLabel} ${toKoreanHourRange(item.startTime)} (${item.rawText})`);
+        setImportProgress((prev) => ({ ...prev, done: idx + 1 }));
         continue;
       }
       if (!classType) {
         skipped += 1;
         skipReasons.noClassType += 1;
+        setImportProgress((prev) => ({ ...prev, done: idx + 1 }));
         continue;
       }
 
@@ -1304,50 +1333,71 @@ export default function SynchroSPage() {
         skipped += 1;
         skipReasons.requestFailed += 1;
       }
+
+        setImportProgress((prev) => ({ ...prev, done: idx + 1 }));
+    }
+      const reasonLine = Object.entries(skipReasons)
+        .filter(([, count]) => count > 0)
+        .map(([key, count]) => `${key}:${count}`)
+        .join(", ");
+      setNotice(`노션 가져오기 완료: 생성 ${created}건 / 기존유지 ${existing}건 / 건너뜀 ${skipped}건${reasonLine ? ` (${reasonLine})` : ""}`);
+
+      const dedupedClassIds = Array.from(new Set(importedClassIds));
+      if (dedupedClassIds.length > 0 && currentTargetId) {
+        const newGroup: TimetableGroup = {
+          id: crypto.randomUUID(),
+          name: `${weekStart} ${currentTargetLabel} 시간표`,
+          roleView,
+          targetId: currentTargetId,
+          weekStart,
+          classIds: dedupedClassIds,
+          snapshotEvents: [],
+          isActive: true,
+          createdAt: new Date().toISOString()
+        };
+        setTimetableGroups((prev) => {
+          const next = prev.map((group) =>
+            group.roleView === roleView && group.targetId === currentTargetId ? { ...group, isActive: false } : group
+          );
+          return [newGroup, ...next];
+        });
+        setSelectedGroupId(newGroup.id);
+      }
+
+      if (created > 0 || existing > 0) {
+        setParsedNotionItems([]);
+        setNotionInput("");
+      }
+
+      if (conflictDetails.length > 0 || noSubjectDetails.length > 0) {
+        const lines: string[] = [];
+        if (conflictDetails.length > 0) {
+          lines.push("노션 시간표 저장 중 충돌이 발생했습니다.");
+          lines.push(...conflictDetails);
+        }
+        if (noSubjectDetails.length > 0) {
+          lines.push("");
+          lines.push(`과목 매핑 실패(noSubject) ${noSubjectDetails.length}건`);
+          lines.push(...noSubjectDetails.slice(0, 12).map((item) => `- ${item}`));
+          if (noSubjectDetails.length > 12) {
+            lines.push(`- 외 ${noSubjectDetails.length - 12}건`);
+          }
+        }
+        setConflictDialog({
+          open: true,
+          message: lines.join("\n")
+        });
+      }
+    } finally {
+      setImportingNotion(false);
+      importingNotionRef.current = false;
+      setImportProgress((prev) => ({ ...prev, active: false, label: "" }));
     }
 
-    setImportingNotion(false);
-    const reasonLine = Object.entries(skipReasons)
-      .filter(([, count]) => count > 0)
-      .map(([key, count]) => `${key}:${count}`)
-      .join(", ");
-    setNotice(`노션 가져오기 완료: 생성 ${created}건 / 기존유지 ${existing}건 / 건너뜀 ${skipped}건${reasonLine ? ` (${reasonLine})` : ""}`);
-
-    const dedupedClassIds = Array.from(new Set(importedClassIds));
-    if (dedupedClassIds.length > 0 && currentTargetId) {
-      const newGroup: TimetableGroup = {
-        id: crypto.randomUUID(),
-        name: `${weekStart} ${currentTargetLabel} 시간표`,
-        roleView,
-        targetId: currentTargetId,
-        weekStart,
-        classIds: dedupedClassIds,
-        snapshotEvents: [],
-        isActive: true,
-        createdAt: new Date().toISOString()
-      };
-      setTimetableGroups((prev) => {
-        const next = prev.map((group) =>
-          group.roleView === roleView && group.targetId === currentTargetId ? { ...group, isActive: false } : group
-        );
-        return [newGroup, ...next];
-      });
-      setSelectedGroupId(newGroup.id);
+    if (pendingRealtimeReloadRef.current) {
+      pendingRealtimeReloadRef.current = false;
     }
-
-    if (created > 0 || existing > 0) {
-      setParsedNotionItems([]);
-      setNotionInput("");
-    }
-
-    if (conflictDetails.length > 0) {
-      setConflictDialog({
-        open: true,
-        message: `노션 시간표 저장 중 충돌이 발생했습니다.\n${conflictDetails.join("\n")}`
-      });
-    }
-
-    await loadWeek();
+    await loadWeek({ silent: true });
   }, [
     classTypes,
     instructors,
@@ -1607,13 +1657,25 @@ export default function SynchroSPage() {
     const channel = supabase
       .channel("synchro-s-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => {
-        void loadWeek();
+        if (importingNotionRef.current) {
+          pendingRealtimeReloadRef.current = true;
+          return;
+        }
+        void loadWeek({ silent: true });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "class_enrollments" }, () => {
-        void loadWeek();
+        if (importingNotionRef.current) {
+          pendingRealtimeReloadRef.current = true;
+          return;
+        }
+        void loadWeek({ silent: true });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "class_overrides" }, () => {
-        void loadWeek();
+        if (importingNotionRef.current) {
+          pendingRealtimeReloadRef.current = true;
+          return;
+        }
+        void loadWeek({ silent: true });
       })
       .subscribe();
 
@@ -2063,6 +2125,30 @@ export default function SynchroSPage() {
           </div>
         </aside>
       </section>
+
+      {importProgress.active ? (
+        <div className="fixed inset-0 z-[340] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/70 bg-[linear-gradient(145deg,rgba(255,255,255,0.72),rgba(219,234,254,0.65),rgba(167,243,208,0.45))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] backdrop-blur-2xl">
+            <p className="text-base font-extrabold text-slate-800">노션 시간표 저장 중...</p>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{importProgress.label || "데이터를 처리하고 있습니다."}</p>
+            <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-white/60">
+              <div
+                className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#60a5fa,#a78bfa)] transition-all duration-300"
+                style={{
+                  width: `${Math.max(
+                    6,
+                    importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0
+                  )}%`
+                }}
+              />
+            </div>
+            <p className="mt-2 text-right text-sm font-bold text-slate-700">
+              {importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0}% (
+              {importProgress.done}/{importProgress.total})
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {conflictDialog.open ? (
         <div className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
