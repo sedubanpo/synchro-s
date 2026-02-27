@@ -84,52 +84,63 @@ function LoginPageContent() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-10">
-      <section className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Synchro-S Login</h1>
-        <p className="mt-1 text-sm text-slate-500">관리자/코디네이터 계정으로 로그인하세요.</p>
+    <main className="min-h-screen bg-[#d6d3e3] px-4 py-8 md:px-8 md:py-12">
+      <section className="mx-auto grid min-h-[82vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-white/50 bg-white/70 shadow-[0_30px_80px_rgba(30,41,59,0.18)] backdrop-blur-xl md:grid-cols-2">
+        <div className="relative flex flex-col justify-between border-b border-slate-200/70 bg-white/85 p-8 md:border-b-0 md:border-r md:p-12">
+          <div>
+            <p className="text-sm font-extrabold text-slate-900">● Synchro-S</p>
+            <h1 className="mt-12 text-4xl font-black tracking-tight text-slate-900">Welcome back</h1>
+            <p className="mt-3 text-sm font-medium text-slate-500">관리자/코디네이터 계정으로 로그인해 주세요.</p>
 
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          <label className="block space-y-1">
-            <span className="text-xs font-semibold text-slate-700">Email</span>
-            <input
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </label>
+            <form className="mt-10 space-y-4" onSubmit={handleSubmit}>
+              <label className="block space-y-1">
+                <span className="text-xs font-bold text-slate-600">Email</span>
+                <input
+                  className="w-full rounded-xl border border-slate-300/80 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </label>
 
-          <label className="block space-y-1">
-            <span className="text-xs font-semibold text-slate-700">Password</span>
-            <input
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-bold text-slate-600">Password</span>
+                <input
+                  className="w-full rounded-xl border border-slate-300/80 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-violet-400"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </label>
 
-          {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
+              {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
 
-          <button
-            type="submit"
-            disabled={submitting || checking}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {checking ? "세션 확인 중..." : submitting ? "로그인 중..." : "로그인"}
-          </button>
-        </form>
+              <button
+                type="submit"
+                disabled={submitting || checking}
+                className="w-full rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2.5 text-sm font-bold text-white shadow-[0_10px_25px_rgba(139,92,246,0.35)] hover:opacity-95 disabled:opacity-60"
+              >
+                {checking ? "세션 확인 중..." : submitting ? "로그인 중..." : "로그인"}
+              </button>
+            </form>
+          </div>
 
-        <div className="mt-4 text-center text-xs text-slate-500">
-          로그인 후 <code>{nextPath}</code>로 이동합니다.
+          <div className="mt-8">
+            <p className="text-xs font-semibold text-slate-500">
+              로그인 후 <code>{nextPath}</code>로 이동합니다.
+            </p>
+            <Link href="/" className="mt-2 inline-block text-xs font-bold text-violet-700 hover:text-violet-800">
+              홈으로
+            </Link>
+          </div>
         </div>
-        <div className="mt-2 text-center">
-          <Link href="/" className="text-xs font-semibold text-blue-600 hover:text-blue-700">
-            홈으로
-          </Link>
+
+        <div className="relative hidden items-center justify-center bg-[#f6f5fb] md:flex">
+          <div className="absolute h-64 w-64 rounded-full bg-gradient-to-br from-violet-600 to-indigo-600" />
+          <div className="absolute h-16 w-80 rounded-full bg-[#f6f5fb]/90 backdrop-blur-sm" />
+          <div className="absolute top-1/2 h-40 w-40 -translate-y-2 rounded-full bg-violet-600/40 blur-2xl" />
         </div>
       </section>
     </main>
@@ -140,8 +151,8 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-10">
-          <section className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <main className="min-h-screen bg-[#d6d3e3] px-4 py-8 md:px-8 md:py-12">
+          <section className="mx-auto flex min-h-[82vh] w-full max-w-6xl items-center justify-center rounded-2xl border border-white/50 bg-white/70 shadow-[0_30px_80px_rgba(30,41,59,0.18)] backdrop-blur-xl">
             <p className="text-sm font-semibold text-slate-600">로그인 페이지 로딩 중...</p>
           </section>
         </main>

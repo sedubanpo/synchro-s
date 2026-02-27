@@ -155,14 +155,14 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                     <div className="p-1">
                       {isEmpty ? (
                         <div
-                          className={`min-h-[58px] rounded-md border border-dashed transition ${
+                          className={`min-h-[46px] rounded-md border border-dashed transition ${
                             isDropTarget
                               ? "border-sky-400 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]"
                               : "border-transparent hover:border-slate-200 hover:bg-slate-50"
                           }`}
                         />
                       ) : (
-                        <div className="flex min-h-[58px] flex-col gap-1">
+                        <div className="flex min-h-[46px] flex-col gap-1">
                           {entries.map((event) => (
                             <div
                               key={`${event.id}-${event.classDate}`}
