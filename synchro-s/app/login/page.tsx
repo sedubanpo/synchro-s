@@ -3,9 +3,9 @@
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = useMemo(() => searchParams.get("next") || "/synchro-s", [searchParams]);
@@ -133,5 +133,21 @@ export default function LoginPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-10">
+          <section className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-sm font-semibold text-slate-600">로그인 페이지 로딩 중...</p>
+          </section>
+        </main>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }
