@@ -588,13 +588,16 @@ export default function SynchroSPage() {
   const activeStudentEventsForInstructor = useMemo(() => {
     if (roleView !== "instructor" || !selectedInstructorId) return [];
     const selectedInstructorKey = normalizePersonName(selectedInstructorLabel);
-    const activeStudentGroups = timetableGroups.filter(
-      (group) => group.roleView === "student" && group.isActive && (group.snapshotEvents?.length ?? 0) > 0
-    );
+    const activeStudentGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
     if (activeStudentGroups.length === 0) return [];
 
     const merged = activeStudentGroups
-      .flatMap((group) => group.snapshotEvents ?? [])
+      .flatMap((group) => {
+        const snapshot = group.snapshotEvents ?? [];
+        if (snapshot.length > 0) return snapshot;
+        const idSet = new Set(group.classIds);
+        return events.filter((event) => idSet.has(event.id));
+      })
       .filter((event) => {
         if (event.instructorId === selectedInstructorId) return true;
         if (!selectedInstructorKey) return false;
@@ -627,7 +630,7 @@ export default function SynchroSPage() {
       });
     }
     return [...dedup.values()];
-  }, [roleView, selectedInstructorId, selectedInstructorLabel, timetableGroups]);
+  }, [events, roleView, selectedInstructorId, selectedInstructorLabel, timetableGroups]);
   const draftEvents = useMemo<ScheduleEvent[]>(() => {
     if (parsedNotionItems.length === 0) return [];
     return parsedNotionItems.map((item, index) => {
@@ -1201,7 +1204,12 @@ export default function SynchroSPage() {
         const res = await fetch(`/api/schedules/${targetClassId}/move`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ weekday: ctx.weekday, startTime: ctx.startTime, weekStart })
+          body: JSON.stringify({
+            weekday: ctx.weekday,
+            startTime: ctx.startTime,
+            weekStart,
+            studentId: roleView === "student" ? selectedStudentId || undefined : undefined
+          })
         });
 
         if (res.status === 401) {
@@ -1243,8 +1251,10 @@ export default function SynchroSPage() {
       moveToLogin,
       selectedGroup,
       selectedInstructorLabel,
+      selectedStudentId,
       students,
       timetableGroups,
+      roleView,
       weekStart
     ]
   );

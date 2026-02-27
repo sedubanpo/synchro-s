@@ -7,6 +7,7 @@ type MovePayload = {
   weekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   startTime: string;
   weekStart: string;
+  studentId?: string;
 };
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
@@ -26,7 +27,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     const payload = (await req.json()) as MovePayload;
-    const result = await moveScheduleSlot(supabase, params.id, payload, user.id);
+    const result = await moveScheduleSlot(supabase, params.id, payload, user.id, {
+      studentId: payload.studentId
+    });
 
     if (!result.moved && result.conflict.hasConflict) {
       return NextResponse.json(result, { status: 409 });

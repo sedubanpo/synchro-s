@@ -412,64 +412,45 @@ export async function importScheduleRow(
 
   const { data: exactRows, error: exactError } = await exactQuery;
   if (exactError) throw exactError;
+  const exactClassRows = (exactRows ?? []) as { id: string; active_from: string | null; active_to: string | null }[];
 
-  if ((exactRows ?? []).length > 0) {
-    const classId = exactRows[0].id as string;
-    const existingActiveFrom = exactRows[0].active_from as string | null;
-    const existingActiveTo = exactRows[0].active_to as string | null;
-    const normalizeActiveFrom = payload.scheduleMode === "recurring" && payload.activeFrom ? payload.activeFrom : null;
-
-    if (payload.scheduleMode === "recurring" && normalizeActiveFrom) {
-      const updatePayload: { active_from?: string; active_to?: string | null; updated_at?: string } = {};
-      if (!existingActiveFrom || existingActiveFrom > normalizeActiveFrom) {
-        updatePayload.active_from = normalizeActiveFrom;
-      }
-      if (existingActiveTo && existingActiveTo < normalizeActiveFrom) {
-        updatePayload.active_to = null;
-      }
-      if (Object.keys(updatePayload).length > 0) {
-        updatePayload.updated_at = new Date().toISOString();
-        const { error: activeUpdateError } = await supabase.from("classes").update(updatePayload).eq("id", classId);
-        if (activeUpdateError) throw activeUpdateError;
-      }
-    }
-    const { data: existingEnrollment, error: enrollmentReadError } = await supabase
+  if (exactClassRows.length > 0) {
+    const exactClassIds = exactClassRows.map((row) => row.id);
+    const { data: linkedEnrollment, error: enrollmentReadError } = await supabase
       .from("class_enrollments")
-      .select("id")
-      .eq("class_id", classId)
+      .select("id,class_id")
+      .in("class_id", exactClassIds)
       .eq("student_id", studentId)
+      .limit(1)
       .maybeSingle();
     if (enrollmentReadError) throw enrollmentReadError;
 
-    if (existingEnrollment) {
-      return { status: "existing", classId, conflict: { hasConflict: false, conflicts: [] } };
-    }
+    if (linkedEnrollment?.class_id) {
+      const existingClass = exactClassRows.find((row) => row.id === linkedEnrollment.class_id);
+      const existingActiveFrom = existingClass?.active_from ?? null;
+      const existingActiveTo = existingClass?.active_to ?? null;
+      const normalizeActiveFrom = payload.scheduleMode === "recurring" && payload.activeFrom ? payload.activeFrom : null;
 
-    const classType = await getClassType(supabase, payload.classTypeCode);
-    const { count: enrollmentCount, error: countError } = await supabase
-      .from("class_enrollments")
-      .select("id", { count: "exact", head: true })
-      .eq("class_id", classId);
-    if (countError) throw countError;
-
-    if ((enrollmentCount ?? 0) >= classType.maxStudents) {
-      return {
-        status: "conflict",
-        classId,
-        conflict: {
-          hasConflict: true,
-          conflicts: [{ classId, reason: `정원 초과: ${classType.label} 최대 ${classType.maxStudents}명` }]
+      if (payload.scheduleMode === "recurring" && normalizeActiveFrom) {
+        const updatePayload: { active_from?: string; active_to?: string | null; updated_at?: string } = {};
+        if (!existingActiveFrom || existingActiveFrom > normalizeActiveFrom) {
+          updatePayload.active_from = normalizeActiveFrom;
         }
-      };
+        if (existingActiveTo && existingActiveTo < normalizeActiveFrom) {
+          updatePayload.active_to = null;
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          updatePayload.updated_at = new Date().toISOString();
+          const { error: activeUpdateError } = await supabase
+            .from("classes")
+            .update(updatePayload)
+            .eq("id", linkedEnrollment.class_id);
+          if (activeUpdateError) throw activeUpdateError;
+        }
+      }
+
+      return { status: "existing", classId: linkedEnrollment.class_id, conflict: { hasConflict: false, conflicts: [] } };
     }
-
-    const { error: enrollmentInsertError } = await supabase.from("class_enrollments").insert({
-      class_id: classId,
-      student_id: studentId
-    });
-    if (enrollmentInsertError) throw enrollmentInsertError;
-
-    return { status: "enrolled", classId, conflict: { hasConflict: false, conflicts: [] } };
   }
 
   const created = await createScheduleWithEnrollments(supabase, payload, actorUserId);
@@ -722,7 +703,8 @@ export async function moveScheduleSlot(
   supabase: SupabaseLike,
   classId: string,
   target: { weekday: number; weekStart: string; startTime: string },
-  actorUserId: string
+  actorUserId: string,
+  options?: { studentId?: string }
 ) {
   const { data: classRow, error: classError } = await supabase
     .from("classes")
@@ -750,6 +732,87 @@ export async function moveScheduleSlot(
   });
   if (conflict.hasConflict) {
     return { moved: false, conflict };
+  }
+
+  if (options?.studentId) {
+    const { data: enrollmentRows, error: enrollmentReadError } = await supabase
+      .from("class_enrollments")
+      .select("id,student_id")
+      .eq("class_id", classId);
+    if (enrollmentReadError) throw enrollmentReadError;
+
+    const enrollments = enrollmentRows ?? [];
+    const targetEnrollment = enrollments.find((row: { student_id: string }) => row.student_id === options.studentId);
+    if (targetEnrollment && enrollments.length > 1) {
+      const insertPayload =
+        classRow.schedule_mode === "recurring"
+          ? {
+              schedule_mode: classRow.schedule_mode,
+              instructor_id: classRow.instructor_id,
+              subject_code: classRow.subject_code,
+              class_type_code: classRow.class_type_code,
+              weekday: target.weekday,
+              class_date: null,
+              start_time: toSqlTime(target.startTime),
+              end_time: toSqlTime(endTime),
+              active_from: classRow.active_from,
+              created_by: actorUserId
+            }
+          : {
+              schedule_mode: classRow.schedule_mode,
+              instructor_id: classRow.instructor_id,
+              subject_code: classRow.subject_code,
+              class_type_code: classRow.class_type_code,
+              weekday: null,
+              class_date: addDays(target.weekStart, target.weekday - 1),
+              start_time: toSqlTime(target.startTime),
+              end_time: toSqlTime(endTime),
+              active_from: classRow.active_from,
+              created_by: actorUserId
+            };
+
+      const { data: insertedClass, error: classInsertError } = await supabase
+        .from("classes")
+        .insert(insertPayload)
+        .select("id,weekday,class_date,start_time,end_time")
+        .single();
+      if (classInsertError || !insertedClass) {
+        throw classInsertError ?? new Error("Failed to split class for student move");
+      }
+
+      const { error: enrollmentInsertError } = await supabase.from("class_enrollments").insert({
+        class_id: insertedClass.id,
+        student_id: options.studentId
+      });
+      if (enrollmentInsertError) {
+        await supabase.from("classes").delete().eq("id", insertedClass.id);
+        throw enrollmentInsertError;
+      }
+
+      const { error: enrollmentDeleteError } = await supabase
+        .from("class_enrollments")
+        .delete()
+        .eq("class_id", classId)
+        .eq("student_id", options.studentId);
+      if (enrollmentDeleteError) {
+        throw enrollmentDeleteError;
+      }
+
+      const remainingCount = enrollments.length - 1;
+      if (remainingCount <= 0) {
+        await supabase.from("classes").delete().eq("id", classId);
+      }
+
+      const { error: logError } = await supabase.from("class_status_logs").insert({
+        class_id: insertedClass.id,
+        status: "planned",
+        changed_by: actorUserId,
+        reason: `drag-move-split:${target.weekday}:${target.startTime}`
+      });
+      if (logError) throw logError;
+
+      return { moved: true, conflict, updated: insertedClass };
+    }
   }
 
   const updatePayload =
