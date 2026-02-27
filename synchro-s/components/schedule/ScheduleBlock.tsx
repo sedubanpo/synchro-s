@@ -5,9 +5,13 @@ import type { RoleView, ScheduleEvent } from "@/types/schedule";
 type ScheduleBlockProps = {
   event: ScheduleEvent;
   roleView: RoleView;
+  chainProgress?: {
+    index: number;
+    total: number;
+  };
 };
 
-export function ScheduleBlock({ event, roleView }: ScheduleBlockProps) {
+export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockProps) {
   const subjectColorClass = getSubjectColorClass(event.subjectCode);
   const durationMinutes = Math.max(30, timeToMinutes(event.endTime) - timeToMinutes(event.startTime));
   const title =
@@ -15,10 +19,12 @@ export function ScheduleBlock({ event, roleView }: ScheduleBlockProps) {
       ? `${event.studentNames.join(", ") || "학생없음"} ${event.classTypeLabel}`
       : `${event.subjectName} ${event.instructorName || "강사없음"} ${event.classTypeLabel}`;
   const timeBubble = `${event.startTime}-${event.endTime}`;
+  const totalSegments = chainProgress?.total ?? 1;
+  const currentSegment = chainProgress?.index ?? 1;
 
   return (
     <div className={`${subjectColorClass} relative rounded-lg px-2 py-1.5 text-white shadow-sm`}>
-      {event.note ? (
+      {roleView !== "student" && event.note ? (
         <div className="absolute -top-2 left-2 z-20 inline-flex max-w-[88%] items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900 shadow-sm">
           <span className="truncate">{event.note}</span>
           <span className="absolute -bottom-1 left-3 h-2 w-2 rotate-45 border-b border-r border-amber-300 bg-amber-100" />
@@ -35,7 +41,15 @@ export function ScheduleBlock({ event, roleView }: ScheduleBlockProps) {
           <span>{timeBubble}</span>
           <span className="absolute -bottom-1 left-2 h-1.5 w-1.5 rotate-45 bg-white/18" />
         </div>
-        <span className="text-[10px] font-medium opacity-90">{Math.floor(durationMinutes / 60)}h</span>
+        <div className="flex items-center gap-0.5">
+          {Array.from({ length: totalSegments }).map((_, idx) => (
+            <span
+              key={`seg-${idx + 1}`}
+              className={`h-1.5 w-2 rounded-sm ${idx + 1 <= currentSegment ? "bg-white/95" : "bg-white/30"}`}
+            />
+          ))}
+          <span className="ml-1 text-[10px] font-medium opacity-90">{Math.floor(durationMinutes / 60)}h</span>
+        </div>
       </div>
     </div>
   );

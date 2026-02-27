@@ -1,6 +1,7 @@
 const SUBJECT_COLOR_MAP: Record<string, string> = {
   MATH: "bg-blue-500",
-  ENGLISH: "bg-purple-500"
+  ENGLISH: "bg-purple-500",
+  SOCIAL: "bg-amber-500"
 };
 
 export function getSubjectColorClass(subjectCode: string): string {

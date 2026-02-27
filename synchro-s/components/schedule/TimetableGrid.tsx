@@ -41,6 +41,7 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
+  const progressByEventKey = new Map<string, { index: number; total: number }>();
   const eventMap = new Map<string, ScheduleEvent[]>();
 
   for (const event of events) {
@@ -48,6 +49,48 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
     const bucket = eventMap.get(key) ?? [];
     bucket.push(event);
     eventMap.set(key, bucket);
+  }
+
+  const chainBaseKey = (event: ScheduleEvent): string => {
+    const studentsKey = [...event.studentNames].sort().join("|");
+    return [
+      event.weekday,
+      event.subjectCode,
+      event.classTypeCode,
+      event.instructorId || event.instructorName,
+      studentsKey
+    ].join("::");
+  };
+
+  const eventGroups = new Map<string, ScheduleEvent[]>();
+  for (const event of events) {
+    const key = chainBaseKey(event);
+    const bucket = eventGroups.get(key) ?? [];
+    bucket.push(event);
+    eventGroups.set(key, bucket);
+  }
+
+  for (const [, group] of eventGroups) {
+    const ordered = [...group].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    let chainStart = 0;
+    while (chainStart < ordered.length) {
+      let chainEnd = chainStart;
+      while (chainEnd + 1 < ordered.length) {
+        const current = ordered[chainEnd];
+        const next = ordered[chainEnd + 1];
+        if (timeToMinutes(current.endTime) !== timeToMinutes(next.startTime)) break;
+        chainEnd += 1;
+      }
+      const total = chainEnd - chainStart + 1;
+      for (let idx = chainStart; idx <= chainEnd; idx += 1) {
+        const event = ordered[idx];
+        progressByEventKey.set(`${event.id}-${event.classDate}-${event.startTime}`, {
+          index: idx - chainStart + 1,
+          total
+        });
+      }
+      chainStart = chainEnd + 1;
+    }
   }
 
   const moveByPayload = async (payload: { classId: string; durationMinutes: number }, weekday: Weekday, startTime: string) => {
@@ -205,7 +248,11 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                                   : undefined
                               }
                             >
-                              <ScheduleBlock event={event} roleView={roleView} />
+                              <ScheduleBlock
+                                event={event}
+                                roleView={roleView}
+                                chainProgress={progressByEventKey.get(`${event.id}-${event.classDate}-${event.startTime}`)}
+                              />
                             </div>
                           ))}
                         </div>
