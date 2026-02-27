@@ -71,6 +71,18 @@ type ImportProgress = {
   label: string;
 };
 
+type ConflictDialogState = {
+  open: boolean;
+  title: string;
+  message: string;
+};
+
+type SubjectSettingItem = {
+  code: string;
+  displayName: string;
+  tailwindBgClass: string;
+};
+
 function formatDateISOInKST(date: Date): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(date);
 }
@@ -202,6 +214,14 @@ function normalizePersonName(value: string): string {
 
 function normalizeLookupToken(value: string): string {
   return value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase().trim();
+}
+
+function normalizeInstructorAlias(value: string): string {
+  const token = normalizeLookupToken(value);
+  if (token === "원장님" || token === "원장" || token === "원장님t" || token === "원장t") {
+    return "안준성";
+  }
+  return value;
 }
 
 function resolveSubjectOption(rawLabel: string, subjects: SubjectOptionWithColor[]): SubjectOptionWithColor | undefined {
@@ -458,6 +478,15 @@ export default function SynchroSPage() {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [showStudentPicker, setShowStudentPicker] = useState(false);
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
+  const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
+  const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
+  const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
+  const [subjectSettings, setSubjectSettings] = useState<SubjectSettingItem[]>([]);
+  const [subjectForm, setSubjectForm] = useState<SubjectSettingItem>({
+    code: "",
+    displayName: "",
+    tailwindBgClass: "bg-blue-500"
+  });
   const [notionPreview, setNotionPreview] = useState<string>("");
   const [notionInput, setNotionInput] = useState<string>("");
   const [parsedNotionItems, setParsedNotionItems] = useState<ParsedNotionItem[]>([]);
@@ -474,7 +503,11 @@ export default function SynchroSPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [groupsHydrated, setGroupsHydrated] = useState(false);
-  const [conflictDialog, setConflictDialog] = useState<{ open: boolean; message: string }>({ open: false, message: "" });
+  const [conflictDialog, setConflictDialog] = useState<ConflictDialogState>({
+    open: false,
+    title: "",
+    message: ""
+  });
   const movingLockRef = useRef(false);
   const importingNotionRef = useRef(false);
   const pendingRealtimeReloadRef = useRef(false);
@@ -566,7 +599,9 @@ export default function SynchroSPage() {
     return parsedNotionItems.map((item, index) => {
       const subjectMatch = resolveSubjectOption(item.subjectLabel, subjects);
       const classTypeMatch = resolveClassTypeOption(item.classTypeLabel, classTypes);
-      const instructorName = item.instructorName || (selectedInstructorLabel === "강사 선택" ? "미지정 강사" : selectedInstructorLabel);
+      const resolvedInstructorName = item.instructorName ? normalizeInstructorAlias(item.instructorName) : "";
+      const instructorName =
+        resolvedInstructorName || (selectedInstructorLabel === "강사 선택" ? "미지정 강사" : selectedInstructorLabel);
       const studentNames =
         selectedStudentLabel !== "학생 선택"
           ? [selectedStudentLabel]
@@ -740,6 +775,126 @@ export default function SynchroSPage() {
       }
     });
   }, [moveToLogin]);
+
+  const loadSubjectSettings = useCallback(async () => {
+    setSubjectSettingsLoading(true);
+    try {
+      const res = await fetch("/api/settings/subjects", { method: "GET", cache: "no-store" });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "과목 설정 목록을 불러오지 못했습니다.");
+      }
+      const data = (await res.json().catch(() => ({}))) as { subjects?: SubjectSettingItem[] };
+      setSubjectSettings(data.subjects ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "과목 설정 목록을 불러오지 못했습니다.");
+    } finally {
+      setSubjectSettingsLoading(false);
+    }
+  }, [moveToLogin]);
+
+  const openSubjectSettingsModal = useCallback(() => {
+    setSubjectSettingsOpen(true);
+    void loadSubjectSettings();
+  }, [loadSubjectSettings]);
+
+  const handleCreateSubject = useCallback(async () => {
+    const payload: SubjectSettingItem = {
+      code: subjectForm.code.trim(),
+      displayName: subjectForm.displayName.trim(),
+      tailwindBgClass: subjectForm.tailwindBgClass.trim()
+    };
+    if (!payload.code || !payload.displayName || !payload.tailwindBgClass) {
+      setError("과목코드/과목명/Tailwind 클래스는 모두 입력해야 합니다.");
+      return;
+    }
+
+    setSubjectSettingsSaving(true);
+    try {
+      const res = await fetch("/api/settings/subjects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "과목 추가에 실패했습니다.");
+      }
+      setNotice(`과목 코드 '${payload.code.toUpperCase()}'를 저장했습니다.`);
+      setSubjectForm({ code: "", displayName: "", tailwindBgClass: "bg-blue-500" });
+      await Promise.all([loadSubjectSettings(), loadOptions()]);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "과목 추가에 실패했습니다.");
+    } finally {
+      setSubjectSettingsSaving(false);
+    }
+  }, [loadOptions, loadSubjectSettings, moveToLogin, subjectForm]);
+
+  const handleUpdateSubject = useCallback(
+    async (subject: SubjectSettingItem) => {
+      setSubjectSettingsSaving(true);
+      try {
+        const res = await fetch("/api/settings/subjects", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(subject)
+        });
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? "과목 수정에 실패했습니다.");
+        }
+        setNotice(`과목 코드 '${subject.code}'를 수정했습니다.`);
+        await Promise.all([loadSubjectSettings(), loadOptions()]);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "과목 수정에 실패했습니다.");
+      } finally {
+        setSubjectSettingsSaving(false);
+      }
+    },
+    [loadOptions, loadSubjectSettings, moveToLogin]
+  );
+
+  const handleDeleteSubject = useCallback(
+    async (code: string) => {
+      const confirmed = window.confirm(`'${code}' 과목 코드를 삭제할까요?`);
+      if (!confirmed) return;
+      setSubjectSettingsSaving(true);
+      try {
+        const res = await fetch("/api/settings/subjects", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code })
+        });
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? "과목 삭제에 실패했습니다.");
+        }
+        setNotice(`과목 코드 '${code}'를 삭제했습니다.`);
+        await Promise.all([loadSubjectSettings(), loadOptions()]);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "과목 삭제에 실패했습니다.");
+      } finally {
+        setSubjectSettingsSaving(false);
+      }
+    },
+    [loadOptions, loadSubjectSettings, moveToLogin]
+  );
 
   const loadWeek = useCallback(async (opts?: { silent?: boolean }) => {
     if (roleView === "instructor" && !selectedInstructorId) {
@@ -946,7 +1101,7 @@ export default function SynchroSPage() {
         if (conflictMessages.length > 0) {
           const msg = `드래그 이동 충돌:\n- ${conflictMessages.join("\n- ")}`;
           setError(msg);
-          setConflictDialog({ open: true, message: msg });
+          setConflictDialog({ open: true, title: "시간표 충돌 경고", message: msg });
           return;
         }
 
@@ -1023,7 +1178,7 @@ export default function SynchroSPage() {
           const readable = getConflictMessageForDisplay(payload.conflict, activeStudentGroups, students);
           const msg = `드래그 이동 충돌:\n${readable || getConflictMessage(payload.conflict)}`;
           setError(msg);
-          setConflictDialog({ open: true, message: msg });
+          setConflictDialog({ open: true, title: "시간표 충돌 경고", message: msg });
           return;
         }
 
@@ -1166,7 +1321,7 @@ export default function SynchroSPage() {
       const normalize = (value: string) => value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
       const firstInstructor = parsed.find((item) => item.instructorName)?.instructorName;
       if (firstInstructor) {
-        const target = normalize(firstInstructor);
+        const target = normalize(normalizeInstructorAlias(firstInstructor));
         const matched =
           instructors.find((entry) => normalize(entry.name) === target) ??
           instructors.find((entry) => normalize(entry.name).includes(target) || target.includes(normalize(entry.name)));
@@ -1224,7 +1379,8 @@ export default function SynchroSPage() {
 
     const normalize = (value: string) => value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
     const findInstructorId = (name: string): string => {
-      const target = normalize(name);
+      const aliased = normalizeInstructorAlias(name);
+      const target = normalize(aliased);
       if (!target) return "";
       const exact = instructors.find((entry) => normalize(entry.name) === target);
       if (exact) return exact.id;
@@ -1255,8 +1411,7 @@ export default function SynchroSPage() {
       let instructorId = "";
       if (item.instructorName) {
         instructorId = findInstructorId(item.instructorName);
-      }
-      if (!instructorId) {
+      } else {
         instructorId = selectedInstructorId;
       }
 
@@ -1371,20 +1526,28 @@ export default function SynchroSPage() {
 
       if (conflictDetails.length > 0 || noSubjectDetails.length > 0) {
         const lines: string[] = [];
+        let title = "시간표 저장 경고";
         if (conflictDetails.length > 0) {
+          title = "시간표 충돌 경고";
           lines.push("노션 시간표 저장 중 충돌이 발생했습니다.");
           lines.push(...conflictDetails);
         }
         if (noSubjectDetails.length > 0) {
+          if (conflictDetails.length === 0) {
+            title = "과목 매핑 경고";
+          }
           lines.push("");
           lines.push(`과목 매핑 실패(noSubject) ${noSubjectDetails.length}건`);
           lines.push(...noSubjectDetails.slice(0, 12).map((item) => `- ${item}`));
           if (noSubjectDetails.length > 12) {
             lines.push(`- 외 ${noSubjectDetails.length - 12}건`);
           }
+          lines.push("");
+          lines.push("사탐/사회 과목은 subjects 테이블에 코드가 있어야 저장됩니다.");
         }
         setConflictDialog({
           open: true,
+          title,
           message: lines.join("\n")
         });
       }
@@ -1753,6 +1916,13 @@ export default function SynchroSPage() {
             onClick={() => void handleSyncSheets()}
           >
             {syncingSheets ? "시트 동기화 중..." : "명단 동기화"}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100"
+            onClick={openSubjectSettingsModal}
+          >
+            과목 코드 설정
           </button>
 
           <div className="flex min-w-[260px] items-center gap-2 rounded-full border border-white/70 bg-white/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur-xl">
@@ -2150,15 +2320,120 @@ export default function SynchroSPage() {
         </div>
       ) : null}
 
+      {subjectSettingsOpen ? (
+        <div className="fixed inset-0 z-[335] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-3xl rounded-3xl border border-white/60 bg-[linear-gradient(160deg,rgba(255,255,255,0.78),rgba(237,233,254,0.68),rgba(219,234,254,0.65))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.30)] backdrop-blur-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-lg font-extrabold text-slate-800">과목 코드 설정</p>
+                <p className="text-xs font-semibold text-slate-500">subjects 테이블을 UI에서 관리합니다.</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl border border-white/70 bg-white/60 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white/80"
+                onClick={() => setSubjectSettingsOpen(false)}
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="grid gap-2 rounded-2xl border border-white/70 bg-white/45 p-3 md:grid-cols-[1fr_1.2fr_1.2fr_auto]">
+              <input
+                value={subjectForm.code}
+                onChange={(event) => setSubjectForm((prev) => ({ ...prev, code: event.target.value.toUpperCase() }))}
+                placeholder="코드 (예: SOCIAL)"
+                className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+              />
+              <input
+                value={subjectForm.displayName}
+                onChange={(event) => setSubjectForm((prev) => ({ ...prev, displayName: event.target.value }))}
+                placeholder="과목명 (예: 사회/사탐)"
+                className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+              />
+              <input
+                value={subjectForm.tailwindBgClass}
+                onChange={(event) => setSubjectForm((prev) => ({ ...prev, tailwindBgClass: event.target.value }))}
+                placeholder="Tailwind 클래스 (예: bg-amber-500)"
+                className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+              />
+              <button
+                type="button"
+                disabled={subjectSettingsSaving}
+                onClick={() => void handleCreateSubject()}
+                className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+              >
+                추가
+              </button>
+            </div>
+
+            <div className="mt-3 max-h-[52vh] overflow-auto rounded-2xl border border-white/70 bg-white/40 p-2">
+              {subjectSettingsLoading ? (
+                <p className="px-2 py-4 text-sm font-semibold text-slate-500">불러오는 중...</p>
+              ) : subjectSettings.length === 0 ? (
+                <p className="px-2 py-4 text-sm font-semibold text-slate-500">등록된 과목 코드가 없습니다.</p>
+              ) : (
+                <div className="space-y-2">
+                  {subjectSettings.map((subject) => (
+                    <div key={subject.code} className="grid gap-2 rounded-xl border border-white/70 bg-white/55 p-2 md:grid-cols-[1fr_1.2fr_1.2fr_auto_auto]">
+                      <input
+                        value={subject.code}
+                        readOnly
+                        className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700 outline-none"
+                      />
+                      <input
+                        value={subject.displayName}
+                        onChange={(event) =>
+                          setSubjectSettings((prev) =>
+                            prev.map((item) => (item.code === subject.code ? { ...item, displayName: event.target.value } : item))
+                          )
+                        }
+                        className="rounded-lg border border-slate-200 bg-white/85 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+                      />
+                      <input
+                        value={subject.tailwindBgClass}
+                        onChange={(event) =>
+                          setSubjectSettings((prev) =>
+                            prev.map((item) =>
+                              item.code === subject.code ? { ...item, tailwindBgClass: event.target.value } : item
+                            )
+                          )
+                        }
+                        className="rounded-lg border border-slate-200 bg-white/85 px-3 py-2 text-sm font-semibold text-slate-700 outline-none"
+                      />
+                      <button
+                        type="button"
+                        disabled={subjectSettingsSaving}
+                        onClick={() => void handleUpdateSubject(subject)}
+                        className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:opacity-60"
+                      >
+                        저장
+                      </button>
+                      <button
+                        type="button"
+                        disabled={subjectSettingsSaving}
+                        onClick={() => void handleDeleteSubject(subject.code)}
+                        className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {conflictDialog.open ? (
         <div className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-3xl border border-white/60 bg-[linear-gradient(160deg,rgba(255,255,255,0.66),rgba(254,226,226,0.58),rgba(219,234,254,0.55))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.32)] backdrop-blur-2xl">
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-lg font-extrabold text-rose-700">시간표 충돌 경고</p>
+              <p className="text-lg font-extrabold text-rose-700">{conflictDialog.title || "시간표 경고"}</p>
               <button
                 type="button"
                 className="rounded-xl border border-white/70 bg-white/60 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white/80"
-                onClick={() => setConflictDialog({ open: false, message: "" })}
+                onClick={() => setConflictDialog({ open: false, title: "", message: "" })}
               >
                 닫기
               </button>
@@ -2170,7 +2445,7 @@ export default function SynchroSPage() {
               <button
                 type="button"
                 className="rounded-2xl border border-rose-200/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(244,114,182,0.48))] px-4 py-2 text-sm font-bold text-rose-900 shadow-[0_10px_28px_rgba(244,63,94,0.28)]"
-                onClick={() => setConflictDialog({ open: false, message: "" })}
+                onClick={() => setConflictDialog({ open: false, title: "", message: "" })}
               >
                 확인
               </button>
