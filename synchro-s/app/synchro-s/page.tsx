@@ -193,6 +193,78 @@ function normalizePersonName(value: string): string {
     .trim();
 }
 
+function normalizeLookupToken(value: string): string {
+  return value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase().trim();
+}
+
+function resolveSubjectOption(rawLabel: string, subjects: SubjectOptionWithColor[]): SubjectOptionWithColor | undefined {
+  const target = normalizeLookupToken(rawLabel);
+  if (!target) return undefined;
+
+  const direct =
+    subjects.find((entry) => normalizeLookupToken(entry.label) === target) ??
+    subjects.find((entry) => normalizeLookupToken(entry.code) === target);
+  if (direct) return direct;
+
+  const contains =
+    subjects.find((entry) => normalizeLookupToken(entry.label).includes(target) || target.includes(normalizeLookupToken(entry.label))) ??
+    subjects.find((entry) => normalizeLookupToken(entry.code).includes(target) || target.includes(normalizeLookupToken(entry.code)));
+  if (contains) return contains;
+
+  const aliasByCode: Record<string, string[]> = {
+    MATH: ["수학", "math"],
+    ENGLISH: ["영어", "english", "eng"],
+    KOREAN: ["국어", "korean"],
+    SCIENCE: ["과학", "science"],
+    SOCIAL: ["사회", "사탐", "social"]
+  };
+
+  for (const [code, aliases] of Object.entries(aliasByCode)) {
+    if (!aliases.some((alias) => target.includes(normalizeLookupToken(alias)))) continue;
+    const mapped =
+      subjects.find((entry) => normalizeLookupToken(entry.code) === normalizeLookupToken(code)) ??
+      subjects.find((entry) => aliases.some((alias) => normalizeLookupToken(entry.label).includes(normalizeLookupToken(alias))));
+    if (mapped) return mapped;
+  }
+
+  return undefined;
+}
+
+function resolveClassTypeOption(rawLabel: string, classTypes: ClassTypeOption[]): ClassTypeOption | undefined {
+  const target = normalizeLookupToken(rawLabel);
+  if (!target) return undefined;
+
+  const direct =
+    classTypes.find((entry) => normalizeLookupToken(entry.label) === target) ??
+    classTypes.find((entry) => normalizeLookupToken(entry.code) === target);
+  if (direct) return direct;
+
+  const contains =
+    classTypes.find((entry) => normalizeLookupToken(entry.label).includes(target) || target.includes(normalizeLookupToken(entry.label))) ??
+    classTypes.find((entry) => normalizeLookupToken(entry.code).includes(target) || target.includes(normalizeLookupToken(entry.code)));
+  if (contains) return contains;
+
+  const pick = (keys: string[]) =>
+    classTypes.find((entry) =>
+      keys.some((key) => normalizeLookupToken(entry.code).includes(key) || normalizeLookupToken(entry.label).includes(key))
+    );
+
+  if (["11", "1대1", "일대일", "개별", "개인"].some((key) => target.includes(normalizeLookupToken(key)))) {
+    return pick(["onetoone", "one", "11", "개별", "개인"]);
+  }
+  if (["21", "2대1", "이대일"].some((key) => target.includes(normalizeLookupToken(key)))) {
+    return pick(["twotoone", "two", "21", "2대1"]);
+  }
+  if (["개별정규", "정규", "regular"].some((key) => target.includes(normalizeLookupToken(key)))) {
+    return pick(["regular", "multi", "정규"]);
+  }
+  if (["특강", "special"].some((key) => target.includes(normalizeLookupToken(key)))) {
+    return pick(["special", "특강"]);
+  }
+
+  return undefined;
+}
+
 function parseNotionTextToItems(text: string): ParsedNotionItem[] {
   const lines = text
     .split(/\r?\n/)
@@ -477,16 +549,8 @@ export default function SynchroSPage() {
   const draftEvents = useMemo<ScheduleEvent[]>(() => {
     if (parsedNotionItems.length === 0) return [];
     return parsedNotionItems.map((item, index) => {
-      const subjectMatch = subjects.find(
-        (subject) =>
-          subject.label.replace(/\s/g, "") === item.subjectLabel.replace(/\s/g, "") ||
-          subject.code.toLowerCase() === item.subjectLabel.toLowerCase()
-      );
-      const classTypeMatch = classTypes.find(
-        (classType) =>
-          classType.label.replace(/\s/g, "") === item.classTypeLabel.replace(/\s/g, "") ||
-          classType.code.toLowerCase() === item.classTypeLabel.toLowerCase()
-      );
+      const subjectMatch = resolveSubjectOption(item.subjectLabel, subjects);
+      const classTypeMatch = resolveClassTypeOption(item.classTypeLabel, classTypes);
       const instructorName = item.instructorName || (selectedInstructorLabel === "강사 선택" ? "미지정 강사" : selectedInstructorLabel);
       const studentNames =
         selectedStudentLabel !== "학생 선택"
@@ -1160,12 +1224,8 @@ export default function SynchroSPage() {
     };
 
     for (const item of parsedNotionItems) {
-      const subject = subjects.find(
-        (entry) => normalize(entry.label) === normalize(item.subjectLabel) || normalize(entry.code) === normalize(item.subjectLabel)
-      );
-      const classType = classTypes.find(
-        (entry) => normalize(entry.label) === normalize(item.classTypeLabel) || normalize(entry.code) === normalize(item.classTypeLabel)
-      );
+      const subject = resolveSubjectOption(item.subjectLabel, subjects);
+      const classType = resolveClassTypeOption(item.classTypeLabel, classTypes);
 
       let instructorId = "";
       if (item.instructorName) {
