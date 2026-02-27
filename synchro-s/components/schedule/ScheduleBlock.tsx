@@ -11,7 +11,7 @@ type ScheduleBlockProps = {
 };
 
 export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockProps) {
-  const subjectColorClass = getSubjectColorClass(event.subjectCode);
+  const subjectColorClass = getSubjectColorClass(event.subjectCode, event.subjectName);
   const title =
     roleView === "instructor"
       ? `${event.studentNames.join(", ") || "학생없음"}`

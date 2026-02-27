@@ -603,7 +603,15 @@ export default function SynchroSPage() {
 
     const dedup = new Map<string, ScheduleEvent>();
     for (const event of merged) {
-      const key = `${event.id}-${event.classDate}-${event.weekday}-${event.startTime}-${event.endTime}`;
+      const key = [
+        event.classDate,
+        event.weekday,
+        event.startTime,
+        event.endTime,
+        normalizeLookupToken(event.subjectCode),
+        normalizeLookupToken(event.classTypeCode),
+        normalizePersonName(event.instructorName)
+      ].join("::");
       const existing = dedup.get(key);
       if (!existing) {
         dedup.set(key, event);
@@ -668,6 +676,11 @@ export default function SynchroSPage() {
     weekStart
   ]);
   const displayEvents = useMemo(() => {
+    if (roleView === "instructor" && activeStudentEventsForInstructor.length > 0) {
+      // 강사 탭은 항상 '활성 학생 시간표' 합본을 우선 표시한다.
+      return activeStudentEventsForInstructor;
+    }
+
     const preferredGroup = selectedGroup ?? activeGroup;
     if (preferredGroup) {
       const snapshot = preferredGroup.snapshotEvents ?? [];
@@ -679,9 +692,6 @@ export default function SynchroSPage() {
       return filteredEvents.filter((event) => idSet.has(event.id));
     }
     if (draftEvents.length > 0) return draftEvents;
-    if (roleView === "instructor" && activeStudentEventsForInstructor.length > 0) {
-      return activeStudentEventsForInstructor;
-    }
     return filteredEvents;
   }, [activeGroup, activeStudentEventsForInstructor, draftEvents, filteredEvents, roleView, selectedGroup]);
   const activeHighlightCellTints = useMemo(() => {
