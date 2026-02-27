@@ -158,11 +158,13 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                 key={day.key}
                 className={`sticky top-0 z-20 border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
                   activeDaySet.has(day.key)
-                    ? "border-sky-200 bg-gradient-to-b from-sky-50 to-white text-sky-700 shadow-[inset_0_-1px_0_rgba(56,189,248,0.3),0_0_18px_rgba(59,130,246,0.18)]"
+                    ? "border-sky-300 bg-[linear-gradient(180deg,rgba(191,219,254,0.75)_0%,rgba(239,246,255,0.95)_42%,rgba(255,255,255,1)_100%)] text-sky-800 shadow-[inset_0_-2px_0_rgba(59,130,246,0.62),inset_0_1px_0_rgba(255,255,255,0.8),0_0_24px_rgba(59,130,246,0.34)]"
                     : "border-slate-200 bg-slate-50 text-slate-700"
                 }`}
               >
-                {day.label}
+                <span className={activeDaySet.has(day.key) ? "font-extrabold tracking-wide drop-shadow-[0_1px_1px_rgba(37,99,235,0.25)]" : ""}>
+                  {day.label}
+                </span>
               </th>
             ))}
           </tr>

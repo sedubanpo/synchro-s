@@ -14,8 +14,8 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
   const subjectColorClass = getSubjectColorClass(event.subjectCode);
   const title =
     roleView === "instructor"
-      ? `${event.studentNames.join(", ") || "학생없음"} ${event.classTypeLabel}`
-      : `${event.subjectName} ${event.instructorName || "강사없음"} ${event.classTypeLabel}`;
+      ? `${event.studentNames.join(", ") || "학생없음"}`
+      : `${event.subjectName} ${event.instructorName || "강사없음"}`;
   const timeBubble = `${event.startTime}-${event.endTime}`;
   const totalSegments = chainProgress?.total ?? 1;
   const currentSegment = chainProgress?.index ?? 1;
@@ -24,6 +24,7 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
     event.classTypeCode === "TWO_TO_ONE" ||
     event.classTypeLabel.includes("1:1") ||
     event.classTypeLabel.includes("2:1");
+  const oneToOneLabel = event.classTypeLabel.includes("2:1") ? "2:1" : "1:1";
 
   return (
     <div className={`${subjectColorClass} relative rounded-lg px-2 py-1.5 text-white shadow-sm`}>
@@ -34,7 +35,16 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
       ) : null}
 
       <div className="mb-1 flex items-start justify-between gap-1">
-        <p className="line-clamp-1 pr-1 text-[12px] font-bold leading-4">{title}</p>
+        <div className="flex min-w-0 items-center gap-1">
+          <p className={`${roleView === "instructor" ? "line-clamp-2" : "line-clamp-1"} pr-1 text-[12px] font-bold leading-4`}>
+            {title}
+          </p>
+          {isRoyalClass ? (
+            <span className="inline-flex shrink-0 rounded-full border border-amber-100/80 bg-amber-200/90 px-1.5 py-0.5 text-[9px] font-black text-amber-900">
+              {oneToOneLabel}
+            </span>
+          ) : null}
+        </div>
         <span className="inline-flex shrink-0 rounded bg-white/25 px-1.5 py-0.5 text-[10px] font-semibold">{event.badgeText}</span>
       </div>
 

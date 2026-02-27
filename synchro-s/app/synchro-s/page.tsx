@@ -603,7 +603,20 @@ export default function SynchroSPage() {
 
     const dedup = new Map<string, ScheduleEvent>();
     for (const event of merged) {
-      dedup.set(`${event.id}-${event.weekday}-${event.startTime}-${event.endTime}`, event);
+      const key = `${event.id}-${event.classDate}-${event.weekday}-${event.startTime}-${event.endTime}`;
+      const existing = dedup.get(key);
+      if (!existing) {
+        dedup.set(key, event);
+        continue;
+      }
+
+      const mergedStudentIds = Array.from(new Set([...(existing.studentIds ?? []), ...(event.studentIds ?? [])]));
+      const mergedStudentNames = Array.from(new Set([...(existing.studentNames ?? []), ...(event.studentNames ?? [])]));
+      dedup.set(key, {
+        ...existing,
+        studentIds: mergedStudentIds,
+        studentNames: mergedStudentNames
+      });
     }
     return [...dedup.values()];
   }, [roleView, selectedInstructorId, selectedInstructorLabel, timetableGroups]);
