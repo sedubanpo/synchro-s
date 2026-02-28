@@ -558,6 +558,7 @@ export default function SynchroSPage() {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [showIntroPage, setShowIntroPage] = useState(true);
   const [timetableViewMode, setTimetableViewMode] = useState<TimetableViewMode>("detailed");
+  const [refreshingData, setRefreshingData] = useState(false);
   const [showStudentPicker, setShowStudentPicker] = useState(false);
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
   const [savingInstructorDaysOff, setSavingInstructorDaysOff] = useState(false);
@@ -1215,6 +1216,24 @@ export default function SynchroSPage() {
       }
     }
   }, [moveToLogin, roleView, selectedInstructorId, selectedStudentId, weekStart]);
+
+  const handleHardRefreshData = useCallback(async () => {
+    if (refreshingData) return;
+
+    setRefreshingData(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      router.refresh();
+      await Promise.all([loadOptions(), loadWeek({ silent: true })]);
+      setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "데이터 새로고침에 실패했습니다.");
+    } finally {
+      setRefreshingData(false);
+    }
+  }, [loadOptions, loadWeek, refreshingData, router]);
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -2518,7 +2537,7 @@ export default function SynchroSPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[auto_1fr_auto]">
+          <div className="grid gap-3 xl:grid-cols-[auto_auto_1fr_auto]">
             <div className="inline-flex flex-wrap items-center gap-1 rounded-[24px] border border-white/45 bg-white/30 p-1.5 shadow-lg shadow-slate-900/5 backdrop-blur-md">
               <button
                 type="button"
@@ -2542,6 +2561,25 @@ export default function SynchroSPage() {
                 다음 주
               </button>
             </div>
+
+            <button
+              type="button"
+              disabled={refreshingData}
+              onClick={() => void handleHardRefreshData()}
+              className="inline-flex items-center justify-center gap-2 rounded-[24px] border border-white/45 bg-white/36 px-4 py-2 text-xs font-bold text-slate-700 shadow-lg shadow-slate-900/5 backdrop-blur-md transition hover:bg-white/56 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+              >
+                <path d="M20 12a8 8 0 1 1-2.34-5.66" strokeLinecap="round" />
+                <path d="M20 4v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {refreshingData ? "새로고침 중..." : "데이터 새로고침"}
+            </button>
 
             <div className="flex flex-wrap items-center gap-2">
               <button
