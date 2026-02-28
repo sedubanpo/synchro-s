@@ -37,6 +37,9 @@ export function getSubjectColorClass(subjectCode: string, subjectName?: string):
     code.includes("SOCIAL") ||
     name.includes("사회") ||
     name.includes("사탐");
+  if (looksLikeSocial) {
+    return "bg-amber-500";
+  }
   const resolvedCode = looksLikeSocial ? "SOCIAL" : code;
   return sanitizeColorClass(resolvedCode, SUBJECT_COLOR_MAP[code] ?? SUBJECT_COLOR_MAP[resolvedCode] ?? "bg-slate-500");
 }

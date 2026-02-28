@@ -241,8 +241,9 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                           {entries.map((event) => (
                             <div
                               key={`${event.id}-${event.classDate}`}
-                              draggable
+                              draggable={Boolean(onEventMove)}
                               onDragStart={(dragEvent) => {
+                                if (!onEventMove) return;
                                 const eventKey = `${event.id}-${event.classDate}-${event.startTime}`;
                                 setDraggingKey(eventKey);
                                 dropHandledRef.current = false;
@@ -259,9 +260,10 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                                 dragEvent.dataTransfer.effectAllowed = "move";
                               }}
                               onDragEnd={() => {
+                                if (!onEventMove) return;
                                 const hovered = dragOverCell;
                                 const payload = dragPayloadRef.current;
-                                if (!dropHandledRef.current && hovered && payload && onEventMove) {
+                                if (!dropHandledRef.current && hovered && payload) {
                                   const [weekdayRaw, startTime] = hovered.split("-");
                                   const weekday = Number(weekdayRaw) as Weekday;
                                   if (weekday >= 1 && weekday <= 7 && startTime) {

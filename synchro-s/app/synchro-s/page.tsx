@@ -83,6 +83,43 @@ type SubjectSettingItem = {
   tailwindBgClass: string;
 };
 
+type UndoState = {
+  label: string;
+  events: ScheduleEvent[];
+  notionInput: string;
+  notionPreview: string;
+  parsedNotionItems: ParsedNotionItem[];
+  timetableGroups: TimetableGroup[];
+  selectedGroupId: string | null;
+  restoreMove?: {
+    classId: string;
+    weekday: Weekday;
+    startTime: string;
+    weekStart: string;
+    studentId?: string;
+  };
+};
+
+function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
+  return items.map((item) => ({
+    ...item,
+    studentIds: [...item.studentIds],
+    studentNames: [...item.studentNames]
+  }));
+}
+
+function cloneParsedNotionItems(items: ParsedNotionItem[]): ParsedNotionItem[] {
+  return items.map((item) => ({ ...item }));
+}
+
+function cloneTimetableGroups(items: TimetableGroup[]): TimetableGroup[] {
+  return items.map((group) => ({
+    ...group,
+    classIds: [...group.classIds],
+    snapshotEvents: group.snapshotEvents ? cloneEvents(group.snapshotEvents) : undefined
+  }));
+}
+
 function formatDateISOInKST(date: Date): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(date);
 }
@@ -514,6 +551,7 @@ export default function SynchroSPage() {
   const [timetableGroups, setTimetableGroups] = useState<TimetableGroup[]>([]);
   const [groupPage, setGroupPage] = useState(1);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
   const [groupsHydrated, setGroupsHydrated] = useState(false);
   const [conflictDialog, setConflictDialog] = useState<ConflictDialogState>({
@@ -778,6 +816,20 @@ export default function SynchroSPage() {
     router.replace(`/login?next=${encodeURIComponent("/synchro-s")}`);
   }, [router]);
 
+  const buildUndoState = useCallback(
+    (label: string, restoreMove?: UndoState["restoreMove"]): UndoState => ({
+      label,
+      events: cloneEvents(events),
+      notionInput,
+      notionPreview,
+      parsedNotionItems: cloneParsedNotionItems(parsedNotionItems),
+      timetableGroups: cloneTimetableGroups(timetableGroups),
+      selectedGroupId,
+      restoreMove
+    }),
+    [events, notionInput, notionPreview, parsedNotionItems, selectedGroupId, timetableGroups]
+  );
+
   const loadOptions = useCallback(async () => {
     const res = await fetch("/api/schedules/options", { method: "GET", cache: "no-store" });
 
@@ -986,6 +1038,50 @@ export default function SynchroSPage() {
     }
   }, [moveToLogin, roleView, selectedInstructorId, selectedStudentId, weekStart]);
 
+  const handleUndoLastChange = useCallback(async () => {
+    if (!undoState) return;
+
+    const snapshot = undoState;
+    setUndoState(null);
+    setEvents(cloneEvents(snapshot.events));
+    setNotionInput(snapshot.notionInput);
+    setNotionPreview(snapshot.notionPreview);
+    setParsedNotionItems(cloneParsedNotionItems(snapshot.parsedNotionItems));
+    setTimetableGroups(cloneTimetableGroups(snapshot.timetableGroups));
+    setSelectedGroupId(snapshot.selectedGroupId);
+    setError(null);
+    setNotice(`${snapshot.label} 변경을 되돌렸습니다.`);
+
+    if (!snapshot.restoreMove) {
+      return;
+    }
+
+    const res = await fetch(`/api/schedules/${snapshot.restoreMove.classId}/move`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        weekday: snapshot.restoreMove.weekday,
+        startTime: snapshot.restoreMove.startTime,
+        weekStart: snapshot.restoreMove.weekStart,
+        studentId: snapshot.restoreMove.studentId
+      })
+    });
+
+    if (res.status === 401) {
+      moveToLogin();
+      return;
+    }
+
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error ?? "되돌리기 저장에 실패했습니다.");
+      await loadWeek({ silent: true });
+      return;
+    }
+
+    await loadWeek({ silent: true });
+  }, [loadWeek, moveToLogin, undoState]);
+
   const handleCreate = useCallback(
     async (input: ScheduleFormInput) => {
       const normalizedInput: ScheduleFormInput = {
@@ -1088,6 +1184,7 @@ export default function SynchroSPage() {
 
         if (targetClassId.startsWith("draft-")) {
           if (ctx.classId.startsWith("draft-") && draftIndex >= 0) {
+            setUndoState(buildUndoState("드래그 이동"));
             setParsedNotionItems((prev) =>
               prev.map((item, index) =>
                 index === draftIndex
@@ -1149,6 +1246,18 @@ export default function SynchroSPage() {
 
         const prevEvents = events;
         const prevSnapshot = baseSnapshot.map((event) => ({ ...event }));
+        const undoSnapshot = buildUndoState(
+          "드래그 이동",
+          isActiveEditing
+            ? {
+                classId: targetClassId,
+                weekday: targetEvent.weekday,
+                startTime: targetEvent.startTime,
+                weekStart,
+                studentId: roleView === "student" ? selectedStudentId || undefined : undefined
+              }
+            : undefined
+        );
         const rollbackMove = () => {
           setEvents(prevEvents);
           if (selectedEditingGroup) {
@@ -1166,6 +1275,7 @@ export default function SynchroSPage() {
         };
 
         if (selectedEditingGroup) {
+          setUndoState(undoSnapshot);
           setTimetableGroups((prev) =>
             prev.map((group) =>
               group.id === selectedEditingGroup.id
@@ -1182,6 +1292,8 @@ export default function SynchroSPage() {
                 : group
             )
           );
+        } else {
+          setUndoState(undoSnapshot);
         }
 
         if (!isActiveEditing) {
@@ -1247,6 +1359,7 @@ export default function SynchroSPage() {
       draftEvents,
       events,
       filteredEvents,
+      buildUndoState,
       loadWeek,
       moveToLogin,
       selectedGroup,
@@ -1365,6 +1478,7 @@ export default function SynchroSPage() {
 
   const handleApplyNotionInput = useCallback(() => {
     const parsed = parseNotionTextToItems(notionTextValue);
+    setUndoState(buildUndoState("노션 반영"));
     setParsedNotionItems(parsed);
     if (parsed.length > 0 && !selectedInstructorId) {
       const normalize = (value: string) => value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
@@ -1380,7 +1494,7 @@ export default function SynchroSPage() {
       }
     }
     setNotice(parsed.length > 0 ? `노션 데이터 ${parsed.length}건을 시간표 미리보기에 반영했습니다.` : "붙여넣은 텍스트에서 수업 데이터가 인식되지 않았습니다.");
-  }, [instructors, notionTextValue, selectedInstructorId]);
+  }, [buildUndoState, instructors, notionTextValue, selectedInstructorId]);
 
   const handleImportNotionToServer = useCallback(async () => {
     if (parsedNotionItems.length === 0) {
@@ -2188,6 +2302,14 @@ export default function SynchroSPage() {
           >
             {importingNotion ? "저장 중..." : "DB로 저장"}
           </button>
+          <button
+            type="button"
+            disabled={!undoState || importingNotion}
+            onClick={() => void handleUndoLastChange()}
+            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            되돌리기
+          </button>
           {notionPreview ? (
             <button
               type="button"
@@ -2220,7 +2342,7 @@ export default function SynchroSPage() {
               timeSlots={TIME_SLOTS}
               events={displayEvents}
               highlightCellTints={activeHighlightCellTints}
-              onEventMove={handleMoveSchedule}
+              onEventMove={roleView === "student" ? handleMoveSchedule : undefined}
               onCellClick={(ctx) => {
                 setInitialCell(ctx);
                 setModalOpen(true);
