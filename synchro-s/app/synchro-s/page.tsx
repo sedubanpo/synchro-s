@@ -15,6 +15,7 @@ import type {
   ScheduleFormInput,
   SelectOption,
   SubjectOption,
+  TimetableViewMode,
   Weekday
 } from "@/types/schedule";
 import { useRouter } from "next/navigation";
@@ -179,6 +180,13 @@ function dayOf(dateISO: string): Weekday {
   const d = new Date(`${dateISO}T00:00:00+09:00`);
   const jsDay = d.getUTCDay();
   return (jsDay === 0 ? 7 : jsDay) as Weekday;
+}
+
+function normalizeDaysOff(daysOff?: Weekday[]): Weekday[] {
+  if (!Array.isArray(daysOff)) {
+    return [];
+  }
+  return Array.from(new Set(daysOff.filter((value): value is Weekday => value >= 1 && value <= 7))).sort((a, b) => a - b) as Weekday[];
 }
 
 function toKoreanHourRange(startTime: string): string {
@@ -534,8 +542,10 @@ export default function SynchroSPage() {
   const [calendarMonth, setCalendarMonth] = useState<string>(monthStart(mondayOfCurrentWeek()));
   const [searchKeyword, setSearchKeyword] = useState("");
   const [showIntroPage, setShowIntroPage] = useState(true);
+  const [timetableViewMode, setTimetableViewMode] = useState<TimetableViewMode>("detailed");
   const [showStudentPicker, setShowStudentPicker] = useState(false);
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
+  const [savingInstructorDaysOff, setSavingInstructorDaysOff] = useState(false);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
   const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
@@ -619,6 +629,14 @@ export default function SynchroSPage() {
     () => instructors.find((item) => item.id === selectedInstructorId)?.secondary ?? "",
     [selectedInstructorId, instructors]
   );
+  const selectedInstructorOption = useMemo(
+    () => instructors.find((item) => item.id === selectedInstructorId) ?? null,
+    [instructors, selectedInstructorId]
+  );
+  const selectedInstructorDaysOff = useMemo(
+    () => normalizeDaysOff(selectedInstructorOption?.daysOff),
+    [selectedInstructorOption]
+  );
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
   const profileTitle = roleView === "student" ? "학생 프로필" : "강사 프로필";
@@ -631,6 +649,10 @@ export default function SynchroSPage() {
   const profileInitial = (profileName === "학생 선택" || profileName === "강사 선택" ? roleView === "student" ? "학" : "강" : profileName)
     .trim()
     .charAt(0);
+  const getInstructorDaysOff = useCallback(
+    (instructorId: string): Weekday[] => normalizeDaysOff(instructors.find((item) => item.id === instructorId)?.daysOff),
+    [instructors]
+  );
   const activeGroup = useMemo(
     () =>
       timetableGroups.find(
@@ -846,6 +868,66 @@ export default function SynchroSPage() {
     setShowStudentPicker(false);
     setShowInstructorPicker(false);
   }, []);
+
+  const handleToggleInstructorDayOff = useCallback(
+    async (weekday: Weekday) => {
+      if (!selectedInstructorId) {
+        setConflictDialog({ open: true, title: "강사 선택 필요", message: "먼저 휴무일을 설정할 강사를 선택해 주세요." });
+        return;
+      }
+
+      const currentDaysOff = getInstructorDaysOff(selectedInstructorId);
+      const nextDaysOff = currentDaysOff.includes(weekday)
+        ? currentDaysOff.filter((value) => value !== weekday)
+        : [...currentDaysOff, weekday].sort((a, b) => a - b);
+
+      setSavingInstructorDaysOff(true);
+      setError(null);
+
+      try {
+        const res = await fetch(`/api/instructors/${selectedInstructorId}/days-off`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ daysOff: nextDaysOff })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? "강사 휴무일 저장에 실패했습니다.");
+        }
+
+        const payload = (await res.json().catch(() => ({}))) as { daysOff?: Weekday[] };
+        const resolvedDaysOff = normalizeDaysOff(payload.daysOff ?? nextDaysOff);
+        setInstructors((prev) =>
+          prev.map((item) =>
+            item.id === selectedInstructorId
+              ? {
+                  ...item,
+                  daysOff: resolvedDaysOff
+                }
+              : item
+          )
+        );
+
+        const weekdayLabel = DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
+        setNotice(
+          resolvedDaysOff.includes(weekday)
+            ? `${selectedInstructorLabel} 강사의 ${weekdayLabel} 휴무를 저장했습니다.`
+            : `${selectedInstructorLabel} 강사의 ${weekdayLabel} 휴무를 해제했습니다.`
+        );
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "강사 휴무일 저장에 실패했습니다.");
+      } finally {
+        setSavingInstructorDaysOff(false);
+      }
+    },
+    [getInstructorDaysOff, moveToLogin, selectedInstructorId, selectedInstructorLabel]
+  );
 
   const buildUndoState = useCallback(
     (label: string, restoreMove?: UndoState["restoreMove"]): UndoState => ({
@@ -1122,6 +1204,19 @@ export default function SynchroSPage() {
         classDate: input.scheduleMode === "one_off" ? input.classDate : undefined,
         weekday: input.scheduleMode === "recurring" ? input.weekday ?? initialCell?.weekday ?? dayOf(weekStart) : undefined
       };
+      const targetWeekday =
+        normalizedInput.scheduleMode === "recurring"
+          ? (normalizedInput.weekday as Weekday)
+          : dayOf(normalizedInput.classDate as string);
+
+      if (getInstructorDaysOff(normalizedInput.instructorId).includes(targetWeekday)) {
+        setConflictDialog({
+          open: true,
+          title: "휴무일 안내",
+          message: "해당 강사의 휴무일입니다"
+        });
+        return;
+      }
 
       const conflictRes = await fetch("/api/schedules/check-conflict", {
         method: "POST",
@@ -1136,6 +1231,14 @@ export default function SynchroSPage() {
 
       if (!conflictRes.ok) {
         const payload = (await conflictRes.json().catch(() => ({}))) as { error?: string };
+        if (payload.error?.includes("해당 강사의 휴무일입니다")) {
+          setConflictDialog({
+            open: true,
+            title: "휴무일 안내",
+            message: "해당 강사의 휴무일입니다"
+          });
+          return;
+        }
         throw new Error(payload.error ?? "Failed to check conflicts");
       }
 
@@ -1163,6 +1266,14 @@ export default function SynchroSPage() {
 
       if (!createRes.ok) {
         const payload = (await createRes.json().catch(() => ({}))) as { error?: string };
+        if (payload.error?.includes("해당 강사의 휴무일입니다")) {
+          setConflictDialog({
+            open: true,
+            title: "휴무일 안내",
+            message: "해당 강사의 휴무일입니다"
+          });
+          return;
+        }
         throw new Error(payload.error ?? "Failed to create schedule");
       }
 
@@ -1173,7 +1284,7 @@ export default function SynchroSPage() {
 
       await loadWeek();
     },
-    [initialCell?.weekday, loadWeek, moveToLogin, weekStart]
+    [getInstructorDaysOff, initialCell?.weekday, loadWeek, moveToLogin, weekStart]
   );
 
   const handleMoveSchedule = useCallback(
@@ -1239,6 +1350,15 @@ export default function SynchroSPage() {
 
         if (!targetEvent) {
           setError("이동 대상 수업을 찾지 못했습니다.");
+          return;
+        }
+
+        if (getInstructorDaysOff(targetEvent.instructorId).includes(ctx.weekday)) {
+          setConflictDialog({
+            open: true,
+            title: "휴무일 안내",
+            message: "해당 강사의 휴무일입니다"
+          });
           return;
         }
 
@@ -1375,6 +1495,14 @@ export default function SynchroSPage() {
         if (!res.ok) {
           const payload = (await res.json().catch(() => ({}))) as { error?: string };
           rollbackMove();
+          if (payload.error?.includes("해당 강사의 휴무일입니다")) {
+            setConflictDialog({
+              open: true,
+              title: "휴무일 안내",
+              message: "해당 강사의 휴무일입니다"
+            });
+            return;
+          }
           setError(payload.error ?? "수업 이동에 실패했습니다.");
           return;
         }
@@ -1391,6 +1519,7 @@ export default function SynchroSPage() {
       events,
       filteredEvents,
       buildUndoState,
+      getInstructorDaysOff,
       loadWeek,
       moveToLogin,
       selectedGroup,
@@ -2263,6 +2392,36 @@ export default function SynchroSPage() {
                     </p>
                   </div>
                 </div>
+                {!showIntroPage && roleView === "instructor" && selectedInstructorId ? (
+                  <div className="mt-3 rounded-2xl border border-white/45 bg-white/35 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Days Off</p>
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        {savingInstructorDaysOff ? "저장 중..." : selectedInstructorDaysOff.length > 0 ? "회색 열로 표시" : "설정 없음"}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-7 gap-1">
+                      {DAYS.map((day) => {
+                        const active = selectedInstructorDaysOff.includes(day.key);
+                        return (
+                          <button
+                            key={`day-off-${day.key}`}
+                            type="button"
+                            disabled={savingInstructorDaysOff}
+                            onClick={() => void handleToggleInstructorDayOff(day.key)}
+                            className={`rounded-2xl border px-0 py-1.5 text-[11px] font-bold transition ${
+                              active
+                                ? "border-slate-300 bg-slate-700/80 text-white shadow-[0_8px_20px_rgba(71,85,105,0.22)]"
+                                : "border-white/50 bg-white/55 text-slate-600 hover:bg-white/70"
+                            } disabled:opacity-60`}
+                          >
+                            {day.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               {!showIntroPage ? (
@@ -2422,6 +2581,32 @@ export default function SynchroSPage() {
 
       <section className="grid flex-1 gap-4 xl:grid-cols-[1fr_330px]">
         <div>
+          <div className="mb-3 flex items-center justify-between rounded-2xl border border-white/55 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-md">
+            <div>
+              <p className="text-sm font-black text-slate-800">시간표 보기 모드</p>
+              <p className="text-[11px] font-semibold text-slate-500">상세 블록과 강사별 심플 점 표시를 전환할 수 있습니다.</p>
+            </div>
+            <div className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/70 p-1">
+              <button
+                type="button"
+                onClick={() => setTimetableViewMode("detailed")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                  timetableViewMode === "detailed" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                상세
+              </button>
+              <button
+                type="button"
+                onClick={() => setTimetableViewMode("summary")}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                  timetableViewMode === "summary" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                심플 뷰
+              </button>
+            </div>
+          </div>
           {loading ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
           ) : (
@@ -2430,6 +2615,8 @@ export default function SynchroSPage() {
               days={DAYS}
               timeSlots={TIME_SLOTS}
               events={displayEvents}
+              daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
+              viewMode={timetableViewMode}
               highlightCellTints={activeHighlightCellTints}
               onEventMove={roleView === "student" ? handleMoveSchedule : undefined}
               onCellClick={(ctx) => {

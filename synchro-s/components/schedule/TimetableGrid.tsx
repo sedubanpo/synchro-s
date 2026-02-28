@@ -1,6 +1,6 @@
 import { ScheduleBlock } from "@/components/schedule/ScheduleBlock";
 import { timeToMinutes } from "@/lib/time";
-import type { RoleView, ScheduleEvent, Weekday } from "@/types/schedule";
+import type { RoleView, ScheduleEvent, TimetableViewMode, Weekday } from "@/types/schedule";
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
@@ -9,6 +9,8 @@ type TimetableGridProps = {
   days: { key: Weekday; label: string }[];
   timeSlots: string[];
   events: ScheduleEvent[];
+  daysOff?: Weekday[];
+  viewMode?: TimetableViewMode;
   highlightCellTints?: Record<string, string>;
   onCellClick: (ctx: { weekday: Weekday; startTime: string }) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
@@ -36,7 +38,33 @@ function addMinutes(time: string, durationMinutes: number): string {
   return minutesToTime(h * 60 + m + durationMinutes);
 }
 
-export function TimetableGrid({ roleView, days, timeSlots, events, highlightCellTints, onCellClick, onEventMove }: TimetableGridProps) {
+function isStrictDotClass(event: ScheduleEvent): boolean {
+  const normalized = `${event.classTypeCode} ${event.classTypeLabel}`.replace(/[^0-9a-z가-힣:]/gi, "").toLowerCase();
+  return (
+    normalized.includes("onetone") ||
+    normalized.includes("onetoone") ||
+    normalized.includes("11") ||
+    normalized.includes("1:1") ||
+    normalized.includes("1대1") ||
+    normalized.includes("twotone") ||
+    normalized.includes("twotoone") ||
+    normalized.includes("21") ||
+    normalized.includes("2:1") ||
+    normalized.includes("2대1")
+  );
+}
+
+export function TimetableGrid({
+  roleView,
+  days,
+  timeSlots,
+  events,
+  daysOff = [],
+  viewMode = "detailed",
+  highlightCellTints,
+  onCellClick,
+  onEventMove
+}: TimetableGridProps) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
@@ -44,6 +72,8 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
   const progressByEventKey = new Map<string, { index: number; total: number }>();
   const eventMap = new Map<string, ScheduleEvent[]>();
   const activeDaySet = new Set<Weekday>();
+  const daysOffSet = new Set(daysOff);
+  const canMoveEvents = Boolean(onEventMove && viewMode === "detailed");
 
   for (const event of events) {
     const key = `${event.weekday}-${event.startTime}`;
@@ -96,7 +126,7 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
   }
 
   const moveByPayload = async (payload: { classId: string; durationMinutes: number }, weekday: Weekday, startTime: string) => {
-    if (!onEventMove) return;
+    if (!canMoveEvents || !onEventMove) return;
     if (!payload.classId || Number.isNaN(payload.durationMinutes)) return;
     await onEventMove({
       classId: payload.classId,
@@ -124,7 +154,7 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
   }, []);
 
   const handleDrop = async (event: DragEvent<HTMLElement>, weekday: Weekday, startTime: string) => {
-    if (!onEventMove) return;
+    if (!canMoveEvents || !onEventMove) return;
     event.preventDefault();
     event.stopPropagation();
     dropHandledRef.current = true;
@@ -157,12 +187,22 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
               <th
                 key={day.key}
                 className={`sticky top-0 z-20 border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
-                  activeDaySet.has(day.key)
+                  daysOffSet.has(day.key)
+                    ? "border-slate-300 bg-[linear-gradient(180deg,rgba(226,232,240,0.65)_0%,rgba(248,250,252,0.95)_100%)] text-slate-500 shadow-[inset_0_-1px_0_rgba(148,163,184,0.45)]"
+                    : activeDaySet.has(day.key)
                     ? "border-sky-300 bg-[linear-gradient(180deg,rgba(191,219,254,0.75)_0%,rgba(239,246,255,0.95)_42%,rgba(255,255,255,1)_100%)] text-sky-800 shadow-[inset_0_-2px_0_rgba(59,130,246,0.62),inset_0_1px_0_rgba(255,255,255,0.8),0_0_24px_rgba(59,130,246,0.34)]"
                     : "border-slate-200 bg-slate-50 text-slate-700"
                 }`}
               >
-                <span className={activeDaySet.has(day.key) ? "font-extrabold tracking-wide drop-shadow-[0_1px_1px_rgba(37,99,235,0.25)]" : ""}>
+                <span
+                  className={
+                    daysOffSet.has(day.key)
+                      ? "font-extrabold tracking-wide"
+                      : activeDaySet.has(day.key)
+                        ? "font-extrabold tracking-wide drop-shadow-[0_1px_1px_rgba(37,99,235,0.25)]"
+                        : ""
+                  }
+                >
                   {day.label}
                 </span>
               </th>
@@ -189,18 +229,20 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                     className={`border-b border-r align-top transition ${
                       isDropTarget
                         ? "border-sky-300 bg-sky-100/80"
-                        : isActiveDay
+                        : daysOffSet.has(day.key)
+                          ? "border-slate-200 bg-[linear-gradient(180deg,rgba(226,232,240,0.34)_0%,rgba(248,250,252,0.88)_100%)]"
+                          : isActiveDay
                           ? "border-sky-100 bg-[linear-gradient(180deg,rgba(239,246,255,0.95)_0%,rgba(248,250,252,0.98)_100%)]"
                           : "border-slate-100 bg-white"
                     }`}
                     style={undefined}
                     onClick={() => {
-                      if (isEmpty) {
+                      if (isEmpty && viewMode === "detailed") {
                         onCellClick({ weekday: day.key, startTime: slot });
                       }
                     }}
                     onDragOver={(event) => {
-                      if (!onEventMove) return;
+                      if (!canMoveEvents) return;
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "move";
                       if (dragOverCell !== cellKey) {
@@ -208,12 +250,12 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                       }
                     }}
                     onDragEnter={(event) => {
-                      if (!onEventMove) return;
+                      if (!canMoveEvents) return;
                       event.preventDefault();
                       setDragOverCell(cellKey);
                     }}
                     onDragLeave={(event) => {
-                      if (!onEventMove) return;
+                      if (!canMoveEvents) return;
                       const nextTarget = event.relatedTarget as Node | null;
                       if (nextTarget && event.currentTarget.contains(nextTarget)) return;
                       if (dragOverCell === cellKey) {
@@ -231,66 +273,82 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                           className={`min-h-[46px] rounded-md border border-dashed transition ${
                             isDropTarget
                               ? "border-sky-400 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]"
-                              : isActiveDay
+                              : daysOffSet.has(day.key)
+                                ? "border-transparent bg-transparent hover:border-slate-200 hover:bg-slate-200/20"
+                                : isActiveDay
                                 ? "border-transparent bg-transparent hover:border-sky-200 hover:bg-white/55"
                                 : "border-transparent hover:border-slate-200 hover:bg-slate-50"
                           }`}
                         />
                       ) : (
-                        <div className="flex min-h-[46px] flex-col gap-1">
-                          {entries.map((event) => (
-                            <div
-                              key={`${event.id}-${event.classDate}`}
-                              draggable={Boolean(onEventMove)}
-                              onDragStart={(dragEvent) => {
-                                if (!onEventMove) return;
-                                const eventKey = `${event.id}-${event.classDate}-${event.startTime}`;
-                                setDraggingKey(eventKey);
-                                dropHandledRef.current = false;
-                                const payload = JSON.stringify({
-                                  classId: event.id,
-                                  durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
-                                });
-                                dragPayloadRef.current = {
-                                  classId: event.id,
-                                  durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
-                                };
-                                dragEvent.dataTransfer.setData("application/json", payload);
-                                dragEvent.dataTransfer.setData("text/plain", payload);
-                                dragEvent.dataTransfer.effectAllowed = "move";
-                              }}
-                              onDragEnd={() => {
-                                if (!onEventMove) return;
-                                const hovered = dragOverCell;
-                                const payload = dragPayloadRef.current;
-                                if (!dropHandledRef.current && hovered && payload) {
-                                  const [weekdayRaw, startTime] = hovered.split("-");
-                                  const weekday = Number(weekdayRaw) as Weekday;
-                                  if (weekday >= 1 && weekday <= 7 && startTime) {
-                                    void moveByPayload(payload, weekday, startTime);
-                                  }
-                                }
-                                dragPayloadRef.current = null;
-                                setDragOverCell(null);
-                                setDraggingKey(null);
-                              }}
-                              className={draggingKey === `${event.id}-${event.classDate}-${event.startTime}` ? "opacity-60" : ""}
-                              style={
-                                highlightCellTints?.[cellKey]
-                                  ? {
-                                      filter: `drop-shadow(0 0 14px ${highlightCellTints[cellKey]}) drop-shadow(0 0 24px ${highlightCellTints[cellKey]})`
-                                    }
-                                  : undefined
-                              }
-                            >
-                              <ScheduleBlock
-                                event={event}
-                                roleView={roleView}
-                                chainProgress={progressByEventKey.get(`${event.id}-${event.classDate}-${event.startTime}`)}
+                        viewMode === "summary" ? (
+                          <div className="flex min-h-[46px] flex-wrap items-center gap-1.5 px-1 py-2">
+                            {entries.map((event) => (
+                              <div
+                                key={`${event.id}-${event.classDate}`}
+                                title={`${event.instructorName} · ${event.classTypeLabel} · ${event.studentNames.join(", ")}`}
+                                className={`h-3.5 w-3.5 rounded-full border border-white/70 shadow-[0_2px_10px_rgba(148,163,184,0.25)] ${
+                                  isStrictDotClass(event) ? "bg-green-400/80" : "bg-blue-400/80"
+                                }`}
                               />
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="flex min-h-[46px] flex-col gap-1">
+                            {entries.map((event) => (
+                              <div
+                                key={`${event.id}-${event.classDate}`}
+                                draggable={canMoveEvents}
+                                onDragStart={(dragEvent) => {
+                                  if (!canMoveEvents || !onEventMove) return;
+                                  const eventKey = `${event.id}-${event.classDate}-${event.startTime}`;
+                                  setDraggingKey(eventKey);
+                                  dropHandledRef.current = false;
+                                  const payload = JSON.stringify({
+                                    classId: event.id,
+                                    durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
+                                  });
+                                  dragPayloadRef.current = {
+                                    classId: event.id,
+                                    durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
+                                  };
+                                  dragEvent.dataTransfer.setData("application/json", payload);
+                                  dragEvent.dataTransfer.setData("text/plain", payload);
+                                  dragEvent.dataTransfer.effectAllowed = "move";
+                                }}
+                                onDragEnd={() => {
+                                  if (!canMoveEvents || !onEventMove) return;
+                                  const hovered = dragOverCell;
+                                  const payload = dragPayloadRef.current;
+                                  if (!dropHandledRef.current && hovered && payload) {
+                                    const [weekdayRaw, startTime] = hovered.split("-");
+                                    const weekday = Number(weekdayRaw) as Weekday;
+                                    if (weekday >= 1 && weekday <= 7 && startTime) {
+                                      void moveByPayload(payload, weekday, startTime);
+                                    }
+                                  }
+                                  dragPayloadRef.current = null;
+                                  setDragOverCell(null);
+                                  setDraggingKey(null);
+                                }}
+                                className={draggingKey === `${event.id}-${event.classDate}-${event.startTime}` ? "opacity-60" : ""}
+                                style={
+                                  highlightCellTints?.[cellKey]
+                                    ? {
+                                        filter: `drop-shadow(0 0 14px ${highlightCellTints[cellKey]}) drop-shadow(0 0 24px ${highlightCellTints[cellKey]})`
+                                      }
+                                    : undefined
+                                }
+                              >
+                                <ScheduleBlock
+                                  event={event}
+                                  roleView={roleView}
+                                  chainProgress={progressByEventKey.get(`${event.id}-${event.classDate}-${event.startTime}`)}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )
                       )}
                     </div>
                   </td>

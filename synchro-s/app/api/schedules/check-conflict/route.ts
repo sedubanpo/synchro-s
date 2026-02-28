@@ -1,6 +1,6 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { getAuthenticatedProfile, canManageSchedules } from "@/lib/server/auth";
-import { checkScheduleConflict } from "@/lib/server/scheduleService";
+import { checkScheduleConflict, INSTRUCTOR_DAY_OFF_MESSAGE } from "@/lib/server/scheduleService";
 import type { CheckConflictRequest } from "@/types/schedule";
 import { NextResponse } from "next/server";
 
@@ -25,6 +25,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(conflict);
   } catch (error) {
+    if (errorMessage(error) === INSTRUCTOR_DAY_OFF_MESSAGE) {
+      return jsonError(INSTRUCTOR_DAY_OFF_MESSAGE, 400);
+    }
     return jsonError(errorMessage(error), 500);
   }
 }

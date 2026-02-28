@@ -59,6 +59,35 @@ type EnrollmentRow = {
 const CLASS_SELECT =
   "id,schedule_mode,instructor_id,subject_code,class_type_code,weekday,class_date,start_time,end_time,active_from,active_to,progress_status,created_at,instructors(id,instructor_name),subjects(code,display_name,tailwind_bg_class),class_types(code,display_name,badge_text,max_students)";
 
+export const INSTRUCTOR_DAY_OFF_MESSAGE = "해당 강사의 휴무일입니다.";
+
+function normalizeDaysOff(values: unknown): number[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values.filter((value): value is number => Number.isInteger(value) && value >= 1 && value <= 7);
+}
+
+async function assertInstructorAvailableOnWeekday(supabase: SupabaseLike, instructorId: string, weekday: number): Promise<void> {
+  const { data, error } = await supabase.from("instructors").select("days_off").eq("id", instructorId).maybeSingle();
+  if (error) {
+    throw error;
+  }
+
+  const daysOff = normalizeDaysOff(data?.days_off);
+  if (daysOff.includes(weekday)) {
+    throw new Error(INSTRUCTOR_DAY_OFF_MESSAGE);
+  }
+}
+
+function resolveTargetWeekday(payload: CreateScheduleRequest): number {
+  if (payload.scheduleMode === "recurring") {
+    return payload.weekday as number;
+  }
+  return dateToWeekday(payload.classDate as string);
+}
+
 function buildOverrideKey(classId: string, date: string): string {
   return `${classId}:${date}`;
 }
@@ -222,6 +251,8 @@ async function checkMoveConflictForWeek(
     endTime: string;
   }
 ): Promise<ConflictResult> {
+  await assertInstructorAvailableOnWeekday(supabase, params.instructorId, params.weekday);
+
   const weekly = await fetchWeeklySchedule(supabase, {
     weekStart: params.weekStart,
     view: "instructor",
@@ -265,6 +296,8 @@ export async function checkScheduleConflict(
   if (errors.length > 0) {
     throw new Error(errors.join(", "));
   }
+
+  await assertInstructorAvailableOnWeekday(supabase, payload.instructorId, resolveTargetWeekday(payload));
 
   const overlaps = await findExistingOverlaps(supabase, payload, options?.excludeClassId);
   if (overlaps.length === 0) {

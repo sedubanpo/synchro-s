@@ -1,6 +1,6 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
-import { moveScheduleSlot } from "@/lib/server/scheduleService";
+import { moveScheduleSlot, INSTRUCTOR_DAY_OFF_MESSAGE } from "@/lib/server/scheduleService";
 import { NextResponse } from "next/server";
 
 type MovePayload = {
@@ -37,6 +37,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     return NextResponse.json(result);
   } catch (error) {
+    if (errorMessage(error) === INSTRUCTOR_DAY_OFF_MESSAGE) {
+      return jsonError(INSTRUCTOR_DAY_OFF_MESSAGE, 400);
+    }
     return jsonError(errorMessage(error), 500);
   }
 }

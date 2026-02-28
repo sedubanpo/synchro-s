@@ -178,22 +178,23 @@ export async function GET() {
       spreadsheetId
     );
 
-    let instructors: { id: string; name: string; secondary?: string }[] = [];
+    let instructors: { id: string; name: string; secondary?: string; daysOff?: number[] }[] = [];
     let students: { id: string; name: string; secondary?: string }[] = [];
 
     if (profile.role === "admin" || profile.role === "coordinator") {
       const [instructorRes, studentRes] = await Promise.all([
-        supabase.from("instructors").select("id,instructor_name").eq("is_active", true).order("instructor_name"),
+        supabase.from("instructors").select("id,instructor_name,days_off").eq("is_active", true).order("instructor_name"),
         supabase.from("students").select("id,student_name,is_active").order("student_name")
       ]);
 
       if (instructorRes.error) throw instructorRes.error;
       if (studentRes.error) throw studentRes.error;
 
-      instructors = (instructorRes.data ?? []).map((row: { id: string; instructor_name: string }) => ({
+      instructors = (instructorRes.data ?? []).map((row: { id: string; instructor_name: string; days_off?: number[] | null }) => ({
         id: row.id,
         name: row.instructor_name,
-        secondary: teacherSubjectByName.get(normalizeName(row.instructor_name))
+        secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
+        daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7)
       }));
       students = (studentRes.data ?? [])
         .filter((row: { student_name: string; is_active: boolean }) => {
@@ -209,7 +210,7 @@ export async function GET() {
     } else if (profile.role === "instructor") {
       const { data: ownInstructor, error: ownInstructorError } = await supabase
         .from("instructors")
-        .select("id,instructor_name")
+        .select("id,instructor_name,days_off")
         .eq("user_id", user.id)
         .single();
 
@@ -221,7 +222,8 @@ export async function GET() {
         {
           id: ownInstructor.id,
           name: ownInstructor.instructor_name,
-          secondary: teacherSubjectByName.get(normalizeName(ownInstructor.instructor_name))
+          secondary: teacherSubjectByName.get(normalizeName(ownInstructor.instructor_name)),
+          daysOff: (ownInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7)
         }
       ];
 
@@ -290,7 +292,7 @@ export async function GET() {
       if (ownStudent.default_instructor_id) {
         const { data: defaultInstructor } = await supabase
           .from("instructors")
-          .select("id,instructor_name")
+          .select("id,instructor_name,days_off")
           .eq("id", ownStudent.default_instructor_id)
           .single();
 
@@ -299,7 +301,8 @@ export async function GET() {
             {
               id: defaultInstructor.id,
               name: defaultInstructor.instructor_name,
-              secondary: teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name))
+              secondary: teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name)),
+              daysOff: (defaultInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7)
             }
           ];
         }

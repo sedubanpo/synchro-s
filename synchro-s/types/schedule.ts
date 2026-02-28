@@ -49,7 +49,10 @@ export type SelectOption = {
   id: string;
   name: string;
   secondary?: string;
+  daysOff?: Weekday[];
 };
+
+export type TimetableViewMode = "detailed" | "summary";
 
 export type SubjectOption = {
   code: string;

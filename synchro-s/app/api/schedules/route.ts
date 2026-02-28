@@ -1,6 +1,6 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
-import { createScheduleWithEnrollments } from "@/lib/server/scheduleService";
+import { createScheduleWithEnrollments, INSTRUCTOR_DAY_OFF_MESSAGE } from "@/lib/server/scheduleService";
 import type { CreateScheduleRequest } from "@/types/schedule";
 import { NextResponse } from "next/server";
 
@@ -29,6 +29,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (errorMessage(error) === INSTRUCTOR_DAY_OFF_MESSAGE) {
+      return jsonError(INSTRUCTOR_DAY_OFF_MESSAGE, 400);
+    }
     return jsonError(errorMessage(error), 500);
   }
 }
