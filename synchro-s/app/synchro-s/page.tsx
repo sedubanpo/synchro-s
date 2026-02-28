@@ -621,6 +621,16 @@ export default function SynchroSPage() {
   );
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
+  const profileTitle = roleView === "student" ? "학생 프로필" : "강사 프로필";
+  const profileName = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
+  const profileSecondary = roleView === "student" ? selectedStudentSecondary : selectedInstructorSecondary;
+  const profileAccentClass =
+    roleView === "student"
+      ? "from-emerald-400/18 via-white/30 to-teal-300/12 text-emerald-700"
+      : "from-sky-400/18 via-white/30 to-indigo-300/12 text-sky-700";
+  const profileInitial = (profileName === "학생 선택" || profileName === "강사 선택" ? roleView === "student" ? "학" : "강" : profileName)
+    .trim()
+    .charAt(0);
   const activeGroup = useMemo(
     () =>
       timetableGroups.find(
@@ -871,8 +881,8 @@ export default function SynchroSPage() {
     setSubjects(data.subjects);
     setClassTypes(data.classTypes);
 
-    setSelectedInstructorId((prev) => prev || data.instructors[0]?.id || "");
-    setSelectedStudentId((prev) => prev || data.students[0]?.id || "");
+    setSelectedInstructorId((prev) => (data.instructors.some((item) => item.id === prev) ? prev : ""));
+    setSelectedStudentId((prev) => (data.students.some((item) => item.id === prev) ? prev : ""));
 
     if (data.instructors.length > 0 && data.students.length === 0) {
       setRoleView("instructor");
@@ -2119,196 +2129,230 @@ export default function SynchroSPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[1520px] flex-col gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8">
       <section
-        className={`relative z-[80] overflow-visible rounded-3xl border border-white/70 bg-gradient-to-r from-white/80 via-sky-50/70 to-teal-100/60 p-4 pl-20 shadow-[0_20px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl ${headerGlowClass}`}
+        className={`relative z-[80] overflow-visible rounded-[32px] border border-white/40 bg-white/30 p-4 shadow-xl shadow-cyan-500/10 backdrop-blur-md ${headerGlowClass}`}
       >
-        <div className="pointer-events-none absolute left-4 top-4 z-10 flex items-center">
-          <img
-            src="https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png"
-            alt="SEDU 로고"
-            className="h-14 w-14 object-contain"
-          />
-          <div className="h-14 w-40 bg-gradient-to-r from-white/60 via-white/25 to-transparent" />
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Synchro-S</h1>
-            <p className="text-sm font-medium text-slate-500">
-              {weekStart} ~ {weekEnd} | 입력 일시/진행현황 자동 기록
-            </p>
-          </div>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(110,231,183,0.22),transparent_28%),radial-gradient(circle_at_18%_18%,rgba(147,197,253,0.18),transparent_24%)]" />
+        <div className="relative space-y-4">
+          <div className="grid gap-3 xl:grid-cols-[1.2fr_minmax(320px,0.9fr)_auto]">
+            <div className="rounded-[28px] border border-white/45 bg-white/35 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+              <div className="flex items-center gap-4">
+                <img
+                  src="https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png"
+                  alt="SEDU 로고"
+                  className="h-14 w-14 shrink-0 object-contain"
+                />
+                <div>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <h1 className="text-[2.35rem] font-black tracking-tight text-slate-900">Synchro-S</h1>
+                    <span className="mb-1 rounded-full border border-white/50 bg-white/35 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
+                      Timetable DB
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-500">{weekStart} ~ {weekEnd} | 입력 일시/진행현황 자동 기록</p>
+                </div>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowIntroPage(true)}
-              className="rounded-lg border border-white/70 bg-white/55 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white/80"
-            >
-              앱 소개
-            </button>
-            <RoleTabs value={roleView} onChange={handleRoleViewChange} />
-            <button
-              type="button"
-              onClick={() => void handleLogout()}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              로그아웃
-            </button>
-          </div>
-        </div>
+            <label className="flex min-h-[88px] items-center gap-3 rounded-[28px] border border-white/45 bg-white/35 px-5 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/45 bg-white/55 text-slate-500 shadow-inner shadow-white/40">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="11" cy="11" r="6" />
+                  <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+                </svg>
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400">Global Search</p>
+                <input
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  placeholder={showIntroPage ? "강사/학생을 미리 검색해 둘 수 있습니다." : "강사/학생 검색"}
+                  className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-400"
+                />
+              </div>
+            </label>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            onClick={() => setWeekStart((prev) => shiftDate(prev, -7))}
-          >
-            이전 주
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            onClick={() => setWeekStart(mondayOfCurrentWeek())}
-          >
-            이번 주
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            onClick={() => setWeekStart((prev) => shiftDate(prev, 7))}
-          >
-            다음 주
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-            onClick={() => void handleCopyForNotion()}
-          >
-            노션 붙여넣기 복사
-          </button>
-          <button
-            type="button"
-            disabled={syncingSheets}
-            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-            onClick={() => void handleSyncSheets()}
-          >
-            {syncingSheets ? "시트 동기화 중..." : "명단 동기화"}
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100"
-            onClick={openSubjectSettingsModal}
-          >
-            과목 코드 설정
-          </button>
-
-          <div className="flex min-w-[260px] items-center gap-2 rounded-full border border-white/70 bg-white/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(15,23,42,0.10)] backdrop-blur-xl">
-            <span className="text-sm text-slate-500">⌕</span>
-            <input
-              value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
-              placeholder="강사/학생 검색"
-              className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-400"
-            />
-          </div>
-
-          <div className="min-w-[220px] rounded-2xl border border-white/70 bg-white/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-xl">
-            {roleView === "student" ? (
-              <>
-                <p className="text-[11px] font-bold text-emerald-700">학생 프로필</p>
-                <p className="text-base font-extrabold text-slate-900">{selectedStudentLabel}</p>
-                <p className="text-xs font-semibold text-slate-500">{selectedStudentSecondary || "학교 정보 없음"}</p>
-              </>
-            ) : (
-              <>
-                <p className="text-[11px] font-bold text-sky-700">강사 프로필</p>
-                <p className="text-base font-extrabold text-slate-900">{selectedInstructorLabel}</p>
-                <p className="text-xs font-semibold text-slate-500">{selectedInstructorSecondary || "과목 정보 없음"}</p>
-              </>
-            )}
-          </div>
-
-          {roleView === "instructor" ? (
-            <div className="relative z-[120] ml-auto">
+            <div className="flex flex-wrap items-center justify-end gap-2 rounded-[28px] border border-white/45 bg-white/30 p-3 shadow-lg shadow-slate-900/5 backdrop-blur-md">
               <button
                 type="button"
-                onClick={() => {
-                  setShowInstructorPicker((prev) => !prev);
-                  setShowStudentPicker(false);
-                }}
-                className="rounded-2xl border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-xl"
+                onClick={() => setShowIntroPage(true)}
+                className="inline-flex items-center gap-2 rounded-full border border-white/45 bg-white/45 px-4 py-2 text-xs font-bold text-slate-700 shadow-sm shadow-white/20 hover:bg-white/60"
               >
-                강사: {selectedInstructorLabel}
+                <span className="h-2 w-2 rounded-full bg-sky-400" />
+                앱 소개
               </button>
-              {showInstructorPicker ? (
-                <div className="absolute right-0 z-[220] mt-2 w-64 overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.2)] backdrop-blur-2xl">
-                  <div className="max-h-72 overflow-auto">
-                    {(filteredInstructors.length > 0 ? filteredInstructors : instructors).map((instructor) => (
-                      <button
-                        key={instructor.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedInstructorId(instructor.id);
-                          setShowInstructorPicker(false);
-                        }}
-                        className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${
-                          instructor.id === selectedInstructorId
-                            ? "bg-indigo-100 text-indigo-800"
-                            : "text-slate-800 hover:bg-slate-100/70"
-                        }`}
-                      >
-                        강사: {instructor.name}
-                        {instructor.secondary ? (
-                          <span className="ml-2 text-xs font-medium text-slate-500">({instructor.secondary})</span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="relative z-[120] ml-auto">
+              <RoleTabs value={roleView} onChange={handleRoleViewChange} />
               <button
                 type="button"
-                onClick={() => {
-                  setShowStudentPicker((prev) => !prev);
-                  setShowInstructorPicker(false);
-                }}
-                className="rounded-2xl border border-white/70 bg-white/65 px-4 py-2 text-sm font-semibold text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_22px_rgba(15,23,42,0.12)] backdrop-blur-xl"
+                onClick={() => void handleLogout()}
+                className="inline-flex items-center gap-2 rounded-full border border-white/45 bg-white/35 px-4 py-2 text-xs font-bold text-slate-700 shadow-sm shadow-white/20 hover:bg-white/55"
               >
-                학생: {selectedStudentLabel}
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" strokeLinecap="round" />
+                  <path d="M10 16l4-4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M14 12H4" strokeLinecap="round" />
+                </svg>
+                로그아웃
               </button>
-              {showStudentPicker ? (
-                <div className="absolute right-0 z-[220] mt-2 w-72 overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.2)] backdrop-blur-2xl">
-                  <div className="max-h-80 overflow-auto">
-                    {(filteredStudents.length > 0 ? filteredStudents : students).map((student) => (
-                      <button
-                        key={student.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedStudentId(student.id);
-                          setShowStudentPicker(false);
-                        }}
-                        className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${
-                          student.id === selectedStudentId
-                            ? "bg-teal-100 text-teal-800"
-                            : "text-slate-800 hover:bg-slate-100/70"
-                        }`}
-                      >
-                        학생: {student.name}
-                        {student.secondary ? (
-                          <span className="ml-2 text-xs font-medium text-slate-500">({student.secondary})</span>
-                        ) : null}
-                      </button>
-                    ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-[auto_1fr_auto]">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-[24px] border border-white/45 bg-white/30 p-1.5 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+              <button
+                type="button"
+                className="rounded-2xl px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white/45"
+                onClick={() => setWeekStart((prev) => shiftDate(prev, -7))}
+              >
+                이전 주
+              </button>
+              <button
+                type="button"
+                className="rounded-2xl bg-white/65 px-4 py-2 text-xs font-black text-slate-800 shadow-sm"
+                onClick={() => setWeekStart(mondayOfCurrentWeek())}
+              >
+                이번 주
+              </button>
+              <button
+                type="button"
+                className="rounded-2xl px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white/45"
+                onClick={() => setWeekStart((prev) => shiftDate(prev, 7))}
+              >
+                다음 주
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm shadow-blue-500/10 backdrop-blur-md hover:bg-white/55"
+                onClick={() => void handleCopyForNotion()}
+              >
+                <span className="h-2 w-2 rounded-full bg-blue-400" />
+                노션 붙여넣기 복사
+              </button>
+              <button
+                type="button"
+                disabled={syncingSheets}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-emerald-700 shadow-sm shadow-emerald-500/10 backdrop-blur-md hover:bg-white/55 disabled:opacity-60"
+                onClick={() => void handleSyncSheets()}
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                {syncingSheets ? "시트 동기화 중..." : "명단 동기화"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-violet-700 shadow-sm shadow-violet-500/10 backdrop-blur-md hover:bg-white/55"
+                onClick={openSubjectSettingsModal}
+              >
+                <span className="h-2 w-2 rounded-full bg-violet-400" />
+                과목 코드 설정
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className={`min-w-[240px] rounded-[26px] border border-white/45 bg-gradient-to-br ${showIntroPage ? "from-slate-100/65 via-white/40 to-sky-100/45 text-slate-500" : profileAccentClass} p-3 shadow-lg shadow-slate-900/5 backdrop-blur-md`}>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/55 bg-white/55 text-base font-black text-slate-800 shadow-inner shadow-white/40">
+                    {showIntroPage ? "홈" : profileInitial}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em]">{showIntroPage ? "Home Guide" : profileTitle}</p>
+                    <p className="truncate text-lg font-black text-slate-900">{showIntroPage ? "운영 가이드 홈화면" : profileName}</p>
+                    <p className="truncate text-xs font-semibold text-slate-500">
+                      {showIntroPage ? "먼저 안내를 확인한 뒤 시간표 작업을 시작하세요." : profileSecondary || "상세 정보 없음"}
+                    </p>
                   </div>
                 </div>
+              </div>
+
+              {!showIntroPage ? (
+                roleView === "instructor" ? (
+                  <div className="relative z-[120]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowInstructorPicker((prev) => !prev);
+                        setShowStudentPicker(false);
+                      }}
+                      className="rounded-full border border-white/45 bg-white/40 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm backdrop-blur-md hover:bg-white/55"
+                    >
+                      강사: {selectedInstructorLabel}
+                    </button>
+                    {showInstructorPicker ? (
+                      <div className="absolute right-0 z-[220] mt-2 w-64 overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.2)] backdrop-blur-2xl">
+                        <div className="max-h-72 overflow-auto">
+                          {(filteredInstructors.length > 0 ? filteredInstructors : instructors).map((instructor) => (
+                            <button
+                              key={instructor.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedInstructorId(instructor.id);
+                                setShowInstructorPicker(false);
+                              }}
+                              className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                                instructor.id === selectedInstructorId
+                                  ? "bg-indigo-100 text-indigo-800"
+                                  : "text-slate-800 hover:bg-slate-100/70"
+                              }`}
+                            >
+                              강사: {instructor.name}
+                              {instructor.secondary ? (
+                                <span className="ml-2 text-xs font-medium text-slate-500">({instructor.secondary})</span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="relative z-[120]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowStudentPicker((prev) => !prev);
+                        setShowInstructorPicker(false);
+                      }}
+                      className="rounded-full border border-white/45 bg-white/40 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm backdrop-blur-md hover:bg-white/55"
+                    >
+                      학생: {selectedStudentLabel}
+                    </button>
+                    {showStudentPicker ? (
+                      <div className="absolute right-0 z-[220] mt-2 w-72 overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.2)] backdrop-blur-2xl">
+                        <div className="max-h-80 overflow-auto">
+                          {(filteredStudents.length > 0 ? filteredStudents : students).map((student) => (
+                            <button
+                              key={student.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedStudentId(student.id);
+                                setShowStudentPicker(false);
+                              }}
+                              className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                                student.id === selectedStudentId
+                                  ? "bg-teal-100 text-teal-800"
+                                  : "text-slate-800 hover:bg-slate-100/70"
+                              }`}
+                            >
+                              학생: {student.name}
+                              {student.secondary ? (
+                                <span className="ml-2 text-xs font-medium text-slate-500">({student.secondary})</span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )
               ) : null}
             </div>
-          )}
+          </div>
         </div>
       </section>
 
+      {!showIntroPage ? (
+        <>
       {error ? (
         <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
           {error}
@@ -2579,110 +2623,114 @@ export default function SynchroSPage() {
           </div>
         </aside>
       </section>
+        </>
+      ) : null}
 
       {showIntroPage ? (
-        <div className="fixed inset-0 z-[360] flex items-center justify-center bg-[radial-gradient(circle_at_top_right,rgba(125,211,252,0.22),transparent_30%),rgba(15,23,42,0.38)] p-4 backdrop-blur-xl">
-          <div className="w-full max-w-5xl overflow-hidden rounded-[32px] border border-white/65 bg-[linear-gradient(145deg,rgba(255,255,255,0.84),rgba(224,242,254,0.78),rgba(219,234,254,0.72))] p-6 shadow-[0_30px_90px_rgba(15,23,42,0.32)] backdrop-blur-2xl">
-            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div>
-                <div className="inline-flex rounded-full border border-sky-200 bg-white/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.25em] text-sky-700">
-                  Synchro-S Guide
-                </div>
-                <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-900">시간표 입력, 그룹 관리, 저장 흐름을 한 화면에서 정리합니다.</h2>
-                <p className="mt-3 text-sm font-medium leading-6 text-slate-600">
-                  이 화면은 강사/학생 시간표 조회, 노션 붙여넣기 반영, DB 저장, 그룹 버전 관리까지 빠르게 처리하도록 설계되어 있습니다.
-                  실무자는 먼저 아래 흐름을 확인한 뒤 실제 편집 화면으로 진입하면 됩니다.
-                </p>
+        <section className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+          <div className="rounded-[32px] border border-white/45 bg-white/38 p-6 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+            <div className="inline-flex rounded-full border border-sky-200/80 bg-white/55 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-sky-700">
+              Synchro-S Guide
+            </div>
+            <h2 className="mt-5 text-4xl font-black tracking-tight text-slate-900">시간표 입력, 그룹 관리, 저장 흐름을 한 화면에서 정리합니다.</h2>
+            <p className="mt-4 max-w-3xl text-base font-semibold leading-8 text-slate-500">
+              Synchro-S는 강사/학생 시간표 조회, 노션 붙여넣기 반영, DB 저장, 그룹 버전 관리까지 연결하는 운영용 시간표 DB입니다.
+              로그인 직후에는 바로 편집보다 홈화면에서 전체 흐름을 확인하고, 필요한 작업으로 진입하는 구성이 더 안전합니다.
+            </p>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  {[
-                    ["1", "탭 선택", "강사/학생 기준으로 대상 시간표를 전환합니다."],
-                    ["2", "노션 반영", "붙여넣은 텍스트를 미리보기로 확인하고 수정합니다."],
-                    ["3", "DB 저장", "검토한 시간표를 그룹과 함께 서버에 저장합니다."]
-                  ].map(([step, title, body]) => (
-                    <div key={step} className="rounded-2xl border border-white/70 bg-white/55 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-sky-500 text-sm font-black text-white">{step}</div>
-                      <p className="mt-3 text-sm font-extrabold text-slate-800">{title}</p>
-                      <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{body}</p>
-                    </div>
-                  ))}
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              {[
+                ["1", "탭 선택", "강사/학생 기준으로 대상 시야를 먼저 고릅니다."],
+                ["2", "노션 반영", "붙여넣은 텍스트를 미리보기로 검수하고 수정합니다."],
+                ["3", "DB 저장", "검토한 시간표를 그룹과 함께 서버에 저장합니다."]
+              ].map(([step, title, body]) => (
+                <div key={step} className="rounded-3xl border border-white/55 bg-white/42 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500 text-sm font-black text-white">{step}</div>
+                  <p className="mt-4 text-lg font-black text-slate-800">{title}</p>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{body}</p>
                 </div>
+              ))}
+            </div>
 
-                <div className="mt-5 rounded-3xl border border-white/70 bg-white/50 p-4">
-                  <p className="text-sm font-extrabold text-slate-800">실무 체크 포인트</p>
-                  <div className="mt-3 space-y-2">
-                    {[
-                      "강사 탭은 조회 중심입니다. 학생 탭에서만 실제 드래그 이동이 가능합니다.",
-                      "노션 붙여넣기 후 '시간표에 반영'으로 미리보고, 필요하면 '되돌리기'로 직전 상태를 복구할 수 있습니다.",
-                      "우측의 저장된 시간표 그룹은 주간 버전 관리 용도이며, 삭제 전에는 전용 확인 창이 표시됩니다."
-                    ].map((item, index) => (
-                      <div key={item} className="flex items-start gap-3 rounded-2xl bg-white/55 px-3 py-2">
-                        <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">
-                          {index + 1}
-                        </span>
-                        <p className="text-xs font-semibold leading-5 text-slate-600">{item}</p>
-                      </div>
-                    ))}
+            <div className="mt-6 rounded-[28px] border border-white/55 bg-white/35 p-5">
+              <p className="text-lg font-black text-slate-800">실무 체크 포인트</p>
+              <div className="mt-4 space-y-3">
+                {[
+                  "강사 탭은 조회 중심이며, 실제 드래그 이동은 학생 탭에서만 수행합니다.",
+                  "노션 붙여넣기 후 '시간표에 반영'으로 미리보고, 필요하면 '되돌리기'로 직전 상태를 복구할 수 있습니다.",
+                  "저장된 시간표 그룹은 주간 버전 관리용이며, 삭제 전에는 전용 확인 UI가 표시됩니다."
+                ].map((item, index) => (
+                  <div key={item} className="flex items-start gap-3 rounded-2xl bg-white/45 px-4 py-3">
+                    <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[11px] font-black text-white">
+                      {index + 1}
+                    </span>
+                    <p className="text-sm font-semibold leading-6 text-slate-600">{item}</p>
                   </div>
-                </div>
-              </div>
-
-              <div className="rounded-[28px] border border-white/70 bg-[linear-gradient(160deg,rgba(30,64,175,0.90),rgba(37,99,235,0.80),rgba(14,165,233,0.62))] p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/70">Quick Infographic</p>
-                <div className="mt-4 rounded-3xl border border-white/20 bg-white/10 p-4">
-                  <div className="grid grid-cols-[72px_1fr] gap-2 text-[11px] font-semibold text-white/85">
-                    <div className="rounded-xl bg-white/12 px-3 py-2 text-center">시간</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-xl bg-white/12 px-3 py-2 text-center">강사</div>
-                      <div className="rounded-xl bg-white/12 px-3 py-2 text-center">학생</div>
-                      <div className="rounded-xl bg-white/12 px-3 py-2 text-center">저장</div>
-                    </div>
-                    {[
-                      ["10-11", "조회", "편집", "저장"],
-                      ["11-12", "검색", "드래그", "그룹"],
-                      ["12-13", "검토", "반영", "복원"]
-                    ].map((row) => (
-                      <Fragment key={row.join("-")}>
-                        <div className="rounded-xl bg-white/10 px-3 py-3 text-center">{row[0]}</div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="rounded-xl bg-emerald-300/18 px-3 py-3 text-center">{row[1]}</div>
-                          <div className="rounded-xl bg-sky-300/18 px-3 py-3 text-center">{row[2]}</div>
-                          <div className="rounded-xl bg-amber-300/18 px-3 py-3 text-center">{row[3]}</div>
-                        </div>
-                      </Fragment>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-3xl border border-white/20 bg-white/10 p-4">
-                    <p className="text-xs font-bold text-white/75">주요 버튼</p>
-                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
-                      <span className="rounded-full bg-white/18 px-3 py-1">노션 붙여넣기 복사</span>
-                      <span className="rounded-full bg-white/18 px-3 py-1">시간표에 반영</span>
-                      <span className="rounded-full bg-white/18 px-3 py-1">DB 저장</span>
-                      <span className="rounded-full bg-white/18 px-3 py-1">되돌리기</span>
-                    </div>
-                  </div>
-                  <div className="rounded-3xl border border-white/20 bg-white/10 p-4">
-                    <p className="text-xs font-bold text-white/75">권장 순서</p>
-                    <p className="mt-3 text-sm font-semibold leading-6 text-white/90">
-                      검색으로 대상 확인 → 노션 반영 → 미리보기 검토 → 저장 또는 그룹 관리
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowIntroPage(false)}
-                  className="mt-5 w-full rounded-3xl border border-white/35 bg-[linear-gradient(135deg,rgba(255,255,255,0.75),rgba(255,255,255,0.18))] px-4 py-3 text-sm font-black text-slate-900 shadow-[0_18px_42px_rgba(15,23,42,0.22)]"
-                >
-                  시간표 화면 열기
-                </button>
+                ))}
               </div>
             </div>
           </div>
-        </div>
+
+          <div className="rounded-[32px] border border-white/45 bg-[linear-gradient(160deg,rgba(37,99,235,0.88),rgba(59,130,246,0.78),rgba(103,232,249,0.45))] p-6 text-white shadow-xl shadow-blue-500/20 backdrop-blur-md">
+            <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/70">Quick Infographic</p>
+            <div className="mt-5 rounded-[28px] border border-white/20 bg-white/10 p-5">
+              <div className="grid grid-cols-[80px_1fr] gap-3 text-[11px] font-bold text-white/85">
+                <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">시간</div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">강사</div>
+                  <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">학생</div>
+                  <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">저장</div>
+                </div>
+                {[
+                  ["10-11", "조회", "편집", "저장"],
+                  ["11-12", "검색", "드래그", "그룹"],
+                  ["12-13", "검토", "반영", "복원"]
+                ].map((row) => (
+                  <Fragment key={row.join("-")}>
+                    <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[0]}</div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[1]}</div>
+                      <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[2]}</div>
+                      <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[3]}</div>
+                    </div>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <div className="rounded-[26px] border border-white/20 bg-white/10 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/65">주요 버튼</p>
+                <div className="mt-4 space-y-3 text-sm font-semibold text-white/90">
+                  <p>노션 붙여넣기 복사</p>
+                  <p>시간표에 반영</p>
+                  <p>DB 저장</p>
+                  <p>되돌리기</p>
+                </div>
+              </div>
+              <div className="rounded-[26px] border border-white/20 bg-white/10 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/65">권장 순서</p>
+                <p className="mt-4 text-sm font-semibold leading-7 text-white/90">
+                  검색으로 대상 확인 → 노션 반영 → 미리보기 검토 → 저장 또는 그룹 관리
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-[26px] border border-white/20 bg-white/10 p-4">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/65">바로 시작</p>
+              <p className="mt-3 text-sm font-semibold leading-7 text-white/90">
+                홈화면에서 전체 흐름을 확인한 뒤, 아래 버튼으로 실제 시간표 작업 화면으로 이동하세요.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowIntroPage(false)}
+                className="mt-5 w-full rounded-3xl border border-white/35 bg-white/80 px-4 py-3 text-sm font-black text-slate-900 shadow-lg shadow-slate-900/10"
+              >
+                시간표 작업 시작
+              </button>
+            </div>
+          </div>
+        </section>
       ) : null}
 
       {importProgress.active ? (
