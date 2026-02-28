@@ -181,12 +181,17 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                 const entries = eventMap.get(cellKey) ?? [];
                 const isEmpty = entries.length === 0;
                 const isDropTarget = dragOverCell === cellKey;
+                const isActiveDay = activeDaySet.has(day.key);
 
                 return (
                   <td
                     key={cellKey}
                     className={`border-b border-r align-top transition ${
-                      isDropTarget ? "border-sky-300 bg-sky-50/50" : "border-slate-100 bg-white"
+                      isDropTarget
+                        ? "border-sky-300 bg-sky-100/80"
+                        : isActiveDay
+                          ? "border-sky-100 bg-[linear-gradient(180deg,rgba(239,246,255,0.95)_0%,rgba(248,250,252,0.98)_100%)]"
+                          : "border-slate-100 bg-white"
                     }`}
                     style={undefined}
                     onClick={() => {
@@ -226,7 +231,9 @@ export function TimetableGrid({ roleView, days, timeSlots, events, highlightCell
                           className={`min-h-[46px] rounded-md border border-dashed transition ${
                             isDropTarget
                               ? "border-sky-400 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]"
-                              : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                              : isActiveDay
+                                ? "border-transparent bg-transparent hover:border-sky-200 hover:bg-white/55"
+                                : "border-transparent hover:border-slate-200 hover:bg-slate-50"
                           }`}
                         />
                       ) : (

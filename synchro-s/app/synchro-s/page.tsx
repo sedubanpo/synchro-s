@@ -1427,19 +1427,45 @@ export default function SynchroSPage() {
     setError(null);
 
     const normalize = (value: string) => value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
+    const instructorIndex = instructors.map((entry) => ({
+      id: entry.id,
+      token: normalize(entry.name)
+    }));
+    const instructorExactMap = new Map(instructorIndex.map((entry) => [entry.token, entry.id]));
+    const subjectResolutionCache = new Map<string, SubjectOptionWithColor | null>();
+    const classTypeResolutionCache = new Map<string, ClassTypeOption | null>();
     const findInstructorId = (name: string): string => {
       const aliased = normalizeInstructorAlias(name);
       const target = normalize(aliased);
       if (!target) return "";
-      const exact = instructors.find((entry) => normalize(entry.name) === target);
-      if (exact) return exact.id;
-      const partial = instructors.find((entry) => normalize(entry.name).includes(target) || target.includes(normalize(entry.name)));
+      const exact = instructorExactMap.get(target);
+      if (exact) return exact;
+      const partial = instructorIndex.find((entry) => entry.token.includes(target) || target.includes(entry.token));
       return partial?.id ?? "";
+    };
+    const resolveSubjectCached = (rawLabel: string) => {
+      const key = normalize(rawLabel);
+      if (subjectResolutionCache.has(key)) {
+        return subjectResolutionCache.get(key) ?? undefined;
+      }
+      const resolved = resolveSubjectOption(rawLabel, subjects) ?? null;
+      subjectResolutionCache.set(key, resolved);
+      return resolved ?? undefined;
+    };
+    const resolveClassTypeCached = (rawLabel: string) => {
+      const key = normalize(rawLabel);
+      if (classTypeResolutionCache.has(key)) {
+        return classTypeResolutionCache.get(key) ?? undefined;
+      }
+      const resolved = resolveClassTypeOption(rawLabel, classTypes) ?? null;
+      classTypeResolutionCache.set(key, resolved);
+      return resolved ?? undefined;
     };
     let created = 0;
     let existing = 0;
     let skipped = 0;
     const importedClassIds: string[] = [];
+    const memoUpdates: Record<string, string> = {};
     const conflictDetails: string[] = [];
     const noSubjectDetails: string[] = [];
     const skipReasons: Record<string, number> = {
@@ -1452,94 +1478,136 @@ export default function SynchroSPage() {
     };
 
     try {
+      const preparedItems: { item: ParsedNotionItem; payload: ScheduleFormInput }[] = [];
+
       for (let idx = 0; idx < parsedNotionItems.length; idx += 1) {
         const item = parsedNotionItems[idx] as ParsedNotionItem;
-      const subject = resolveSubjectOption(item.subjectLabel, subjects);
-      const classType = resolveClassTypeOption(item.classTypeLabel, classTypes);
+        const subject = resolveSubjectCached(item.subjectLabel);
+        const classType = resolveClassTypeCached(item.classTypeLabel);
 
-      let instructorId = "";
-      if (item.instructorName) {
-        instructorId = findInstructorId(item.instructorName);
-      } else {
-        instructorId = selectedInstructorId;
-      }
+        const instructorId = item.instructorName ? findInstructorId(item.instructorName) : selectedInstructorId;
+        const studentIds: string[] = selectedStudentId ? [selectedStudentId] : [];
 
-      const studentIds: string[] = selectedStudentId ? [selectedStudentId] : [];
-
-      if (!instructorId) {
-        skipped += 1;
-        skipReasons.noInstructor += 1;
-        continue;
-      }
-      if (studentIds.length === 0) {
-        skipped += 1;
-        skipReasons.noStudent += 1;
-        continue;
-      }
-      if (!subject) {
-        skipped += 1;
-        skipReasons.noSubject += 1;
-        const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
-        noSubjectDetails.push(`${weekdayLabel} ${toKoreanHourRange(item.startTime)} (${item.rawText})`);
-        setImportProgress((prev) => ({ ...prev, done: idx + 1 }));
-        continue;
-      }
-      if (!classType) {
-        skipped += 1;
-        skipReasons.noClassType += 1;
-        setImportProgress((prev) => ({ ...prev, done: idx + 1 }));
-        continue;
-      }
-
-      const payload: ScheduleFormInput = {
-        instructorId,
-        studentIds,
-        subjectCode: subject.code,
-        classTypeCode: classType.code,
-        note: item.note?.trim() || item.rawText,
-        scheduleMode: "recurring",
-        weekday: item.weekday,
-        activeFrom: weekStart,
-        startTime: item.startTime,
-        endTime: item.endTime
-      };
-
-      const createRes = await fetch("/api/schedules/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (createRes.ok) {
-        const result = (await createRes.json().catch(() => ({}))) as { status?: string; classId?: string };
-        if (result.classId) {
-          importedClassIds.push(result.classId);
-          setMemoByEventId((prev) => ({ ...prev, [result.classId as string]: payload.note }));
+        if (!instructorId) {
+          skipped += 1;
+          skipReasons.noInstructor += 1;
+          continue;
         }
-        if (result.status === "existing") {
-          existing += 1;
-        } else {
-          created += 1;
+        if (studentIds.length === 0) {
+          skipped += 1;
+          skipReasons.noStudent += 1;
+          continue;
         }
-      } else if (createRes.status === 409) {
-        skipped += 1;
-        skipReasons.conflict += 1;
-        const conflictResult = (await createRes.json().catch(() => ({}))) as {
-          conflict?: { conflicts?: { reason?: string; classId?: string }[] };
+        if (!subject) {
+          skipped += 1;
+          skipReasons.noSubject += 1;
+          const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
+          noSubjectDetails.push(`${weekdayLabel} ${toKoreanHourRange(item.startTime)} (${item.rawText})`);
+          continue;
+        }
+        if (!classType) {
+          skipped += 1;
+          skipReasons.noClassType += 1;
+          continue;
+        }
+
+        preparedItems.push({
+          item,
+          payload: {
+            instructorId,
+            studentIds,
+            subjectCode: subject.code,
+            classTypeCode: classType.code,
+            note: item.note?.trim() || item.rawText,
+            scheduleMode: "recurring",
+            weekday: item.weekday,
+            activeFrom: weekStart,
+            startTime: item.startTime,
+            endTime: item.endTime
+          }
+        });
+      }
+
+      let processedCount = skipped;
+      setImportProgress((prev) => ({ ...prev, done: processedCount }));
+
+      const batchSize = 12;
+      for (let idx = 0; idx < preparedItems.length; idx += batchSize) {
+        const batch = preparedItems.slice(idx, idx + batchSize);
+        const createRes = await fetch("/api/schedules/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: batch.map((entry) => entry.payload)
+          })
+        });
+
+        if (createRes.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        const payload = (await createRes.json().catch(() => ({}))) as {
+          error?: string;
+          results?: {
+            status?: string;
+            classId?: string;
+            conflict?: { conflicts?: { reason?: string; classId?: string }[] };
+          }[];
         };
-        const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
-        const slotLabel = `${weekdayLabel} ${toKoreanHourRange(item.startTime)}`;
-        const conflictReason =
-          conflictResult.conflict?.conflicts?.map((conflict) => conflict.reason).filter(Boolean).join(", ") ??
-          "시간표 충돌";
-        conflictDetails.push(`- ${slotLabel} (${item.rawText}): ${conflictReason}`);
-      } else {
-        skipped += 1;
-        skipReasons.requestFailed += 1;
+
+        if (!createRes.ok) {
+          throw new Error(payload.error ?? "시간표 저장 요청에 실패했습니다.");
+        }
+
+        const results = Array.isArray(payload.results) ? payload.results : [];
+
+        batch.forEach((entry, batchIndex) => {
+          const result = results[batchIndex];
+          if (!result) {
+            skipped += 1;
+            skipReasons.requestFailed += 1;
+            return;
+          }
+
+          if (result.classId) {
+            importedClassIds.push(result.classId);
+            memoUpdates[result.classId] = entry.payload.note;
+          }
+
+          if (result.status === "existing") {
+            existing += 1;
+            return;
+          }
+
+          if (result.status === "conflict") {
+            skipped += 1;
+            skipReasons.conflict += 1;
+            const weekdayLabel = DAYS.find((day) => day.key === entry.item.weekday)?.label ?? String(entry.item.weekday);
+            const slotLabel = `${weekdayLabel} ${toKoreanHourRange(entry.item.startTime)}`;
+            const conflictReason =
+              result.conflict?.conflicts?.map((conflict) => conflict.reason).filter(Boolean).join(", ") ?? "시간표 충돌";
+            conflictDetails.push(`- ${slotLabel} (${entry.item.rawText}): ${conflictReason}`);
+            return;
+          }
+
+          if (result.status === "created" || result.status === "enrolled") {
+            created += 1;
+            return;
+          }
+
+          skipped += 1;
+          skipReasons.requestFailed += 1;
+        });
+
+        processedCount += batch.length;
+        setImportProgress((prev) => ({ ...prev, done: processedCount }));
       }
 
-        setImportProgress((prev) => ({ ...prev, done: idx + 1 }));
-    }
+      if (Object.keys(memoUpdates).length > 0) {
+        setMemoByEventId((prev) => ({ ...prev, ...memoUpdates }));
+      }
+
       const reasonLine = Object.entries(skipReasons)
         .filter(([, count]) => count > 0)
         .map(([key, count]) => `${key}:${count}`)
@@ -1614,13 +1682,13 @@ export default function SynchroSPage() {
     classTypes,
     instructors,
     loadWeek,
+    moveToLogin,
     parsedNotionItems,
     selectedInstructorId,
     selectedStudentId,
     subjects,
     currentTargetId,
     currentTargetLabel,
-    draftEvents,
     displayEvents,
     roleView,
     weekStart
