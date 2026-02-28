@@ -3001,7 +3001,7 @@ export default function SynchroSPage() {
                   {overviewInstructorGroups.map((group) => (
                     <div
                       key={`overview-subject-${group.subject}`}
-                      className="rounded-2xl border border-white/60 bg-white/55 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
+                      className="rounded-2xl border border-white/60 bg-white/55 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
                     >
                       <div className="flex items-center gap-2">
                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
@@ -3009,7 +3009,7 @@ export default function SynchroSPage() {
                         </span>
                         <span className="text-[11px] font-semibold text-slate-400">{group.items.length}명</span>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
                         {group.items.map((instructor) => {
                           const active = instructor.id === selectedInstructorId;
                           return (
@@ -3017,10 +3017,10 @@ export default function SynchroSPage() {
                               key={`overview-chip-${instructor.id}`}
                               type="button"
                               onClick={() => setSelectedInstructorId(instructor.id)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                              className={`rounded-2xl border px-3 py-1.5 text-sm font-black leading-none transition ${
                                 active
                                   ? "border-sky-300 bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
-                                  : "border-white/70 bg-white/80 text-slate-600 hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
+                                  : "border-slate-200/80 bg-white/88 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
                               }`}
                             >
                               {instructor.name}
@@ -3060,17 +3060,21 @@ export default function SynchroSPage() {
                 <div className="mt-4 rounded-2xl border border-white/60 bg-white/60 p-4">
                   <p className="text-xs font-bold text-slate-500">이번 주 배치 수업</p>
                   <p className="mt-2 text-3xl font-black text-slate-900">{displayEvents.length}개</p>
-                  <p className="mt-2 text-xs font-semibold text-slate-500">심플 뷰 기준으로 동일 시간대는 점 형태로 압축 표시됩니다.</p>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">심플 뷰 기준으로 동일 시간대는 유형 배지를 중앙에 압축 표시합니다.</p>
                 </div>
                 <div className="mt-4 rounded-2xl border border-white/60 bg-white/55 p-4">
                   <p className="text-xs font-bold text-slate-500">범례</p>
                   <div className="mt-3 space-y-2">
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <span className="h-3.5 w-3.5 rounded-full bg-green-400/80" />
+                      <span className="inline-flex min-h-[26px] items-center justify-center rounded-full border border-green-200/70 bg-green-500/80 px-2.5 py-1 text-[11px] font-black text-white">
+                        1:1
+                      </span>
                       1:1 / 2:1 수업
                     </div>
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <span className="h-3.5 w-3.5 rounded-full bg-blue-400/80" />
+                      <span className="inline-flex min-h-[26px] items-center justify-center rounded-full border border-blue-200/70 bg-blue-500/80 px-2.5 py-1 text-[11px] font-black text-white">
+                        개별정규
+                      </span>
                       개별정규 및 다대일 수업
                     </div>
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">

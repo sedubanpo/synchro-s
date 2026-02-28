@@ -54,6 +54,14 @@ function isStrictDotClass(event: ScheduleEvent): boolean {
   );
 }
 
+function summaryBadgeText(event: ScheduleEvent): string {
+  const raw = event.badgeText?.replace(/^\[|\]$/g, "").trim();
+  if (raw) {
+    return raw;
+  }
+  return event.classTypeLabel;
+}
+
 export function TimetableGrid({
   roleView,
   days,
@@ -304,15 +312,19 @@ export function TimetableGrid({
                         />
                       ) : (
                         viewMode === "summary" ? (
-                          <div className="flex min-h-[46px] flex-wrap items-center gap-1.5 px-1 py-2">
+                          <div className="flex min-h-[46px] flex-wrap items-center justify-center gap-1.5 px-1 py-2">
                             {entries.map((event) => (
-                              <div
+                              <span
                                 key={`${event.id}-${event.classDate}`}
                                 title={`${event.instructorName} · ${event.classTypeLabel} · ${event.studentNames.join(", ")}`}
-                                className={`h-3.5 w-3.5 rounded-full border border-white/70 shadow-[0_2px_10px_rgba(148,163,184,0.25)] ${
-                                  isStrictDotClass(event) ? "bg-green-400/80" : "bg-blue-400/80"
+                                className={`inline-flex min-h-[28px] items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.02em] text-white shadow-[0_6px_18px_rgba(148,163,184,0.18)] ${
+                                  isStrictDotClass(event)
+                                    ? "border-green-200/70 bg-green-500/80"
+                                    : "border-blue-200/70 bg-blue-500/80"
                                 }`}
-                              />
+                              >
+                                {summaryBadgeText(event)}
+                              </span>
                             ))}
                           </div>
                         ) : (
