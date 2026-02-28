@@ -109,6 +109,8 @@ type UndoState = {
   };
 };
 
+const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
+
 function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
   return items.map((item) => ({
     ...item,
@@ -517,6 +519,17 @@ function isStrictConflictClassType(code: string, label?: string): boolean {
     normalizedLabel.includes(normalizeLookupToken("2:1")) ||
     normalizedLabel.includes(normalizeLookupToken("2대1"))
   );
+}
+
+function hasMixedClassTypeConflict(
+  current: { classTypeCode: string; classTypeLabel?: string },
+  other: { classTypeCode: string; classTypeLabel?: string }
+): boolean {
+  return isStrictConflictClassType(current.classTypeCode, current.classTypeLabel) !== isStrictConflictClassType(other.classTypeCode, other.classTypeLabel);
+}
+
+function conflictIncludesMixedTypeRule(conflict: ConflictResult): boolean {
+  return conflict.conflicts.some((item) => item.reason.includes(MIXED_CLASS_TYPE_CONFLICT_MESSAGE));
 }
 
 export default function SynchroSPage() {
@@ -1260,12 +1273,33 @@ export default function SynchroSPage() {
         normalizedInput.scheduleMode === "recurring"
           ? (normalizedInput.weekday as Weekday)
           : dayOf(normalizedInput.classDate as string);
+      const immediateOverlap = events.find(
+        (event) =>
+          event.instructorId === normalizedInput.instructorId &&
+          event.weekday === targetWeekday &&
+          hasTimeOverlap(normalizedInput.startTime, normalizedInput.endTime, event.startTime, event.endTime) &&
+          hasMixedClassTypeConflict(
+            {
+              classTypeCode: normalizedInput.classTypeCode
+            },
+            event
+          )
+      );
 
       if (getInstructorDaysOff(normalizedInput.instructorId).includes(targetWeekday)) {
         setConflictDialog({
           open: true,
           title: "휴무일 안내",
           message: "해당 강사의 휴무일입니다"
+        });
+        return;
+      }
+
+      if (immediateOverlap) {
+        setConflictDialog({
+          open: true,
+          title: "혼합 배정 불가",
+          message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
         });
         return;
       }
@@ -1297,6 +1331,14 @@ export default function SynchroSPage() {
       const conflict = (await conflictRes.json()) as ConflictResult;
 
       if (conflict.hasConflict) {
+        if (conflictIncludesMixedTypeRule(conflict)) {
+          setConflictDialog({
+            open: true,
+            title: "혼합 배정 불가",
+            message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+          });
+          return;
+        }
         throw new Error(`시간표 충돌이 발견되었습니다.\n${getConflictMessage(conflict)}`);
       }
 
@@ -1313,6 +1355,14 @@ export default function SynchroSPage() {
 
       if (createRes.status === 409) {
         const payload = (await createRes.json()) as { conflict: ConflictResult };
+        if (conflictIncludesMixedTypeRule(payload.conflict)) {
+          setConflictDialog({
+            open: true,
+            title: "혼합 배정 불가",
+            message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+          });
+          return;
+        }
         throw new Error(`시간표 충돌로 저장이 차단되었습니다.\n${getConflictMessage(payload.conflict)}`);
       }
 
@@ -1336,7 +1386,7 @@ export default function SynchroSPage() {
 
       await loadWeek();
     },
-    [getInstructorDaysOff, initialCell?.weekday, loadWeek, moveToLogin, weekStart]
+    [events, getInstructorDaysOff, initialCell?.weekday, loadWeek, moveToLogin, weekStart]
   );
 
   const handleMoveSchedule = useCallback(
@@ -1431,6 +1481,14 @@ export default function SynchroSPage() {
             if (!hasTimeOverlap(ctx.startTime, ctx.endTime, other.startTime, other.endTime)) continue;
             const movingIsStrict = isStrictConflictClassType(targetEvent.classTypeCode, targetEvent.classTypeLabel);
             const existingIsStrict = isStrictConflictClassType(other.classTypeCode, other.classTypeLabel);
+            if (movingIsStrict !== existingIsStrict) {
+              setConflictDialog({
+                open: true,
+                title: "혼합 배정 불가",
+                message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+              });
+              return;
+            }
             if (!(movingIsStrict && existingIsStrict)) continue;
 
             const dayLabel = DAYS.find((day) => day.key === ctx.weekday)?.label ?? `${ctx.weekday}`;
@@ -1536,6 +1594,14 @@ export default function SynchroSPage() {
         if (res.status === 409) {
           const payload = (await res.json()) as { conflict: ConflictResult };
           rollbackMove();
+          if (conflictIncludesMixedTypeRule(payload.conflict)) {
+            setConflictDialog({
+              open: true,
+              title: "혼합 배정 불가",
+              message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+            });
+            return;
+          }
           const activeStudentGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
           const readable = getConflictMessageForDisplay(payload.conflict, activeStudentGroups, students);
           const msg = `드래그 이동 충돌:\n${readable || getConflictMessage(payload.conflict)}`;

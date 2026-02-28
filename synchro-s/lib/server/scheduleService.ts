@@ -60,6 +60,7 @@ const CLASS_SELECT =
   "id,schedule_mode,instructor_id,subject_code,class_type_code,weekday,class_date,start_time,end_time,active_from,active_to,progress_status,created_at,instructors(id,instructor_name),subjects(code,display_name,tailwind_bg_class),class_types(code,display_name,badge_text,max_students)";
 
 export const INSTRUCTOR_DAY_OFF_MESSAGE = "해당 강사의 휴무일입니다.";
+export const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 
 function normalizeDaysOff(values: unknown): number[] {
   if (!Array.isArray(values)) {
@@ -201,9 +202,18 @@ function resolveCompatibility(
   existingType: string
 ): { isCompatible: boolean; reason: string } {
   const isStrictType = (code: string) => code === "ONE_TO_ONE" || code === "TWO_TO_ONE";
+  const candidateIsStrict = isStrictType(candidateType);
+  const existingIsStrict = isStrictType(existingType);
   // Business rule: 다대일(개별/개별정규/특강 등)은 시간 중복 허용.
-  // 충돌 차단은 1:1, 2:1 수업끼리 겹칠 때만 적용한다.
-  if (!isStrictType(candidateType) || !isStrictType(existingType)) {
+  // 단, 1:1 / 2:1 과 다대일 수업은 같은 시간에 혼합 배정할 수 없다.
+  if (candidateIsStrict !== existingIsStrict) {
+    return {
+      isCompatible: false,
+      reason: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+    };
+  }
+
+  if (!candidateIsStrict && !existingIsStrict) {
     return {
       isCompatible: true,
       reason: "multi-class overlap allowed"
