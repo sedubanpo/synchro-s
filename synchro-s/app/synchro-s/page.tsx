@@ -18,7 +18,7 @@ import type {
   Weekday
 } from "@/types/schedule";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type SubjectOptionWithColor = SubjectOption & { tailwindClass?: string };
 
@@ -75,6 +75,13 @@ type ConflictDialogState = {
   open: boolean;
   title: string;
   message: string;
+};
+
+type DeleteGroupDialogState = {
+  open: boolean;
+  groupId: string | null;
+  groupName: string;
+  submitting: boolean;
 };
 
 type SubjectSettingItem = {
@@ -526,6 +533,7 @@ export default function SynchroSPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<string>(monthStart(mondayOfCurrentWeek()));
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [showIntroPage, setShowIntroPage] = useState(true);
   const [showStudentPicker, setShowStudentPicker] = useState(false);
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
@@ -558,6 +566,12 @@ export default function SynchroSPage() {
     open: false,
     title: "",
     message: ""
+  });
+  const [deleteGroupDialog, setDeleteGroupDialog] = useState<DeleteGroupDialogState>({
+    open: false,
+    groupId: null,
+    groupName: "",
+    submitting: false
   });
   const movingLockRef = useRef(false);
   const importingNotionRef = useRef(false);
@@ -815,6 +829,13 @@ export default function SynchroSPage() {
   const moveToLogin = useCallback(() => {
     router.replace(`/login?next=${encodeURIComponent("/synchro-s")}`);
   }, [router]);
+
+  const handleRoleViewChange = useCallback((next: RoleView) => {
+    setRoleView(next);
+    setSearchKeyword("");
+    setShowStudentPicker(false);
+    setShowInstructorPicker(false);
+  }, []);
 
   const buildUndoState = useCallback(
     (label: string, restoreMove?: UndoState["restoreMove"]): UndoState => ({
@@ -1884,12 +1905,26 @@ export default function SynchroSPage() {
     setNotice("선택한 그룹 시간표를 표시했습니다.");
   }, [filteredEvents]);
 
+  const handleOpenDeleteGroupDialog = useCallback(
+    (groupId: string) => {
+      const targetGroup = timetableGroups.find((group) => group.id === groupId);
+      if (!targetGroup) return;
+      setDeleteGroupDialog({
+        open: true,
+        groupId,
+        groupName: targetGroup.name,
+        submitting: false
+      });
+    },
+    [timetableGroups]
+  );
+
   const handleDeleteGroup = useCallback(
     async (groupId: string) => {
       const targetGroup = timetableGroups.find((group) => group.id === groupId);
       if (!targetGroup) return;
-      const confirmed = window.confirm(`'${targetGroup.name}' 그룹을 삭제할까요?`);
-      if (!confirmed) return;
+
+      setDeleteGroupDialog((prev) => ({ ...prev, submitting: true }));
 
       try {
         const res = await fetch("/api/schedules/group", {
@@ -1903,6 +1938,7 @@ export default function SynchroSPage() {
         });
 
         if (res.status === 401) {
+          setDeleteGroupDialog({ open: false, groupId: null, groupName: "", submitting: false });
           moveToLogin();
           return;
         }
@@ -1912,10 +1948,12 @@ export default function SynchroSPage() {
           throw new Error(payload.error ?? "시간표 삭제에 실패했습니다.");
         }
       } catch (deleteError) {
+        setDeleteGroupDialog((prev) => ({ ...prev, submitting: false }));
         setError(deleteError instanceof Error ? deleteError.message : "시간표 삭제에 실패했습니다.");
         return;
       }
 
+      setDeleteGroupDialog({ open: false, groupId: null, groupName: "", submitting: false });
       setTimetableGroups((prev) => {
         const next = prev.filter((group) => group.id !== groupId);
         const sameScope = next
@@ -2100,7 +2138,14 @@ export default function SynchroSPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <RoleTabs value={roleView} onChange={setRoleView} />
+            <button
+              type="button"
+              onClick={() => setShowIntroPage(true)}
+              className="rounded-lg border border-white/70 bg-white/55 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white/80"
+            >
+              앱 소개
+            </button>
+            <RoleTabs value={roleView} onChange={handleRoleViewChange} />
             <button
               type="button"
               onClick={() => void handleLogout()}
@@ -2487,7 +2532,7 @@ export default function SynchroSPage() {
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void handleDeleteGroup(group.id);
+                          handleOpenDeleteGroupDialog(group.id);
                         }}
                         className="rounded-md border border-rose-200/50 bg-rose-400/20 px-2 py-1 text-[11px] font-semibold text-rose-100 hover:bg-rose-400/35"
                       >
@@ -2535,6 +2580,111 @@ export default function SynchroSPage() {
         </aside>
       </section>
 
+      {showIntroPage ? (
+        <div className="fixed inset-0 z-[360] flex items-center justify-center bg-[radial-gradient(circle_at_top_right,rgba(125,211,252,0.22),transparent_30%),rgba(15,23,42,0.38)] p-4 backdrop-blur-xl">
+          <div className="w-full max-w-5xl overflow-hidden rounded-[32px] border border-white/65 bg-[linear-gradient(145deg,rgba(255,255,255,0.84),rgba(224,242,254,0.78),rgba(219,234,254,0.72))] p-6 shadow-[0_30px_90px_rgba(15,23,42,0.32)] backdrop-blur-2xl">
+            <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <div>
+                <div className="inline-flex rounded-full border border-sky-200 bg-white/70 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.25em] text-sky-700">
+                  Synchro-S Guide
+                </div>
+                <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-900">시간표 입력, 그룹 관리, 저장 흐름을 한 화면에서 정리합니다.</h2>
+                <p className="mt-3 text-sm font-medium leading-6 text-slate-600">
+                  이 화면은 강사/학생 시간표 조회, 노션 붙여넣기 반영, DB 저장, 그룹 버전 관리까지 빠르게 처리하도록 설계되어 있습니다.
+                  실무자는 먼저 아래 흐름을 확인한 뒤 실제 편집 화면으로 진입하면 됩니다.
+                </p>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {[
+                    ["1", "탭 선택", "강사/학생 기준으로 대상 시간표를 전환합니다."],
+                    ["2", "노션 반영", "붙여넣은 텍스트를 미리보기로 확인하고 수정합니다."],
+                    ["3", "DB 저장", "검토한 시간표를 그룹과 함께 서버에 저장합니다."]
+                  ].map(([step, title, body]) => (
+                    <div key={step} className="rounded-2xl border border-white/70 bg-white/55 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-sky-500 text-sm font-black text-white">{step}</div>
+                      <p className="mt-3 text-sm font-extrabold text-slate-800">{title}</p>
+                      <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{body}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-3xl border border-white/70 bg-white/50 p-4">
+                  <p className="text-sm font-extrabold text-slate-800">실무 체크 포인트</p>
+                  <div className="mt-3 space-y-2">
+                    {[
+                      "강사 탭은 조회 중심입니다. 학생 탭에서만 실제 드래그 이동이 가능합니다.",
+                      "노션 붙여넣기 후 '시간표에 반영'으로 미리보고, 필요하면 '되돌리기'로 직전 상태를 복구할 수 있습니다.",
+                      "우측의 저장된 시간표 그룹은 주간 버전 관리 용도이며, 삭제 전에는 전용 확인 창이 표시됩니다."
+                    ].map((item, index) => (
+                      <div key={item} className="flex items-start gap-3 rounded-2xl bg-white/55 px-3 py-2">
+                        <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">
+                          {index + 1}
+                        </span>
+                        <p className="text-xs font-semibold leading-5 text-slate-600">{item}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-white/70 bg-[linear-gradient(160deg,rgba(30,64,175,0.90),rgba(37,99,235,0.80),rgba(14,165,233,0.62))] p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-white/70">Quick Infographic</p>
+                <div className="mt-4 rounded-3xl border border-white/20 bg-white/10 p-4">
+                  <div className="grid grid-cols-[72px_1fr] gap-2 text-[11px] font-semibold text-white/85">
+                    <div className="rounded-xl bg-white/12 px-3 py-2 text-center">시간</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl bg-white/12 px-3 py-2 text-center">강사</div>
+                      <div className="rounded-xl bg-white/12 px-3 py-2 text-center">학생</div>
+                      <div className="rounded-xl bg-white/12 px-3 py-2 text-center">저장</div>
+                    </div>
+                    {[
+                      ["10-11", "조회", "편집", "저장"],
+                      ["11-12", "검색", "드래그", "그룹"],
+                      ["12-13", "검토", "반영", "복원"]
+                    ].map((row) => (
+                      <Fragment key={row.join("-")}>
+                        <div className="rounded-xl bg-white/10 px-3 py-3 text-center">{row[0]}</div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-xl bg-emerald-300/18 px-3 py-3 text-center">{row[1]}</div>
+                          <div className="rounded-xl bg-sky-300/18 px-3 py-3 text-center">{row[2]}</div>
+                          <div className="rounded-xl bg-amber-300/18 px-3 py-3 text-center">{row[3]}</div>
+                        </div>
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-3xl border border-white/20 bg-white/10 p-4">
+                    <p className="text-xs font-bold text-white/75">주요 버튼</p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
+                      <span className="rounded-full bg-white/18 px-3 py-1">노션 붙여넣기 복사</span>
+                      <span className="rounded-full bg-white/18 px-3 py-1">시간표에 반영</span>
+                      <span className="rounded-full bg-white/18 px-3 py-1">DB 저장</span>
+                      <span className="rounded-full bg-white/18 px-3 py-1">되돌리기</span>
+                    </div>
+                  </div>
+                  <div className="rounded-3xl border border-white/20 bg-white/10 p-4">
+                    <p className="text-xs font-bold text-white/75">권장 순서</p>
+                    <p className="mt-3 text-sm font-semibold leading-6 text-white/90">
+                      검색으로 대상 확인 → 노션 반영 → 미리보기 검토 → 저장 또는 그룹 관리
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowIntroPage(false)}
+                  className="mt-5 w-full rounded-3xl border border-white/35 bg-[linear-gradient(135deg,rgba(255,255,255,0.75),rgba(255,255,255,0.18))] px-4 py-3 text-sm font-black text-slate-900 shadow-[0_18px_42px_rgba(15,23,42,0.22)]"
+                >
+                  시간표 화면 열기
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {importProgress.active ? (
         <div className="fixed inset-0 z-[340] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-white/70 bg-[linear-gradient(145deg,rgba(255,255,255,0.72),rgba(219,234,254,0.65),rgba(167,243,208,0.45))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] backdrop-blur-2xl">
@@ -2555,6 +2705,38 @@ export default function SynchroSPage() {
               {importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0}% (
               {importProgress.done}/{importProgress.total})
             </p>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteGroupDialog.open ? (
+        <div className="fixed inset-0 z-[330] flex items-center justify-center bg-slate-900/28 p-4 backdrop-blur-md">
+          <div className="w-full max-w-xl rounded-[30px] border border-white/55 bg-[linear-gradient(160deg,rgba(255,255,255,0.34),rgba(255,241,242,0.26),rgba(219,234,254,0.24))] p-5 shadow-[0_28px_80px_rgba(15,23,42,0.34)] backdrop-blur-2xl">
+            <div className="rounded-[26px] border border-white/45 bg-[linear-gradient(145deg,rgba(15,23,42,0.80),rgba(30,41,59,0.72),rgba(88,28,135,0.32))] p-6 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+              <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-white/55">Delete Schedule Group</p>
+              <p className="mt-4 text-3xl font-black tracking-tight">이 시간표 그룹을 삭제할까요?</p>
+              <p className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold leading-6 text-white/80">
+                <span>&apos;{deleteGroupDialog.groupName}&apos; 그룹과 연결된 수업이 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.</span>
+              </p>
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={deleteGroupDialog.submitting}
+                  onClick={() => setDeleteGroupDialog({ open: false, groupId: null, groupName: "", submitting: false })}
+                  className="rounded-3xl border border-white/18 bg-white/10 px-6 py-3 text-sm font-bold text-white/85 hover:bg-white/16 disabled:opacity-60"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteGroupDialog.submitting || !deleteGroupDialog.groupId}
+                  onClick={() => void handleDeleteGroup(deleteGroupDialog.groupId as string)}
+                  className="rounded-3xl border border-rose-200/30 bg-[linear-gradient(135deg,rgba(251,113,133,0.86),rgba(253,186,116,0.82))] px-6 py-3 text-sm font-black text-slate-950 shadow-[0_16px_36px_rgba(251,113,133,0.28)] disabled:opacity-60"
+                >
+                  {deleteGroupDialog.submitting ? "삭제 중..." : "삭제 확인"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
