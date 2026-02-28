@@ -1859,12 +1859,14 @@ export default function SynchroSPage() {
     const importedClassIds: string[] = [];
     const memoUpdates: Record<string, string> = {};
     const conflictDetails: string[] = [];
+    const dayOffDetails: string[] = [];
     const noSubjectDetails: string[] = [];
     const skipReasons: Record<string, number> = {
       noInstructor: 0,
       noStudent: 0,
       noSubject: 0,
       noClassType: 0,
+      daysOff: 0,
       conflict: 0,
       requestFailed: 0
     };
@@ -1900,6 +1902,16 @@ export default function SynchroSPage() {
         if (!classType) {
           skipped += 1;
           skipReasons.noClassType += 1;
+          continue;
+        }
+        if (getInstructorDaysOff(instructorId).includes(item.weekday)) {
+          skipped += 1;
+          skipReasons.daysOff += 1;
+          const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
+          const instructorLabel = instructors.find((entry) => entry.id === instructorId)?.name ?? item.instructorName ?? "선택 강사";
+          dayOffDetails.push(
+            `[${instructorLabel}] 강사님의 휴무일(${weekdayLabel})에는 수업을 배정할 수 없습니다. 해당 항목은 저장되지 않았습니다. - ${toKoreanHourRange(item.startTime)} (${item.rawText})`
+          );
           continue;
         }
 
@@ -1949,6 +1961,21 @@ export default function SynchroSPage() {
         };
 
         if (!createRes.ok) {
+          if ((payload.error ?? "").includes("해당 강사의 휴무일입니다")) {
+            batch.forEach((entry) => {
+              skipped += 1;
+              skipReasons.daysOff += 1;
+              const weekdayLabel = DAYS.find((day) => day.key === entry.item.weekday)?.label ?? String(entry.item.weekday);
+              const instructorLabel =
+                instructors.find((item) => item.id === entry.payload.instructorId)?.name ?? entry.item.instructorName ?? "선택 강사";
+              dayOffDetails.push(
+                `[${instructorLabel}] 강사님의 휴무일(${weekdayLabel})에는 수업을 배정할 수 없습니다. 해당 항목은 저장되지 않았습니다. - ${toKoreanHourRange(entry.item.startTime)} (${entry.item.rawText})`
+              );
+            });
+            processedCount += batch.length;
+            setImportProgress((prev) => ({ ...prev, done: processedCount }));
+            continue;
+          }
           throw new Error(payload.error ?? "시간표 저장 요청에 실패했습니다.");
         }
 
@@ -2033,7 +2060,7 @@ export default function SynchroSPage() {
         setNotionInput("");
       }
 
-      if (conflictDetails.length > 0 || noSubjectDetails.length > 0) {
+      if (conflictDetails.length > 0 || dayOffDetails.length > 0 || noSubjectDetails.length > 0) {
         const lines: string[] = [];
         let title = "시간표 저장 경고";
         if (conflictDetails.length > 0) {
@@ -2041,11 +2068,26 @@ export default function SynchroSPage() {
           lines.push("노션 시간표 저장 중 충돌이 발생했습니다.");
           lines.push(...conflictDetails);
         }
+        if (dayOffDetails.length > 0) {
+          if (conflictDetails.length === 0) {
+            title = "휴무일 배정 경고";
+          }
+          if (lines.length > 0) {
+            lines.push("");
+          }
+          lines.push(`휴무일 충돌 ${dayOffDetails.length}건`);
+          lines.push(...dayOffDetails.slice(0, 12).map((item) => `- ${item}`));
+          if (dayOffDetails.length > 12) {
+            lines.push(`- 외 ${dayOffDetails.length - 12}건`);
+          }
+        }
         if (noSubjectDetails.length > 0) {
           if (conflictDetails.length === 0) {
-            title = "과목 매핑 경고";
+            title = dayOffDetails.length > 0 ? title : "과목 매핑 경고";
           }
-          lines.push("");
+          if (lines.length > 0) {
+            lines.push("");
+          }
           lines.push(`과목 매핑 실패(noSubject) ${noSubjectDetails.length}건`);
           lines.push(...noSubjectDetails.slice(0, 12).map((item) => `- ${item}`));
           if (noSubjectDetails.length > 12) {
@@ -2082,6 +2124,7 @@ export default function SynchroSPage() {
     currentTargetId,
     currentTargetLabel,
     displayEvents,
+    getInstructorDaysOff,
     roleView,
     weekStart
   ]);
