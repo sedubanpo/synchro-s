@@ -188,23 +188,38 @@ export function TimetableGrid({
                 key={day.key}
                 className={`sticky top-0 z-20 border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
                   daysOffSet.has(day.key)
-                    ? "border-slate-300 bg-[linear-gradient(180deg,rgba(226,232,240,0.65)_0%,rgba(248,250,252,0.95)_100%)] text-slate-500 shadow-[inset_0_-1px_0_rgba(148,163,184,0.45)]"
+                    ? "border-slate-300 bg-[linear-gradient(180deg,rgba(203,213,225,0.86)_0%,rgba(241,245,249,0.96)_100%)] text-slate-600 shadow-[inset_0_-1px_0_rgba(100,116,139,0.4),inset_0_1px_0_rgba(255,255,255,0.65)]"
                     : activeDaySet.has(day.key)
                     ? "border-sky-300 bg-[linear-gradient(180deg,rgba(191,219,254,0.75)_0%,rgba(239,246,255,0.95)_42%,rgba(255,255,255,1)_100%)] text-sky-800 shadow-[inset_0_-2px_0_rgba(59,130,246,0.62),inset_0_1px_0_rgba(255,255,255,0.8),0_0_24px_rgba(59,130,246,0.34)]"
                     : "border-slate-200 bg-slate-50 text-slate-700"
                 }`}
+                style={
+                  daysOffSet.has(day.key)
+                    ? {
+                        backgroundImage:
+                          "repeating-linear-gradient(135deg, rgba(148,163,184,0.14) 0px, rgba(148,163,184,0.14) 10px, rgba(255,255,255,0) 10px, rgba(255,255,255,0) 20px), linear-gradient(180deg, rgba(203,213,225,0.86) 0%, rgba(241,245,249,0.96) 100%)"
+                      }
+                    : undefined
+                }
               >
-                <span
-                  className={
-                    daysOffSet.has(day.key)
-                      ? "font-extrabold tracking-wide"
-                      : activeDaySet.has(day.key)
-                        ? "font-extrabold tracking-wide drop-shadow-[0_1px_1px_rgba(37,99,235,0.25)]"
-                        : ""
-                  }
-                >
-                  {day.label}
-                </span>
+                <div className="flex flex-col items-center gap-1">
+                  <span
+                    className={
+                      daysOffSet.has(day.key)
+                        ? "font-extrabold tracking-wide"
+                        : activeDaySet.has(day.key)
+                          ? "font-extrabold tracking-wide drop-shadow-[0_1px_1px_rgba(37,99,235,0.25)]"
+                          : ""
+                    }
+                  >
+                    {day.label}
+                  </span>
+                  {daysOffSet.has(day.key) ? (
+                    <span className="inline-flex rounded-full border border-slate-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-black tracking-[0.16em] text-slate-600 shadow-sm">
+                      휴무
+                    </span>
+                  ) : null}
+                </div>
               </th>
             ))}
           </tr>
@@ -235,7 +250,14 @@ export function TimetableGrid({
                           ? "border-sky-100 bg-[linear-gradient(180deg,rgba(239,246,255,0.95)_0%,rgba(248,250,252,0.98)_100%)]"
                           : "border-slate-100 bg-white"
                     }`}
-                    style={undefined}
+                    style={
+                      daysOffSet.has(day.key)
+                        ? {
+                            backgroundImage:
+                              "repeating-linear-gradient(135deg, rgba(148,163,184,0.12) 0px, rgba(148,163,184,0.12) 11px, rgba(255,255,255,0) 11px, rgba(255,255,255,0) 22px), linear-gradient(180deg, rgba(203,213,225,0.38) 0%, rgba(248,250,252,0.95) 100%)"
+                          }
+                        : undefined
+                    }
                     onClick={() => {
                       if (isEmpty && viewMode === "detailed") {
                         onCellClick({ weekday: day.key, startTime: slot });

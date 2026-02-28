@@ -1,6 +1,5 @@
 "use client";
 
-import { RoleTabs } from "@/components/schedule/RoleTabs";
 import { ScheduleModal } from "@/components/schedule/ScheduleModal";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
@@ -71,6 +70,8 @@ type ImportProgress = {
   done: number;
   label: string;
 };
+
+type MainTab = "overview" | RoleView;
 
 type ConflictDialogState = {
   open: boolean;
@@ -521,6 +522,7 @@ function isStrictConflictClassType(code: string, label?: string): boolean {
 export default function SynchroSPage() {
   const router = useRouter();
   const [roleView, setRoleView] = useState<RoleView>("student");
+  const [mainTab, setMainTab] = useState<MainTab>("student");
   const [weekStart, setWeekStart] = useState<string>(mondayOfCurrentWeek);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
 
@@ -862,12 +864,25 @@ export default function SynchroSPage() {
     router.replace(`/login?next=${encodeURIComponent("/synchro-s")}`);
   }, [router]);
 
-  const handleRoleViewChange = useCallback((next: RoleView) => {
-    setRoleView(next);
-    setSearchKeyword("");
-    setShowStudentPicker(false);
-    setShowInstructorPicker(false);
-  }, []);
+  const handleMainTabChange = useCallback(
+    (next: MainTab) => {
+      setMainTab(next);
+      setSearchKeyword("");
+      setShowStudentPicker(false);
+      setShowInstructorPicker(false);
+
+      if (next === "overview") {
+        setRoleView("instructor");
+        if (!selectedInstructorId && instructors.length > 0) {
+          setSelectedInstructorId(instructors[0]!.id);
+        }
+        return;
+      }
+
+      setRoleView(next);
+    },
+    [instructors, selectedInstructorId]
+  );
 
   const handleToggleInstructorDayOff = useCallback(
     async (weekday: Weekday) => {
@@ -2126,6 +2141,12 @@ export default function SynchroSPage() {
   }, [loadWeek]);
 
   useEffect(() => {
+    if (mainTab === "overview" && !selectedInstructorId && instructors.length > 0) {
+      setSelectedInstructorId(instructors[0]!.id);
+    }
+  }, [instructors, mainTab, selectedInstructorId]);
+
+  useEffect(() => {
     const saved = window.localStorage.getItem("synchro-s-timetable-groups-v1");
     if (!saved) {
       setGroupsHydrated(true);
@@ -2309,7 +2330,33 @@ export default function SynchroSPage() {
                 <span className="h-2 w-2 rounded-full bg-sky-400" />
                 앱 소개
               </button>
-              <RoleTabs value={roleView} onChange={handleRoleViewChange} />
+              <div className="inline-flex rounded-2xl border border-white/55 bg-white/35 p-1 shadow-[0_12px_34px_rgba(31,38,135,0.16)] backdrop-blur-xl">
+                {([
+                  { key: "overview", label: "전체 요약" },
+                  { key: "instructor", label: "강사" },
+                  { key: "student", label: "학생" }
+                ] as const).map((tab) => {
+                  const active = mainTab === tab.key;
+                  const accentClass =
+                    tab.key === "overview"
+                      ? "shadow-[inset_0_-2px_0_rgba(99,102,241,0.42),0_7px_16px_rgba(99,102,241,0.22)]"
+                      : tab.key === "instructor"
+                        ? "shadow-[inset_0_-2px_0_rgba(59,130,246,0.45),0_7px_16px_rgba(59,130,246,0.24)]"
+                        : "shadow-[inset_0_-2px_0_rgba(16,185,129,0.45),0_7px_16px_rgba(16,185,129,0.24)]";
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => handleMainTabChange(tab.key)}
+                      className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                        active ? `bg-white/90 text-slate-900 ${accentClass}` : "text-slate-700 hover:bg-white/70"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 type="button"
                 onClick={() => void handleLogout()}
@@ -2385,14 +2432,22 @@ export default function SynchroSPage() {
                     {showIntroPage ? "홈" : profileInitial}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em]">{showIntroPage ? "Home Guide" : profileTitle}</p>
-                    <p className="truncate text-lg font-black text-slate-900">{showIntroPage ? "운영 가이드 홈화면" : profileName}</p>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em]">
+                      {showIntroPage ? "Home Guide" : mainTab === "overview" ? "Overview Dashboard" : profileTitle}
+                    </p>
+                    <p className="truncate text-lg font-black text-slate-900">
+                      {showIntroPage ? "운영 가이드 홈화면" : mainTab === "overview" ? "강사 스케줄 모아보기" : profileName}
+                    </p>
                     <p className="truncate text-xs font-semibold text-slate-500">
-                      {showIntroPage ? "먼저 안내를 확인한 뒤 시간표 작업을 시작하세요." : profileSecondary || "상세 정보 없음"}
+                      {showIntroPage
+                        ? "먼저 안내를 확인한 뒤 시간표 작업을 시작하세요."
+                        : mainTab === "overview"
+                          ? "등록된 강사를 빠르게 넘겨 보며 심플 시간표를 조회합니다."
+                          : profileSecondary || "상세 정보 없음"}
                     </p>
                   </div>
                 </div>
-                {!showIntroPage && roleView === "instructor" && selectedInstructorId ? (
+                {!showIntroPage && mainTab !== "overview" && roleView === "instructor" && selectedInstructorId ? (
                   <div className="mt-3 rounded-2xl border border-white/45 bg-white/35 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Days Off</p>
@@ -2424,7 +2479,7 @@ export default function SynchroSPage() {
                 ) : null}
               </div>
 
-              {!showIntroPage ? (
+              {!showIntroPage && mainTab !== "overview" ? (
                 roleView === "instructor" ? (
                   <div className="relative z-[120]">
                     <button
@@ -2510,7 +2565,7 @@ export default function SynchroSPage() {
         </div>
       </section>
 
-      {!showIntroPage ? (
+      {!showIntroPage && mainTab !== "overview" ? (
         <>
       {error ? (
         <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
@@ -2810,6 +2865,105 @@ export default function SynchroSPage() {
           </div>
         </aside>
       </section>
+        </>
+      ) : null}
+
+      {!showIntroPage && mainTab === "overview" ? (
+        <>
+          {error ? (
+            <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+              {notice}
+            </div>
+          ) : null}
+          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+            <div className="rounded-[26px] border border-white/55 bg-white/45 p-3 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Instructor Overview</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">강사 스케줄 모아보기</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">원장/실무자가 강사별 심플 시간표를 빠르게 넘겨보는 조회 전용 화면입니다.</p>
+                </div>
+                <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-right">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Selected</p>
+                  <p className="text-sm font-black text-slate-800">{selectedInstructorLabel}</p>
+                </div>
+              </div>
+              <div className="mt-4 overflow-x-auto pb-1">
+                <div className="inline-flex min-w-full gap-2">
+                  {instructors.map((instructor) => {
+                    const active = instructor.id === selectedInstructorId;
+                    return (
+                      <button
+                        key={`overview-tab-${instructor.id}`}
+                        type="button"
+                        onClick={() => setSelectedInstructorId(instructor.id)}
+                        className={`whitespace-nowrap rounded-2xl border px-4 py-2 text-sm font-semibold transition ${
+                          active
+                            ? "border-sky-300 bg-[linear-gradient(135deg,rgba(219,234,254,0.95),rgba(191,219,254,0.88))] text-sky-900 shadow-[0_12px_28px_rgba(59,130,246,0.18)]"
+                            : "border-white/60 bg-white/65 text-slate-600 hover:bg-white/85"
+                        }`}
+                      >
+                        {instructor.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_330px]">
+              <div>
+                {loading ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
+                ) : (
+                  <TimetableGrid
+                    roleView="instructor"
+                    days={DAYS}
+                    timeSlots={TIME_SLOTS}
+                    events={displayEvents}
+                    daysOff={selectedInstructorDaysOff}
+                    viewMode="summary"
+                    highlightCellTints={{}}
+                    onEventMove={undefined}
+                    onCellClick={() => {}}
+                  />
+                )}
+              </div>
+
+              <aside className="rounded-3xl border border-white/40 bg-[linear-gradient(180deg,rgba(255,255,255,0.46),rgba(219,234,254,0.42),rgba(224,231,255,0.4))] p-4 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Quick Read</p>
+                <p className="mt-2 text-xl font-black text-slate-900">{selectedInstructorLabel}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">{selectedInstructorSecondary || "담당 과목 정보 없음"}</p>
+                <div className="mt-4 rounded-2xl border border-white/60 bg-white/60 p-4">
+                  <p className="text-xs font-bold text-slate-500">이번 주 배치 수업</p>
+                  <p className="mt-2 text-3xl font-black text-slate-900">{displayEvents.length}개</p>
+                  <p className="mt-2 text-xs font-semibold text-slate-500">심플 뷰 기준으로 동일 시간대는 점 형태로 압축 표시됩니다.</p>
+                </div>
+                <div className="mt-4 rounded-2xl border border-white/60 bg-white/55 p-4">
+                  <p className="text-xs font-bold text-slate-500">범례</p>
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                      <span className="h-3.5 w-3.5 rounded-full bg-green-400/80" />
+                      1:1 / 2:1 수업
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                      <span className="h-3.5 w-3.5 rounded-full bg-blue-400/80" />
+                      개별정규 및 다대일 수업
+                    </div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                      <span className="inline-flex rounded-full border border-slate-300 bg-slate-200/80 px-2 py-0.5 text-[11px] font-bold text-slate-700">휴무</span>
+                      휴무일 컬럼
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
         </>
       ) : null}
 
