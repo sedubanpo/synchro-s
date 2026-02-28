@@ -639,6 +639,43 @@ export default function SynchroSPage() {
     () => normalizeDaysOff(selectedInstructorOption?.daysOff),
     [selectedInstructorOption]
   );
+  const overviewInstructorGroups = useMemo(() => {
+    const subjectOrder = ["국어", "수학", "영어", "사탐", "과학", "논술", "입시", "기타"];
+    const normalizeSubjectLabel = (value?: string) => {
+      const raw = (value ?? "").trim();
+      if (!raw) return "기타";
+      if (raw.includes("사회") || raw.includes("사탐")) return "사탐";
+      if (raw.includes("국어")) return "국어";
+      if (raw.includes("수학")) return "수학";
+      if (raw.includes("영어")) return "영어";
+      if (raw.includes("과학")) return "과학";
+      if (raw.includes("논술")) return "논술";
+      if (raw.includes("입시")) return "입시";
+      return raw;
+    };
+
+    const grouped = new Map<string, SelectOption[]>();
+    for (const instructor of instructors) {
+      const key = normalizeSubjectLabel(instructor.secondary);
+      const bucket = grouped.get(key) ?? [];
+      bucket.push(instructor);
+      grouped.set(key, bucket);
+    }
+
+    return [...grouped.entries()]
+      .sort((a, b) => {
+        const aIndex = subjectOrder.indexOf(a[0]);
+        const bIndex = subjectOrder.indexOf(b[0]);
+        if (aIndex >= 0 && bIndex >= 0 && aIndex !== bIndex) return aIndex - bIndex;
+        if (aIndex >= 0) return -1;
+        if (bIndex >= 0) return 1;
+        return a[0].localeCompare(b[0], "ko");
+      })
+      .map(([subject, items]) => ({
+        subject,
+        items: [...items].sort((a, b) => a.name.localeCompare(b.name, "ko"))
+      }));
+  }, [instructors]);
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
   const profileTitle = roleView === "student" ? "학생 프로필" : "강사 프로필";
@@ -2893,25 +2930,40 @@ export default function SynchroSPage() {
                   <p className="text-sm font-black text-slate-800">{selectedInstructorLabel}</p>
                 </div>
               </div>
-              <div className="mt-4 overflow-x-auto pb-1">
-                <div className="inline-flex min-w-full gap-2">
-                  {instructors.map((instructor) => {
-                    const active = instructor.id === selectedInstructorId;
-                    return (
-                      <button
-                        key={`overview-tab-${instructor.id}`}
-                        type="button"
-                        onClick={() => setSelectedInstructorId(instructor.id)}
-                        className={`whitespace-nowrap rounded-2xl border px-4 py-2 text-sm font-semibold transition ${
-                          active
-                            ? "border-sky-300 bg-[linear-gradient(135deg,rgba(219,234,254,0.95),rgba(191,219,254,0.88))] text-sky-900 shadow-[0_12px_28px_rgba(59,130,246,0.18)]"
-                            : "border-white/60 bg-white/65 text-slate-600 hover:bg-white/85"
-                        }`}
-                      >
-                        {instructor.name}
-                      </button>
-                    );
-                  })}
+              <div className="mt-4 rounded-3xl border border-white/55 bg-white/40 p-3">
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {overviewInstructorGroups.map((group) => (
+                    <div
+                      key={`overview-subject-${group.subject}`}
+                      className="rounded-2xl border border-white/60 bg-white/55 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
+                          {group.subject}
+                        </span>
+                        <span className="text-[11px] font-semibold text-slate-400">{group.items.length}명</span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {group.items.map((instructor) => {
+                          const active = instructor.id === selectedInstructorId;
+                          return (
+                            <button
+                              key={`overview-chip-${instructor.id}`}
+                              type="button"
+                              onClick={() => setSelectedInstructorId(instructor.id)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                                active
+                                  ? "border-sky-300 bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
+                                  : "border-white/70 bg-white/80 text-slate-600 hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
+                              }`}
+                            >
+                              {instructor.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
