@@ -726,20 +726,25 @@ export default function SynchroSPage() {
     if (roleView !== "instructor" || !selectedInstructorId) return [];
     const selectedInstructorKey = normalizePersonName(selectedInstructorLabel);
     const activeStudentGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
-    if (activeStudentGroups.length === 0) return [];
+    const isForSelectedInstructor = (event: ScheduleEvent) => {
+      if (event.instructorId === selectedInstructorId) return true;
+      if (!selectedInstructorKey) return false;
+      return normalizePersonName(event.instructorName) === selectedInstructorKey;
+    };
+
+    const liveInstructorEvents = filteredEvents.filter(isForSelectedInstructor);
+    if (activeStudentGroups.length === 0) return liveInstructorEvents;
 
     const merged = activeStudentGroups
       .flatMap((group) => {
-        const snapshot = group.snapshotEvents ?? [];
-        if (snapshot.length > 0) return snapshot;
-        const idSet = new Set(group.classIds);
-        return events.filter((event) => idSet.has(event.id));
+        const snapshot = (group.snapshotEvents ?? []).filter(isForSelectedInstructor);
+        const snapshotKeys = new Set(snapshot.map((event) => `${event.id}:${event.classDate}`));
+        const liveLinked = liveInstructorEvents.filter(
+          (event) => group.classIds.includes(event.id) && !snapshotKeys.has(`${event.id}:${event.classDate}`)
+        );
+        return [...snapshot, ...liveLinked];
       })
-      .filter((event) => {
-        if (event.instructorId === selectedInstructorId) return true;
-        if (!selectedInstructorKey) return false;
-        return normalizePersonName(event.instructorName) === selectedInstructorKey;
-      });
+      .concat(liveInstructorEvents);
 
     const dedup = new Map<string, ScheduleEvent>();
     for (const event of merged) {
@@ -767,7 +772,7 @@ export default function SynchroSPage() {
       });
     }
     return [...dedup.values()];
-  }, [events, roleView, selectedInstructorId, selectedInstructorLabel, timetableGroups]);
+  }, [filteredEvents, roleView, selectedInstructorId, selectedInstructorLabel, timetableGroups]);
   const draftEvents = useMemo<ScheduleEvent[]>(() => {
     if (parsedNotionItems.length === 0) return [];
     return parsedNotionItems.map((item, index) => {
@@ -817,12 +822,15 @@ export default function SynchroSPage() {
   ]);
   const displayEvents = useMemo(() => {
     if (roleView === "instructor" && activeStudentEventsForInstructor.length > 0) {
-      // 강사 탭은 항상 '활성 학생 시간표' 합본을 우선 표시한다.
+      // 강사 탭은 라이브 DB 결과를 기준으로, 활성 학생 그룹 스냅샷을 보정해서 합본을 표시한다.
       return activeStudentEventsForInstructor;
     }
 
     const preferredGroup = selectedGroup ?? activeGroup;
     if (preferredGroup) {
+      if (preferredGroup.isActive) {
+        return filteredEvents;
+      }
       const snapshot = preferredGroup.snapshotEvents ?? [];
       const hasDraftSnapshot = snapshot.some((event) => event.id.startsWith("draft-"));
       if (snapshot.length > 0 && !hasDraftSnapshot) {
