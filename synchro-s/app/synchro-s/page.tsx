@@ -2702,6 +2702,15 @@ export default function SynchroSPage() {
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
+              <div className="group relative">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/50 bg-white/40 px-3 py-2 text-[11px] font-bold text-slate-600 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+                  <span className="text-sm leading-none">💡</span>
+                  <span>정규수업 매주 자동 반복</span>
+                </div>
+                <div className="pointer-events-none absolute left-0 top-full z-[180] mt-2 w-72 rounded-2xl border border-white/60 bg-[linear-gradient(160deg,rgba(255,255,255,0.88),rgba(219,234,254,0.76),rgba(236,253,245,0.72))] p-3 text-xs font-semibold leading-5 text-slate-700 opacity-0 shadow-[0_18px_40px_rgba(15,23,42,0.14)] backdrop-blur-xl transition duration-150 group-hover:opacity-100">
+                  정규수업은 매주 같은 시간에 반복 표시됩니다. 특정 날짜에 배정된 보강/단기 수업(one-off)만 해당 주차에 표시됩니다.
+                </div>
+              </div>
               <button
                 type="button"
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm shadow-blue-500/10 backdrop-blur-md hover:bg-white/55"
