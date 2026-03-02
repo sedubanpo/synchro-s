@@ -2483,36 +2483,56 @@ export default function SynchroSPage() {
   }, [loadWeek]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1520px] flex-col gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 xl:pl-[14rem]">
-      <aside className="fixed left-4 top-28 bottom-6 z-[60] hidden w-44 xl:flex">
-        <div className="flex h-full w-full flex-col overflow-hidden rounded-[28px] border border-white/45 bg-white/32 p-3 shadow-xl shadow-slate-900/8 backdrop-blur-xl">
-          <div className="rounded-2xl border border-white/40 bg-white/35 px-3 py-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Save History</p>
-            <p className="mt-1 text-sm font-black text-slate-800">DB 저장 기록</p>
+    <main className="mx-auto grid min-h-screen w-full max-w-[1520px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
+      <aside className="hidden xl:block xl:sticky xl:top-24 xl:self-start">
+        <div className="max-h-[calc(100vh-7.5rem)] w-[12.75rem] overflow-hidden rounded-[26px] border border-white/50 bg-white/40 shadow-[0_18px_42px_rgba(15,23,42,0.10)] backdrop-blur-md">
+          <div className="border-b border-white/45 bg-white/35 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-2xl border border-white/55 bg-white/70 text-slate-500 shadow-sm">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M8 7h8" strokeLinecap="round" />
+                  <path d="M8 12h8" strokeLinecap="round" />
+                  <path d="M8 17h5" strokeLinecap="round" />
+                  <circle cx="6" cy="7" r="1" fill="currentColor" stroke="none" />
+                  <circle cx="6" cy="12" r="1" fill="currentColor" stroke="none" />
+                  <circle cx="6" cy="17" r="1" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Save History</p>
+                <p className="text-sm font-black text-slate-800">최근 저장 기록</p>
+              </div>
+            </div>
           </div>
-          <div className="mt-3 flex-1 overflow-y-auto pr-1">
+
+          <div className="max-h-[calc(100vh-11.5rem)] overflow-y-auto px-4 py-3">
             {saveHistory.length === 0 ? (
-              <div className="rounded-2xl border border-white/40 bg-white/28 px-3 py-3 text-xs font-semibold leading-5 text-slate-500">
+              <div className="rounded-2xl border border-white/45 bg-white/34 px-3 py-3 text-xs font-semibold leading-5 text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
                 아직 저장 기록이 없습니다.
                 <br />
                 [DB로 저장] 성공 시 이곳에 최신순으로 표시됩니다.
               </div>
             ) : (
-              <div className="space-y-2">
-                {saveHistory.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="rounded-2xl border border-white/45 bg-white/34 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]"
-                  >
-                    <p className="text-[11px] font-black text-slate-700">[{entry.timestampLabel}]</p>
-                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
-                  </div>
-                ))}
+              <div className="relative pl-5">
+                <span className="absolute left-[7px] top-1 bottom-1 w-px bg-[linear-gradient(180deg,rgba(148,163,184,0.45),rgba(148,163,184,0.08))]" />
+                <div className="space-y-3">
+                  {saveHistory.map((entry) => (
+                    <div key={entry.id} className="relative">
+                      <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full border border-white/70 bg-[linear-gradient(135deg,rgba(96,165,250,0.95),rgba(167,243,208,0.9))] shadow-[0_4px_10px_rgba(96,165,250,0.25)]" />
+                      <div className="rounded-2xl border border-white/45 bg-white/34 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
+                        <p className="text-[11px] font-black tracking-wide text-slate-700">[{entry.timestampLabel}]</p>
+                        <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
         </div>
       </aside>
+
+      <div className="flex min-w-0 flex-col gap-4">
       <section
         className={`relative z-[80] overflow-visible rounded-[32px] border border-white/40 bg-white/30 p-4 shadow-xl shadow-cyan-500/10 backdrop-blur-md ${headerGlowClass}`}
       >
@@ -3554,6 +3574,7 @@ export default function SynchroSPage() {
         onClose={() => setModalOpen(false)}
         onSubmit={handleCreate}
       />
+      </div>
     </main>
   );
 }
