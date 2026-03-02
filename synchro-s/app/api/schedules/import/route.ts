@@ -1,11 +1,14 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
+import { insertSaveHistory } from "@/lib/server/saveHistory";
 import { importScheduleRow, INSTRUCTOR_DAY_OFF_MESSAGE } from "@/lib/server/scheduleService";
 import type { CreateScheduleRequest } from "@/types/schedule";
 import { NextResponse } from "next/server";
 
 type ImportBatchRequest = {
   items: CreateScheduleRequest[];
+  targetType?: "학생" | "강사";
+  targetName?: string;
 };
 
 function isImportBatchRequest(payload: unknown): payload is ImportBatchRequest {
@@ -37,6 +40,13 @@ export async function POST(req: Request) {
       const results = [];
       for (const item of payload.items) {
         results.push(await importScheduleRow(supabase, item, user.id));
+      }
+      if (results.some((result) => result.status === "created" || result.status === "enrolled" || result.status === "existing")) {
+        try {
+          await insertSaveHistory(supabase, payload.targetType, payload.targetName);
+        } catch (historyError) {
+          console.error("[save-history] insert failed", historyError);
+        }
       }
       return NextResponse.json({ results });
     }

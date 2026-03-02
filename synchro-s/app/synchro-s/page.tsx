@@ -115,6 +115,15 @@ type SaveHistoryEntry = {
   targetLabel: string;
 };
 
+type SaveHistoryResponse = {
+  items?: {
+    id: string;
+    created_at: string;
+    target_type: "학생" | "강사";
+    target_name: string;
+  }[];
+};
+
 const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 
 function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
@@ -1246,6 +1255,29 @@ export default function SynchroSPage() {
     }
   }, [moveToLogin, roleView, selectedInstructorId, selectedStudentId, weekStart]);
 
+  const loadSaveHistory = useCallback(async () => {
+    const res = await fetch("/api/save-history", { method: "GET", cache: "no-store" });
+
+    if (res.status === 401) {
+      moveToLogin();
+      return;
+    }
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? "저장 기록을 불러오지 못했습니다.");
+    }
+
+    const data = (await res.json().catch(() => ({}))) as SaveHistoryResponse;
+    setSaveHistory(
+      (data.items ?? []).map((item) => ({
+        id: item.id,
+        timestampLabel: formatSaveHistoryTimestamp(new Date(item.created_at)),
+        targetLabel: `${item.target_type}: ${item.target_name}`
+      }))
+    );
+  }, [moveToLogin]);
+
   const handleHardRefreshData = useCallback(async () => {
     if (refreshingData) return;
 
@@ -1255,24 +1287,14 @@ export default function SynchroSPage() {
 
     try {
       router.refresh();
-      await Promise.all([loadOptions(), loadWeek({ silent: true })]);
+      await Promise.all([loadOptions(), loadWeek({ silent: true }), loadSaveHistory()]);
       setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "데이터 새로고침에 실패했습니다.");
     } finally {
       setRefreshingData(false);
     }
-  }, [loadOptions, loadWeek, refreshingData, router]);
-
-  const pushSaveHistory = useCallback((targetLabel: string) => {
-    const entry: SaveHistoryEntry = {
-      id: crypto.randomUUID(),
-      timestampLabel: formatSaveHistoryTimestamp(new Date()),
-      targetLabel
-    };
-
-    setSaveHistory((prev) => [entry, ...prev].slice(0, 60));
-  }, []);
+  }, [loadOptions, loadSaveHistory, loadWeek, refreshingData, router]);
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -2000,7 +2022,9 @@ export default function SynchroSPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            items: batch.map((entry) => entry.payload)
+            items: batch.map((entry) => entry.payload),
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: currentTargetLabel
           })
         });
 
@@ -2116,7 +2140,7 @@ export default function SynchroSPage() {
       if (created > 0 || existing > 0) {
         setParsedNotionItems([]);
         setNotionInput("");
-        pushSaveHistory(`${roleView === "student" ? "학생" : "강사"}: ${currentTargetLabel}`);
+        await loadSaveHistory();
       }
 
       if (conflictDetails.length > 0 || dayOffDetails.length > 0 || noSubjectDetails.length > 0) {
@@ -2184,7 +2208,7 @@ export default function SynchroSPage() {
     currentTargetLabel,
     displayEvents,
     getInstructorDaysOff,
-    pushSaveHistory,
+    loadSaveHistory,
     roleView,
     weekStart
   ]);
@@ -2343,6 +2367,12 @@ export default function SynchroSPage() {
   }, [loadOptions]);
 
   useEffect(() => {
+    void loadSaveHistory().catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "저장 기록을 불러오지 못했습니다.");
+    });
+  }, [loadSaveHistory]);
+
+  useEffect(() => {
     void loadWeek();
   }, [loadWeek]);
 
@@ -2483,7 +2513,7 @@ export default function SynchroSPage() {
   }, [loadWeek]);
 
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-[1520px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
+    <main className="mx-auto grid min-h-screen w-full max-w-[1760px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 2xl:max-w-[1880px] xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
       <aside className="hidden xl:block xl:sticky xl:top-24 xl:self-start">
         <div className="max-h-[calc(100vh-7.5rem)] w-[12.75rem] overflow-hidden rounded-[26px] border border-white/50 bg-white/40 shadow-[0_18px_42px_rgba(15,23,42,0.10)] backdrop-blur-md">
           <div className="border-b border-white/45 bg-white/35 px-4 py-3">

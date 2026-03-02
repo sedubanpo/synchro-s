@@ -58,7 +58,7 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
               ))}
             </div>
           ) : (
-            <p className="line-clamp-1 pr-1 text-[12px] font-bold leading-4">{title}</p>
+            <p className="pr-1 text-[12px] font-bold leading-4 whitespace-normal break-words">{title}</p>
           )}
           {isRoyalClass ? (
             <span className="inline-flex shrink-0 rounded-full border border-amber-100/80 bg-amber-200/90 px-1.5 py-0.5 text-[9px] font-black text-amber-900">

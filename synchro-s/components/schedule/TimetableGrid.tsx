@@ -185,16 +185,16 @@ export function TimetableGrid({
 
   return (
     <div className="grid-scrollbar overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <table className="min-w-[980px] table-fixed border-collapse text-xs">
+      <table className="min-w-[1380px] table-fixed border-collapse text-xs 2xl:min-w-[1500px]">
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 w-24 border-b border-r border-slate-200 bg-slate-50 px-2 py-3 text-center font-extrabold text-slate-600">
+            <th className="sticky left-0 top-0 z-30 w-28 border-b border-r border-slate-200 bg-slate-50 px-2 py-3 text-center font-extrabold text-slate-600">
               시간
             </th>
             {days.map((day) => (
               <th
                 key={day.key}
-                className={`sticky top-0 z-20 border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
+                className={`sticky top-0 z-20 w-[158px] border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
                   daysOffSet.has(day.key)
                     ? "border-slate-300 bg-[linear-gradient(180deg,rgba(203,213,225,0.86)_0%,rgba(241,245,249,0.96)_100%)] text-slate-600 shadow-[inset_0_-1px_0_rgba(100,116,139,0.4),inset_0_1px_0_rgba(255,255,255,0.65)]"
                     : activeDaySet.has(day.key)
@@ -249,7 +249,7 @@ export function TimetableGrid({
                 return (
                   <td
                     key={cellKey}
-                    className={`border-b border-r align-top transition ${
+                    className={`w-[158px] border-b border-r align-top transition ${
                       isDropTarget
                         ? "border-sky-300 bg-sky-100/80"
                         : daysOffSet.has(day.key)
