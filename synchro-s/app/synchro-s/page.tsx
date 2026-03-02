@@ -109,6 +109,12 @@ type UndoState = {
   };
 };
 
+type SaveHistoryEntry = {
+  id: string;
+  timestampLabel: string;
+  targetLabel: string;
+};
+
 const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 
 function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
@@ -200,6 +206,20 @@ function toKoreanHourRange(startTime: string): string {
   }
   const mm = String(minute).padStart(2, "0");
   return `${hour}:${mm}-${endHour}:${mm}`;
+}
+
+function formatSaveHistoryTimestamp(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${pick("month")}/${pick("day")} ${pick("hour")}:${pick("minute")}`;
 }
 
 function parseTimeLabel(raw: string): { startTime: string; endTime: string } | null {
@@ -581,6 +601,7 @@ export default function SynchroSPage() {
     done: 0,
     label: ""
   });
+  const [saveHistory, setSaveHistory] = useState<SaveHistoryEntry[]>([]);
   const [memoByEventId, setMemoByEventId] = useState<Record<string, string>>({});
   const [timetableGroups, setTimetableGroups] = useState<TimetableGroup[]>([]);
   const [groupPage, setGroupPage] = useState(1);
@@ -1242,6 +1263,16 @@ export default function SynchroSPage() {
       setRefreshingData(false);
     }
   }, [loadOptions, loadWeek, refreshingData, router]);
+
+  const pushSaveHistory = useCallback((targetLabel: string) => {
+    const entry: SaveHistoryEntry = {
+      id: crypto.randomUUID(),
+      timestampLabel: formatSaveHistoryTimestamp(new Date()),
+      targetLabel
+    };
+
+    setSaveHistory((prev) => [entry, ...prev].slice(0, 60));
+  }, []);
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -2085,6 +2116,7 @@ export default function SynchroSPage() {
       if (created > 0 || existing > 0) {
         setParsedNotionItems([]);
         setNotionInput("");
+        pushSaveHistory(`${roleView === "student" ? "학생" : "강사"}: ${currentTargetLabel}`);
       }
 
       if (conflictDetails.length > 0 || dayOffDetails.length > 0 || noSubjectDetails.length > 0) {
@@ -2152,6 +2184,7 @@ export default function SynchroSPage() {
     currentTargetLabel,
     displayEvents,
     getInstructorDaysOff,
+    pushSaveHistory,
     roleView,
     weekStart
   ]);
@@ -2450,7 +2483,36 @@ export default function SynchroSPage() {
   }, [loadWeek]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1520px] flex-col gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1520px] flex-col gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 xl:pl-[14rem]">
+      <aside className="fixed left-4 top-28 bottom-6 z-[60] hidden w-44 xl:flex">
+        <div className="flex h-full w-full flex-col overflow-hidden rounded-[28px] border border-white/45 bg-white/32 p-3 shadow-xl shadow-slate-900/8 backdrop-blur-xl">
+          <div className="rounded-2xl border border-white/40 bg-white/35 px-3 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Save History</p>
+            <p className="mt-1 text-sm font-black text-slate-800">DB 저장 기록</p>
+          </div>
+          <div className="mt-3 flex-1 overflow-y-auto pr-1">
+            {saveHistory.length === 0 ? (
+              <div className="rounded-2xl border border-white/40 bg-white/28 px-3 py-3 text-xs font-semibold leading-5 text-slate-500">
+                아직 저장 기록이 없습니다.
+                <br />
+                [DB로 저장] 성공 시 이곳에 최신순으로 표시됩니다.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {saveHistory.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="rounded-2xl border border-white/45 bg-white/34 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.4)]"
+                  >
+                    <p className="text-[11px] font-black text-slate-700">[{entry.timestampLabel}]</p>
+                    <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
       <section
         className={`relative z-[80] overflow-visible rounded-[32px] border border-white/40 bg-white/30 p-4 shadow-xl shadow-cyan-500/10 backdrop-blur-md ${headerGlowClass}`}
       >
