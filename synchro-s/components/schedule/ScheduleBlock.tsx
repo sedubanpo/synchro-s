@@ -8,9 +8,12 @@ type ScheduleBlockProps = {
     index: number;
     total: number;
   };
+  showSaveAction?: boolean;
+  onSave?: (event: ScheduleEvent) => void;
+  onDelete?: (event: ScheduleEvent) => void;
 };
 
-export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockProps) {
+export function ScheduleBlock({ event, roleView, chainProgress, showSaveAction = false, onSave, onDelete }: ScheduleBlockProps) {
   const subjectColorClass = getSubjectColorClass(event.subjectCode, event.subjectName);
   const title = `${event.subjectName} ${event.instructorName || "강사없음"}`;
   const studentBadges = event.studentNames.length > 0 ? event.studentNames : ["학생없음"];
@@ -37,11 +40,52 @@ export function ScheduleBlock({ event, roleView, chainProgress }: ScheduleBlockP
     : "bg-white/18 text-white";
 
   return (
-    <div className={`${blockClass} relative rounded-lg px-2 py-1.5 text-white`}>
+    <div className={`${blockClass} group relative rounded-lg px-2 py-1.5 text-white`}>
       {isRoyalClass ? (
         <span className="absolute -top-1.5 -left-1.5 z-20 inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-200 bg-gradient-to-b from-amber-200 to-amber-400 text-[11px] shadow-[0_4px_12px_rgba(251,191,36,0.45)]">
           👑
         </span>
+      ) : null}
+
+      {(showSaveAction || onDelete) ? (
+        <div className="absolute right-1.5 top-1.5 z-30 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+          {showSaveAction && onSave ? (
+            <button
+              type="button"
+              onClick={(clickEvent) => {
+                clickEvent.stopPropagation();
+                onSave(event);
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/55 bg-white/28 text-white shadow-[0_6px_14px_rgba(15,23,42,0.2)] backdrop-blur-md hover:bg-emerald-400/75"
+              title="이 수업만 즉시 저장"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 4h9l3 3v13H6z" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M9 4v6h6V4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={(clickEvent) => {
+                clickEvent.stopPropagation();
+                onDelete(event);
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/55 bg-white/28 text-white shadow-[0_6px_14px_rgba(15,23,42,0.2)] backdrop-blur-md hover:bg-rose-500/80"
+              title="이 수업 삭제"
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7h16" strokeLinecap="round" />
+                <path d="M9 7V4h6v3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M8 10v7" strokeLinecap="round" />
+                <path d="M12 10v7" strokeLinecap="round" />
+                <path d="M16 10v7" strokeLinecap="round" />
+                <path d="M6 7l1 12h10l1-12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="mb-1 flex items-start justify-between gap-1">

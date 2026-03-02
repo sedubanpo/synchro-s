@@ -14,6 +14,8 @@ type TimetableGridProps = {
   highlightCellTints?: Record<string, string>;
   onCellClick: (ctx: { weekday: Weekday; startTime: string }) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
+  onEventSave?: (event: ScheduleEvent) => Promise<void>;
+  onEventDelete?: (event: ScheduleEvent) => Promise<void>;
 };
 
 function toRangeLabel(startTime: string): string {
@@ -71,7 +73,9 @@ export function TimetableGrid({
   viewMode = "detailed",
   highlightCellTints,
   onCellClick,
-  onEventMove
+  onEventMove,
+  onEventSave,
+  onEventDelete
 }: TimetableGridProps) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
@@ -378,6 +382,9 @@ export function TimetableGrid({
                                   event={event}
                                   roleView={roleView}
                                   chainProgress={progressByEventKey.get(`${event.id}-${event.classDate}-${event.startTime}`)}
+                                  showSaveAction={event.id.startsWith("draft-")}
+                                  onSave={onEventSave ? (item) => void onEventSave(item) : undefined}
+                                  onDelete={onEventDelete ? (item) => void onEventDelete(item) : undefined}
                                 />
                               </div>
                             ))}

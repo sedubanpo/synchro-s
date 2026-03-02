@@ -124,7 +124,28 @@ type SaveHistoryResponse = {
   }[];
 };
 
+type SpecialNoteItem = {
+  id: string;
+  createdAt: string;
+  content: string;
+};
+
+type SpecialNotesResponse = {
+  items?: {
+    id: string;
+    created_at: string;
+    target_type: "학생" | "강사";
+    target_id: string;
+    content: string;
+  }[];
+};
+
+type OverviewEntity = RoleView;
+type InstructorOverviewMode = "subject" | "weekday" | "dayOff";
+type StudentOverviewMode = "weekday" | "school" | "classType";
+
 const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
+const EXCLUDED_OVERVIEW_INSTRUCTORS = new Set(["홍성우", "안종성", "김용찬", "에스에듀"]);
 
 function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
   return items.map((item) => ({
@@ -229,6 +250,20 @@ function formatSaveHistoryTimestamp(date: Date): string {
 
   const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return `${pick("month")}/${pick("day")} ${pick("hour")}:${pick("minute")}`;
+}
+
+function formatSpecialNoteTimestamp(dateISO: string): string {
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(dateISO));
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${pick("year")}.${pick("month")}.${pick("day")} ${pick("hour")}:${pick("minute")}`;
 }
 
 function parseTimeLabel(raw: string): { startTime: string; endTime: string } | null {
@@ -565,8 +600,12 @@ export default function SynchroSPage() {
   const router = useRouter();
   const [roleView, setRoleView] = useState<RoleView>("student");
   const [mainTab, setMainTab] = useState<MainTab>("student");
+  const [overviewEntity, setOverviewEntity] = useState<OverviewEntity>("instructor");
+  const [instructorOverviewMode, setInstructorOverviewMode] = useState<InstructorOverviewMode>("subject");
+  const [studentOverviewMode, setStudentOverviewMode] = useState<StudentOverviewMode>("weekday");
   const [weekStart, setWeekStart] = useState<string>(mondayOfCurrentWeek);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
+  const [overviewEvents, setOverviewEvents] = useState<ScheduleEvent[]>([]);
 
   const [instructors, setInstructors] = useState<SelectOption[]>([]);
   const [students, setStudents] = useState<SelectOption[]>([]);
@@ -611,6 +650,10 @@ export default function SynchroSPage() {
     label: ""
   });
   const [saveHistory, setSaveHistory] = useState<SaveHistoryEntry[]>([]);
+  const [specialNotes, setSpecialNotes] = useState<SpecialNoteItem[]>([]);
+  const [specialNoteInput, setSpecialNoteInput] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
   const [memoByEventId, setMemoByEventId] = useState<Record<string, string>>({});
   const [timetableGroups, setTimetableGroups] = useState<TimetableGroup[]>([]);
   const [groupPage, setGroupPage] = useState(1);
@@ -683,6 +726,10 @@ export default function SynchroSPage() {
     () => normalizeDaysOff(selectedInstructorOption?.daysOff),
     [selectedInstructorOption]
   );
+  const overviewVisibleInstructors = useMemo(
+    () => instructors.filter((item) => !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
+    [instructors]
+  );
   const overviewInstructorGroups = useMemo(() => {
     const subjectOrder = ["국어", "수학", "영어", "사탐", "과학", "논술", "입시", "기타"];
     const normalizeSubjectLabel = (value?: string) => {
@@ -699,8 +746,27 @@ export default function SynchroSPage() {
     };
 
     const grouped = new Map<string, SelectOption[]>();
-    for (const instructor of instructors) {
-      const key = normalizeSubjectLabel(instructor.secondary);
+    const labelForDay = (weekday: Weekday) => DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
+    const eventsByInstructor = new Map<string, ScheduleEvent[]>();
+    for (const event of overviewEvents) {
+      const bucket = eventsByInstructor.get(event.instructorId) ?? [];
+      bucket.push(event);
+      eventsByInstructor.set(event.instructorId, bucket);
+    }
+
+    for (const instructor of overviewVisibleInstructors) {
+      let key = "기타";
+      if (instructorOverviewMode === "subject") {
+        key = normalizeSubjectLabel(instructor.secondary);
+      } else if (instructorOverviewMode === "weekday") {
+        const activeDays = Array.from(
+          new Set((eventsByInstructor.get(instructor.id) ?? []).map((event) => event.weekday))
+        ).sort((a, b) => a - b);
+        key = activeDays.length > 0 ? activeDays.map((day) => labelForDay(day)).join(" · ") : "이번 주 수업 없음";
+      } else {
+        const daysOff = normalizeDaysOff(instructor.daysOff);
+        key = daysOff.length > 0 ? daysOff.map((day) => labelForDay(day)).join(" · ") : "휴무 없음";
+      }
       const bucket = grouped.get(key) ?? [];
       bucket.push(instructor);
       grouped.set(key, bucket);
@@ -719,7 +785,58 @@ export default function SynchroSPage() {
         subject,
         items: [...items].sort((a, b) => a.name.localeCompare(b.name, "ko"))
       }));
-  }, [instructors]);
+  }, [instructorOverviewMode, overviewEvents, overviewVisibleInstructors]);
+  const overviewStudentGroups = useMemo(() => {
+    const grouped = new Map<string, SelectOption[]>();
+    const labelForDay = (weekday: Weekday) => DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
+    const schoolLabel = (secondary?: string) => secondary?.split("·")[0]?.trim() || "학교 정보 없음";
+    const eventsByStudent = new Map<string, ScheduleEvent[]>();
+
+    for (const event of overviewEvents) {
+      for (const studentId of event.studentIds) {
+        const bucket = eventsByStudent.get(studentId) ?? [];
+        bucket.push(event);
+        eventsByStudent.set(studentId, bucket);
+      }
+    }
+
+    for (const student of students) {
+      const linkedEvents = eventsByStudent.get(student.id) ?? [];
+      let keys: string[] = [];
+
+      if (studentOverviewMode === "weekday") {
+        keys = Array.from(new Set(linkedEvents.map((event) => labelForDay(event.weekday))));
+      } else if (studentOverviewMode === "school") {
+        keys = [schoolLabel(student.secondary)];
+      } else {
+        keys = Array.from(new Set(linkedEvents.map((event) => event.classTypeLabel || event.badgeText || "유형 없음")));
+      }
+
+      if (keys.length === 0) {
+        keys = [studentOverviewMode === "weekday" ? "이번 주 수업 없음" : studentOverviewMode === "classType" ? "유형 없음" : "학교 정보 없음"];
+      }
+
+      for (const key of keys) {
+        const bucket = grouped.get(key) ?? [];
+        bucket.push(student);
+        grouped.set(key, bucket);
+      }
+    }
+
+    return [...grouped.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
+      .map(([label, items]) => ({
+        label,
+        items: [...items].sort((a, b) => a.name.localeCompare(b.name, "ko"))
+      }));
+  }, [overviewEvents, studentOverviewMode, students]);
+  const overviewDisplayGroups = useMemo(
+    () =>
+      overviewEntity === "instructor"
+        ? overviewInstructorGroups.map((group) => ({ label: group.subject, items: group.items }))
+        : overviewStudentGroups.map((group) => ({ label: group.label, items: group.items })),
+    [overviewEntity, overviewInstructorGroups, overviewStudentGroups]
+  );
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
   const profileTitle = roleView === "student" ? "학생 프로필" : "강사 프로필";
@@ -851,6 +968,9 @@ export default function SynchroSPage() {
     weekStart
   ]);
   const displayEvents = useMemo(() => {
+    if (mainTab === "overview") {
+      return filteredEvents;
+    }
     if (roleView === "instructor" && activeStudentEventsForInstructor.length > 0) {
       // 강사 탭은 라이브 DB 결과를 기준으로, 활성 학생 그룹 스냅샷을 보정해서 합본을 표시한다.
       return activeStudentEventsForInstructor;
@@ -871,7 +991,7 @@ export default function SynchroSPage() {
     }
     if (draftEvents.length > 0) return draftEvents;
     return filteredEvents;
-  }, [activeGroup, activeStudentEventsForInstructor, draftEvents, filteredEvents, roleView, selectedGroup]);
+  }, [activeGroup, activeStudentEventsForInstructor, draftEvents, filteredEvents, mainTab, roleView, selectedGroup]);
   const activeHighlightCellTints = useMemo(() => {
     if (displayEvents.length === 0) return {};
     const chainEvents = [...displayEvents]
@@ -961,16 +1081,23 @@ export default function SynchroSPage() {
       setShowInstructorPicker(false);
 
       if (next === "overview") {
-        setRoleView("instructor");
-        if (!selectedInstructorId && instructors.length > 0) {
-          setSelectedInstructorId(instructors[0]!.id);
+        setRoleView(overviewEntity);
+        if (
+          overviewEntity === "instructor" &&
+          overviewVisibleInstructors.length > 0 &&
+          !overviewVisibleInstructors.some((item) => item.id === selectedInstructorId)
+        ) {
+          setSelectedInstructorId(overviewVisibleInstructors[0]!.id);
+        }
+        if (overviewEntity === "student" && students.length > 0 && !students.some((item) => item.id === selectedStudentId)) {
+          setSelectedStudentId(students[0]!.id);
         }
         return;
       }
 
       setRoleView(next);
     },
-    [instructors, selectedInstructorId]
+    [overviewEntity, overviewVisibleInstructors, selectedInstructorId, selectedStudentId, students]
   );
 
   const handleToggleInstructorDayOff = useCallback(
@@ -1278,6 +1405,119 @@ export default function SynchroSPage() {
     );
   }, [moveToLogin]);
 
+  const loadOverviewEvents = useCallback(async () => {
+    const query = new URLSearchParams({ weekStart, view: "instructor" });
+    const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
+
+    if (res.status === 401) {
+      moveToLogin();
+      return;
+    }
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? "전체 요약 데이터를 불러오지 못했습니다.");
+    }
+
+    const data = (await res.json()) as WeekResponse;
+    setOverviewEvents(data.events);
+  }, [moveToLogin, weekStart]);
+
+  const loadSpecialNotes = useCallback(async () => {
+    if (showIntroPage || mainTab === "overview" || !currentTargetId) {
+      setSpecialNotes([]);
+      return;
+    }
+
+    setNotesLoading(true);
+
+    try {
+      const query = new URLSearchParams({
+        targetType: roleView === "student" ? "학생" : "강사",
+        targetId: currentTargetId
+      });
+      const res = await fetch(`/api/special-notes?${query.toString()}`, { method: "GET", cache: "no-store" });
+
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "특이사항을 불러오지 못했습니다.");
+      }
+
+      const data = (await res.json().catch(() => ({}))) as SpecialNotesResponse;
+      setSpecialNotes(
+        (data.items ?? []).map((item) => ({
+          id: item.id,
+          createdAt: item.created_at,
+          content: item.content
+        }))
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "특이사항을 불러오지 못했습니다.");
+      setSpecialNotes([]);
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [currentTargetId, mainTab, moveToLogin, roleView, showIntroPage]);
+
+  const removeClassFromGroups = useCallback((classId: string) => {
+    setTimetableGroups((prev) =>
+      prev
+        .map((group) => ({
+          ...group,
+          classIds: group.classIds.filter((id) => id !== classId),
+          snapshotEvents: group.snapshotEvents?.filter((event) => event.id !== classId)
+        }))
+        .filter((group) => group.classIds.length > 0 || (group.snapshotEvents?.length ?? 0) > 0)
+    );
+  }, []);
+
+  const buildSinglePayloadFromDraft = useCallback(
+    (draftEvent: ScheduleEvent): { payload: ScheduleFormInput; rawLabel: string } | null => {
+      const draftIndex = Number(draftEvent.id.replace("draft-", ""));
+      const source = Number.isNaN(draftIndex) ? null : parsedNotionItems[draftIndex];
+      if (!source) {
+        return null;
+      }
+
+      const normalize = (value: string) => value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
+      const instructorIndex = instructors.map((entry) => ({ id: entry.id, token: normalize(entry.name) }));
+      const subjectMatch = resolveSubjectOption(source.subjectLabel, subjects);
+      const classTypeMatch = resolveClassTypeOption(source.classTypeLabel, classTypes);
+      const targetInstructorName = source.instructorName ? normalizeInstructorAlias(source.instructorName) : "";
+      const exactInstructor =
+        instructorIndex.find((entry) => entry.token === normalize(targetInstructorName)) ??
+        instructorIndex.find((entry) => entry.token.includes(normalize(targetInstructorName)) || normalize(targetInstructorName).includes(entry.token));
+      const instructorId = exactInstructor?.id ?? selectedInstructorId;
+      const studentIds = selectedStudentId ? [selectedStudentId] : [];
+
+      if (!subjectMatch || !classTypeMatch || !instructorId || studentIds.length === 0) {
+        return null;
+      }
+
+      return {
+        rawLabel: source.rawText,
+        payload: {
+          instructorId,
+          studentIds,
+          subjectCode: subjectMatch.code,
+          classTypeCode: classTypeMatch.code,
+          note: source.note?.trim() || source.rawText,
+          scheduleMode: "recurring",
+          weekday: source.weekday,
+          activeFrom: weekStart,
+          startTime: source.startTime,
+          endTime: source.endTime
+        }
+      };
+    },
+    [classTypes, instructors, parsedNotionItems, selectedInstructorId, selectedStudentId, subjects, weekStart]
+  );
+
   const handleHardRefreshData = useCallback(async () => {
     if (refreshingData) return;
 
@@ -1287,14 +1527,14 @@ export default function SynchroSPage() {
 
     try {
       router.refresh();
-      await Promise.all([loadOptions(), loadWeek({ silent: true }), loadSaveHistory()]);
+      await Promise.all([loadOptions(), loadWeek({ silent: true }), loadSaveHistory(), loadOverviewEvents(), loadSpecialNotes()]);
       setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "데이터 새로고침에 실패했습니다.");
     } finally {
       setRefreshingData(false);
     }
-  }, [loadOptions, loadSaveHistory, loadWeek, refreshingData, router]);
+  }, [loadOptions, loadOverviewEvents, loadSaveHistory, loadSpecialNotes, loadWeek, refreshingData, router]);
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -2213,6 +2453,232 @@ export default function SynchroSPage() {
     weekStart
   ]);
 
+  const handleSaveSingleSchedule = useCallback(
+    async (event: ScheduleEvent) => {
+      if (!event.id.startsWith("draft-")) {
+        setNotice("이미 DB에 저장된 수업입니다.");
+        return;
+      }
+
+      try {
+        const prepared = buildSinglePayloadFromDraft(event);
+        if (!prepared) {
+          setError("이 수업은 강사/학생/과목/수업유형 매핑이 완료되어야 개별 저장할 수 있습니다.");
+          return;
+        }
+
+        if (getInstructorDaysOff(prepared.payload.instructorId).includes(prepared.payload.weekday as Weekday)) {
+          const weekdayLabel = DAYS.find((day) => day.key === prepared.payload.weekday)?.label ?? `${prepared.payload.weekday}`;
+          const instructorLabel =
+            instructors.find((item) => item.id === prepared.payload.instructorId)?.name ?? event.instructorName ?? "선택 강사";
+          setConflictDialog({
+            open: true,
+            title: "휴무일 배정 경고",
+            message: `[${instructorLabel}] 강사님의 휴무일(${weekdayLabel})에는 수업을 배정할 수 없습니다. 해당 항목은 저장되지 않았습니다.`
+          });
+          return;
+        }
+
+        const res = await fetch("/api/schedules/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: [prepared.payload],
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: currentTargetLabel
+          })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          results?: { status?: string; classId?: string; conflict?: ConflictResult }[];
+        };
+        const result = payload.results?.[0];
+
+        if (res.status === 409 || result?.status === "conflict") {
+          const conflict = result?.conflict ?? { hasConflict: false, conflicts: [] };
+          if (conflictIncludesMixedTypeRule(conflict)) {
+            setConflictDialog({
+              open: true,
+              title: "혼합 배정 불가",
+              message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+            });
+            return;
+          }
+          setConflictDialog({
+            open: true,
+            title: "시간표 충돌 경고",
+            message: getConflictMessage(conflict) || "시간표 충돌로 개별 저장이 차단되었습니다."
+          });
+          return;
+        }
+
+        if (!res.ok) {
+          if ((payload.error ?? "").includes("해당 강사의 휴무일입니다")) {
+            setConflictDialog({
+              open: true,
+              title: "휴무일 안내",
+              message: "해당 강사의 휴무일입니다"
+            });
+            return;
+          }
+          setError(payload.error ?? "개별 저장에 실패했습니다.");
+          return;
+        }
+
+        if (result?.classId && prepared.payload.note) {
+          setMemoByEventId((prev) => ({ ...prev, [result.classId as string]: prepared.payload.note }));
+        }
+
+        const draftIndex = Number(event.id.replace("draft-", ""));
+        if (!Number.isNaN(draftIndex)) {
+          setParsedNotionItems((prev) => prev.filter((_, index) => index !== draftIndex));
+        }
+
+        await Promise.all([loadWeek(), loadSaveHistory(), loadOverviewEvents()]);
+        setNotice(`'${prepared.rawLabel}' 수업을 즉시 저장했습니다.`);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "개별 저장에 실패했습니다.");
+      }
+    },
+    [
+      buildSinglePayloadFromDraft,
+      currentTargetLabel,
+      getInstructorDaysOff,
+      instructors,
+      loadOverviewEvents,
+      loadSaveHistory,
+      loadWeek,
+      moveToLogin,
+      roleView
+    ]
+  );
+
+  const handleDeleteSingleSchedule = useCallback(
+    async (event: ScheduleEvent) => {
+      if (event.id.startsWith("draft-")) {
+        const draftIndex = Number(event.id.replace("draft-", ""));
+        if (!Number.isNaN(draftIndex)) {
+          setParsedNotionItems((prev) => prev.filter((_, index) => index !== draftIndex));
+          setNotice("미리보기 수업을 삭제했습니다.");
+        }
+        return;
+      }
+
+      if (!currentTargetId) {
+        setError("삭제 대상의 강사/학생을 먼저 선택해 주세요.");
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/schedules/group", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            classIds: [event.id],
+            roleView,
+            targetId: currentTargetId
+          })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          setError(payload.error ?? "개별 삭제에 실패했습니다.");
+          return;
+        }
+
+        removeClassFromGroups(event.id);
+        setEvents((prev) => prev.filter((item) => item.id !== event.id));
+        await Promise.all([loadWeek({ silent: true }), loadOverviewEvents()]);
+        setNotice(`${event.subjectName} ${event.startTime}-${event.endTime} 수업을 삭제했습니다.`);
+      } catch (deleteError) {
+        setError(deleteError instanceof Error ? deleteError.message : "개별 삭제에 실패했습니다.");
+      }
+    },
+    [currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView]
+  );
+
+  const handleCreateSpecialNote = useCallback(async () => {
+    if (!currentTargetId) {
+      setError("특이사항을 등록할 강사/학생을 먼저 선택해 주세요.");
+      return;
+    }
+
+    const content = specialNoteInput.trim();
+    if (!content) return;
+
+    setNoteSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/special-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetType: roleView === "student" ? "학생" : "강사",
+          targetId: currentTargetId,
+          content
+        })
+      });
+
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "특이사항 저장에 실패했습니다.");
+      }
+
+      setSpecialNoteInput("");
+      await loadSpecialNotes();
+      setNotice("특이사항을 저장했습니다.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "특이사항 저장에 실패했습니다.");
+    } finally {
+      setNoteSubmitting(false);
+    }
+  }, [currentTargetId, loadSpecialNotes, moveToLogin, roleView, specialNoteInput]);
+
+  const handleDeleteSpecialNote = useCallback(
+    async (noteId: string) => {
+      setNoteSubmitting(true);
+      setError(null);
+
+      try {
+        const res = await fetch(`/api/special-notes/${noteId}`, { method: "DELETE" });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? "특이사항 삭제에 실패했습니다.");
+        }
+
+        setSpecialNotes((prev) => prev.filter((item) => item.id !== noteId));
+      } catch (deleteError) {
+        setError(deleteError instanceof Error ? deleteError.message : "특이사항 삭제에 실패했습니다.");
+      } finally {
+        setNoteSubmitting(false);
+      }
+    },
+    [moveToLogin]
+  );
+
   const handleSyncSheets = useCallback(async () => {
     setSyncingSheets(true);
     setNotice(null);
@@ -2373,14 +2839,35 @@ export default function SynchroSPage() {
   }, [loadSaveHistory]);
 
   useEffect(() => {
+    void loadOverviewEvents().catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "전체 요약 데이터를 불러오지 못했습니다.");
+    });
+  }, [loadOverviewEvents]);
+
+  useEffect(() => {
     void loadWeek();
   }, [loadWeek]);
 
   useEffect(() => {
-    if (mainTab === "overview" && !selectedInstructorId && instructors.length > 0) {
-      setSelectedInstructorId(instructors[0]!.id);
+    void loadSpecialNotes();
+  }, [loadSpecialNotes]);
+
+  useEffect(() => {
+    if (mainTab !== "overview") {
+      return;
     }
-  }, [instructors, mainTab, selectedInstructorId]);
+    setRoleView(overviewEntity);
+    if (
+      overviewEntity === "instructor" &&
+      overviewVisibleInstructors.length > 0 &&
+      !overviewVisibleInstructors.some((item) => item.id === selectedInstructorId)
+    ) {
+      setSelectedInstructorId(overviewVisibleInstructors[0]!.id);
+    }
+    if (overviewEntity === "student" && students.length > 0 && !students.some((item) => item.id === selectedStudentId)) {
+      setSelectedStudentId(students[0]!.id);
+    }
+  }, [mainTab, overviewEntity, overviewVisibleInstructors, selectedInstructorId, selectedStudentId, students]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("synchro-s-timetable-groups-v1");
@@ -2490,6 +2977,7 @@ export default function SynchroSPage() {
           return;
         }
         void loadWeek({ silent: true });
+        void loadOverviewEvents();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "class_enrollments" }, () => {
         if (importingNotionRef.current) {
@@ -2497,6 +2985,7 @@ export default function SynchroSPage() {
           return;
         }
         void loadWeek({ silent: true });
+        void loadOverviewEvents();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "class_overrides" }, () => {
         if (importingNotionRef.current) {
@@ -2504,13 +2993,14 @@ export default function SynchroSPage() {
           return;
         }
         void loadWeek({ silent: true });
+        void loadOverviewEvents();
       })
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadWeek]);
+  }, [loadOverviewEvents, loadWeek]);
 
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-[1760px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 2xl:max-w-[1880px] xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
@@ -2949,10 +3439,61 @@ export default function SynchroSPage() {
 
       <section className="grid flex-1 gap-4 xl:grid-cols-[1fr_330px]">
         <div>
+          <div className="mb-3 rounded-2xl border border-white/55 bg-white/55 px-3 py-3 shadow-sm backdrop-blur-md">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-slate-800">특이사항</p>
+                <p className="text-[11px] font-semibold text-slate-500">시간표 편성 시 참고할 요청사항을 대상별로 기록합니다.</p>
+              </div>
+              <div className="flex min-w-[280px] flex-1 flex-wrap items-center justify-end gap-2">
+                <input
+                  value={specialNoteInput}
+                  onChange={(inputEvent) => setSpecialNoteInput(inputEvent.target.value)}
+                  placeholder="예: 수학은 안준성T로만 구성 희망"
+                  className="min-w-[220px] flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400"
+                />
+                <button
+                  type="button"
+                  disabled={noteSubmitting || !currentTargetId}
+                  onClick={() => void handleCreateSpecialNote()}
+                  className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {noteSubmitting ? "저장 중..." : "등록"}
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 max-h-36 space-y-1.5 overflow-y-auto pr-1">
+              {notesLoading ? (
+                <p className="text-xs font-semibold text-slate-500">불러오는 중...</p>
+              ) : specialNotes.length === 0 ? (
+                <p className="text-xs font-semibold text-slate-500">아직 등록된 특이사항이 없습니다.</p>
+              ) : (
+                specialNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-white/60 bg-white/65 px-3 py-2"
+                  >
+                    <p className="min-w-0 text-xs font-semibold leading-5 text-slate-700">
+                      <span className="font-black text-slate-500">[{formatSpecialNoteTimestamp(note.createdAt)}]</span>{" "}
+                      {note.content}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={noteSubmitting}
+                      onClick={() => void handleDeleteSpecialNote(note.id)}
+                      className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    >
+                      X 삭제
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
           <div className="mb-3 flex items-center justify-between rounded-2xl border border-white/55 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-md">
             <div>
               <p className="text-sm font-black text-slate-800">시간표 보기 모드</p>
-              <p className="text-[11px] font-semibold text-slate-500">상세 블록과 강사별 심플 점 표시를 전환할 수 있습니다.</p>
+              <p className="text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환할 수 있습니다.</p>
             </div>
             <div className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/70 p-1">
               <button
@@ -2987,6 +3528,8 @@ export default function SynchroSPage() {
               viewMode={timetableViewMode}
               highlightCellTints={activeHighlightCellTints}
               onEventMove={roleView === "student" ? handleMoveSchedule : undefined}
+              onEventSave={timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
+              onEventDelete={timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
               onCellClick={(ctx) => {
                 setInitialCell(ctx);
                 setModalOpen(true);
@@ -3198,42 +3741,123 @@ export default function SynchroSPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Instructor Overview</p>
-                  <p className="mt-1 text-xl font-black text-slate-900">강사 스케줄 모아보기</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">원장/실무자가 강사별 심플 시간표를 빠르게 넘겨보는 조회 전용 화면입니다.</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">{overviewEntity === "instructor" ? "강사 전체 요약" : "학생 전체 요약"}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    {overviewEntity === "instructor"
+                      ? "실무자 인원을 제외한 강사 목록을 필터 기준별로 재정렬해 빠르게 조회합니다."
+                      : "재원생을 요일/학교/수업 유형 기준으로 묶어 한눈에 파악합니다."}
+                  </p>
                 </div>
                 <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-right">
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Selected</p>
-                  <p className="text-sm font-black text-slate-800">{selectedInstructorLabel}</p>
+                  <p className="text-sm font-black text-slate-800">{currentTargetLabel}</p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="inline-flex rounded-full border border-white/60 bg-white/65 p-1 shadow-[0_10px_30px_rgba(59,130,246,0.12)]">
+                  {([
+                    { key: "instructor", label: "강사 전체 요약" },
+                    { key: "student", label: "학생 전체 요약" }
+                  ] as const).map((tab) => (
+                    <button
+                      key={`overview-entity-${tab.key}`}
+                      type="button"
+                      onClick={() => {
+                        setOverviewEntity(tab.key);
+                        setRoleView(tab.key);
+                        if (tab.key === "instructor" && !selectedInstructorId && overviewVisibleInstructors.length > 0) {
+                          setSelectedInstructorId(overviewVisibleInstructors[0]!.id);
+                        }
+                        if (tab.key === "student" && !selectedStudentId && students.length > 0) {
+                          setSelectedStudentId(students[0]!.id);
+                        }
+                      }}
+                      className={`rounded-full px-4 py-2 text-xs font-black transition ${
+                        overviewEntity === tab.key
+                          ? "bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
+                          : "text-slate-600 hover:bg-white/80"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="inline-flex rounded-full border border-white/60 bg-white/60 p-1">
+                  {(overviewEntity === "instructor"
+                    ? ([
+                        { key: "subject", label: "과목별" },
+                        { key: "weekday", label: "요일별" },
+                        { key: "dayOff", label: "휴무일별" }
+                      ] as const)
+                    : ([
+                        { key: "weekday", label: "요일별 재원생" },
+                        { key: "school", label: "학교별 재원생" },
+                        { key: "classType", label: "수업 유형별" }
+                      ] as const)
+                  ).map((tab) => {
+                    const active =
+                      overviewEntity === "instructor"
+                        ? instructorOverviewMode === tab.key
+                        : studentOverviewMode === tab.key;
+                    return (
+                      <button
+                        key={`overview-mode-${tab.key}`}
+                        type="button"
+                        onClick={() => {
+                          if (overviewEntity === "instructor") {
+                            setInstructorOverviewMode(tab.key as InstructorOverviewMode);
+                          } else {
+                            setStudentOverviewMode(tab.key as StudentOverviewMode);
+                          }
+                        }}
+                        className={`rounded-full px-4 py-2 text-xs font-bold transition ${
+                          active
+                            ? "bg-white text-slate-900 shadow-[0_8px_18px_rgba(148,163,184,0.22)]"
+                            : "text-slate-600 hover:bg-white/75"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="mt-4 rounded-3xl border border-white/55 bg-white/40 p-3">
                 <div className="grid gap-3 xl:grid-cols-2">
-                  {overviewInstructorGroups.map((group) => (
+                  {overviewDisplayGroups.map((group) => (
                     <div
-                      key={`overview-subject-${group.subject}`}
+                      key={`overview-group-${overviewEntity}-${group.label}`}
                       className="rounded-2xl border border-white/60 bg-white/55 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
                     >
                       <div className="flex items-center gap-2">
                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
-                          {group.subject}
+                          {group.label}
                         </span>
                         <span className="text-[11px] font-semibold text-slate-400">{group.items.length}명</span>
                       </div>
-                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                        {group.items.map((instructor) => {
-                          const active = instructor.id === selectedInstructorId;
+                      <div className="mt-2.5 flex flex-wrap gap-1">
+                        {group.items.map((item) => {
+                          const active = overviewEntity === "instructor" ? item.id === selectedInstructorId : item.id === selectedStudentId;
                           return (
                             <button
-                              key={`overview-chip-${instructor.id}`}
+                              key={`overview-chip-${overviewEntity}-${item.id}`}
                               type="button"
-                              onClick={() => setSelectedInstructorId(instructor.id)}
-                              className={`rounded-2xl border px-3 py-1.5 text-sm font-black leading-none transition ${
+                              onClick={() => {
+                                if (overviewEntity === "instructor") {
+                                  setSelectedInstructorId(item.id);
+                                  setRoleView("instructor");
+                                } else {
+                                  setSelectedStudentId(item.id);
+                                  setRoleView("student");
+                                }
+                              }}
+                              className={`rounded-full border px-3 py-1.5 text-sm font-black leading-none transition ${
                                 active
                                   ? "border-sky-300 bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
                                   : "border-slate-200/80 bg-white/88 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
                               }`}
                             >
-                              {instructor.name}
+                              {item.name}
                             </button>
                           );
                         })}
@@ -3250,11 +3874,11 @@ export default function SynchroSPage() {
                   <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
                 ) : (
                   <TimetableGrid
-                    roleView="instructor"
+                    roleView={overviewEntity}
                     days={DAYS}
                     timeSlots={TIME_SLOTS}
                     events={displayEvents}
-                    daysOff={selectedInstructorDaysOff}
+                    daysOff={overviewEntity === "instructor" ? selectedInstructorDaysOff : []}
                     viewMode="summary"
                     highlightCellTints={{}}
                     onEventMove={undefined}
@@ -3265,8 +3889,8 @@ export default function SynchroSPage() {
 
               <aside className="rounded-3xl border border-white/40 bg-[linear-gradient(180deg,rgba(255,255,255,0.46),rgba(219,234,254,0.42),rgba(224,231,255,0.4))] p-4 shadow-lg shadow-slate-900/5 backdrop-blur-md">
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Quick Read</p>
-                <p className="mt-2 text-xl font-black text-slate-900">{selectedInstructorLabel}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-500">{selectedInstructorSecondary || "담당 과목 정보 없음"}</p>
+                <p className="mt-2 text-xl font-black text-slate-900">{currentTargetLabel}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">{profileSecondary || "추가 정보 없음"}</p>
                 <div className="mt-4 rounded-2xl border border-white/60 bg-white/60 p-4">
                   <p className="text-xs font-bold text-slate-500">이번 주 배치 수업</p>
                   <p className="mt-2 text-3xl font-black text-slate-900">{displayEvents.length}개</p>
