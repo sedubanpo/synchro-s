@@ -9,6 +9,10 @@ type LoginPayload = {
   password?: string;
 };
 
+function normalizeTeacherName(value: string): string {
+  return value.replace(/^\/+/, "").replace(/\s+/g, "").trim().toLowerCase();
+}
+
 export async function POST(req: Request) {
   try {
     const payload = (await req.json()) as LoginPayload;
@@ -25,29 +29,37 @@ export async function POST(req: Request) {
     }
 
     const supabase = await createSupabaseServerClient();
-    const { data: instructor, error } = await supabase
+    const teacherNameToken = normalizeTeacherName(verified.teacherName);
+    const { data: instructors, error } = await supabase
       .from("instructors")
       .select("id,instructor_name,is_active")
-      .eq("instructor_name", verified.teacherName)
-      .maybeSingle();
+      .eq("is_active", true);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    if (!instructor?.id || instructor.is_active === false) {
+    const matched =
+      (instructors ?? []).find(
+        (item: { id: string; instructor_name: string }) =>
+          normalizeTeacherName(item.instructor_name) === teacherNameToken
+      ) ??
+      (instructors ?? []).find((item: { id: string; instructor_name: string }) => {
+        const token = normalizeTeacherName(item.instructor_name);
+        return token.includes(teacherNameToken) || teacherNameToken.includes(token);
+      });
+
+    if (!matched?.id) {
       return jsonError("Teachers 시트 계정과 매칭되는 활성 강사 정보가 없습니다.", 403);
     }
 
     const token = buildSessionToken({
-      fullName: instructor.instructor_name,
-      instructorId: instructor.id
+      fullName: matched.instructor_name,
+      instructorId: matched.id
     });
 
     const response = NextResponse.json({
       ok: true,
       role: "instructor",
-      name: instructor.instructor_name
+      name: matched.instructor_name
     });
 
     response.cookies.set({
