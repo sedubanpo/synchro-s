@@ -1,12 +1,13 @@
 import crypto from "crypto";
+type AppUserRole = "admin" | "coordinator" | "instructor" | "student";
 
 const COOKIE_NAME = "synchro_s_session";
 const DEFAULT_TTL_SECONDS = 60 * 60 * 12;
 
 type SessionPayload = {
-  role: "instructor";
+  role: AppUserRole;
   fullName: string;
-  instructorId: string;
+  instructorId?: string | null;
   issuedAt: number;
   expiresAt: number;
 };
@@ -31,12 +32,12 @@ export function getSessionCookieName(): string {
   return COOKIE_NAME;
 }
 
-export function buildSessionToken(input: { fullName: string; instructorId: string }): string {
+export function buildSessionToken(input: { fullName: string; role: AppUserRole; instructorId?: string | null }): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
-    role: "instructor",
+    role: input.role,
     fullName: input.fullName,
-    instructorId: input.instructorId,
+    instructorId: input.instructorId ?? null,
     issuedAt: now,
     expiresAt: now + DEFAULT_TTL_SECONDS
   };
@@ -58,8 +59,8 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
   }
   try {
     const payload = JSON.parse(base64UrlDecode(body)) as SessionPayload;
-    if (payload.role !== "instructor") return null;
-    if (!payload.fullName || !payload.instructorId) return null;
+    if (!["admin", "coordinator", "instructor", "student"].includes(payload.role)) return null;
+    if (!payload.fullName) return null;
     const now = Math.floor(Date.now() / 1000);
     if (!payload.expiresAt || payload.expiresAt < now) return null;
     return payload;

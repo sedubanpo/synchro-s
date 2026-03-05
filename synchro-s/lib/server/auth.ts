@@ -11,13 +11,13 @@ export async function getAuthenticatedProfile() {
   if (sheetSession) {
     return {
       supabase,
-      user: { id: `sheet:${sheetSession.instructorId}` },
+      user: { id: `sheet:${sheetSession.instructorId ?? sheetSession.fullName}` },
       profile: {
-        id: sheetSession.instructorId,
-        role: "instructor" as AppUserRole,
+        id: sheetSession.instructorId ?? `sheet-profile:${sheetSession.fullName}`,
+        role: sheetSession.role as AppUserRole,
         full_name: sheetSession.fullName,
         auth_source: "sheet",
-        instructor_id: sheetSession.instructorId
+        instructor_id: sheetSession.instructorId ?? null
       },
       profileError: null
     } as const;

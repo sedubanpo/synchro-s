@@ -9,6 +9,8 @@ type LoginPayload = {
   password?: string;
 };
 
+const MANAGER_NAME_ALLOWLIST = new Set(["에스에듀", "안종성", "홍성우", "김용찬"]);
+
 function normalizeTeacherName(value: string): string {
   return value.replace(/^\/+/, "").replace(/\s+/g, "").trim().toLowerCase();
 }
@@ -30,36 +32,52 @@ export async function POST(req: Request) {
 
     const supabase = await createSupabaseServerClient();
     const teacherNameToken = normalizeTeacherName(verified.teacherName);
+    const { data: users, error: usersError } = await supabase
+      .from("users")
+      .select("id,role,full_name");
+    if (usersError) throw usersError;
+
+    const matchedUser =
+      (users ?? []).find((item: { full_name: string }) => normalizeTeacherName(item.full_name ?? "") === teacherNameToken) ??
+      (users ?? []).find((item: { full_name: string }) => {
+        const token = normalizeTeacherName(item.full_name ?? "");
+        return token.includes(teacherNameToken) || teacherNameToken.includes(token);
+      });
+
+    const userRole = (matchedUser?.role as "admin" | "coordinator" | "instructor" | "student" | undefined) ?? undefined;
+    const sessionRole = userRole === "admin" || userRole === "coordinator" ? userRole : MANAGER_NAME_ALLOWLIST.has(verified.teacherName) ? "coordinator" : "instructor";
+
     const { data: instructors, error } = await supabase
       .from("instructors")
-      .select("id,instructor_name,is_active")
-      .eq("is_active", true);
+      .select("id,instructor_name,is_active");
 
     if (error) throw error;
 
     const matched =
       (instructors ?? []).find(
-        (item: { id: string; instructor_name: string }) =>
-          normalizeTeacherName(item.instructor_name) === teacherNameToken
+        (item: { id: string; instructor_name: string; is_active?: boolean | null }) =>
+          item.is_active !== false && normalizeTeacherName(item.instructor_name) === teacherNameToken
       ) ??
-      (instructors ?? []).find((item: { id: string; instructor_name: string }) => {
+      (instructors ?? []).find((item: { id: string; instructor_name: string; is_active?: boolean | null }) => {
+        if (item.is_active === false) return false;
         const token = normalizeTeacherName(item.instructor_name);
         return token.includes(teacherNameToken) || teacherNameToken.includes(token);
       });
 
-    if (!matched?.id) {
+    if (sessionRole === "instructor" && !matched?.id) {
       return jsonError("Teachers 시트 계정과 매칭되는 활성 강사 정보가 없습니다.", 403);
     }
 
     const token = buildSessionToken({
-      fullName: matched.instructor_name,
-      instructorId: matched.id
+      fullName: matched?.instructor_name ?? verified.teacherName,
+      role: sessionRole,
+      instructorId: matched?.id ?? null
     });
 
     const response = NextResponse.json({
       ok: true,
-      role: "instructor",
-      name: matched.instructor_name
+      role: sessionRole,
+      name: matched?.instructor_name ?? verified.teacherName
     });
 
     response.cookies.set({
