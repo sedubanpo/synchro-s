@@ -126,6 +126,23 @@ type SaveHistoryResponse = {
   }[];
 };
 
+type TimetableGroupApiItem = {
+  id: string;
+  createdAt: string;
+  updatedAt?: string;
+  roleView: RoleView;
+  targetId: string;
+  weekStart: string;
+  name: string;
+  classIds: string[];
+  snapshotEvents?: ScheduleEvent[];
+  isActive: boolean;
+};
+
+type TimetableGroupsResponse = {
+  items?: TimetableGroupApiItem[];
+};
+
 type SpecialNoteItem = {
   id: string;
   createdAt: string;
@@ -167,6 +184,20 @@ function cloneTimetableGroups(items: TimetableGroup[]): TimetableGroup[] {
     classIds: [...group.classIds],
     snapshotEvents: group.snapshotEvents ? cloneEvents(group.snapshotEvents) : undefined
   }));
+}
+
+function mapApiGroupToState(item: TimetableGroupApiItem): TimetableGroup {
+  return {
+    id: item.id,
+    name: item.name,
+    roleView: item.roleView,
+    targetId: item.targetId,
+    weekStart: item.weekStart,
+    classIds: Array.isArray(item.classIds) ? item.classIds : [],
+    snapshotEvents: Array.isArray(item.snapshotEvents) ? cloneEvents(item.snapshotEvents) : [],
+    isActive: item.isActive === true,
+    createdAt: item.createdAt
+  };
 }
 
 function formatDateISOInKST(date: Date): string {
@@ -663,7 +694,6 @@ export default function SynchroSPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
-  const [groupsHydrated, setGroupsHydrated] = useState(false);
   const [conflictDialog, setConflictDialog] = useState<ConflictDialogState>({
     open: false,
     title: "",
@@ -1419,6 +1449,141 @@ export default function SynchroSPage() {
     );
   }, [moveToLogin]);
 
+  const loadTimetableGroups = useCallback(async () => {
+    const res = await fetch("/api/schedules/groups", { method: "GET", cache: "no-store" });
+
+    if (res.status === 401) {
+      moveToLogin();
+      return;
+    }
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? "저장된 시간표 그룹을 불러오지 못했습니다.");
+    }
+
+    const data = (await res.json().catch(() => ({}))) as TimetableGroupsResponse;
+    setTimetableGroups((data.items ?? []).map(mapApiGroupToState));
+  }, [moveToLogin]);
+
+  const createTimetableGroup = useCallback(
+    async (input: {
+      name: string;
+      roleView: RoleView;
+      targetId: string;
+      weekStart: string;
+      classIds: string[];
+      snapshotEvents: ScheduleEvent[];
+      isActive?: boolean;
+    }) => {
+      const res = await fetch("/api/schedules/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input)
+      });
+
+      if (res.status === 401) {
+        moveToLogin();
+        return null;
+      }
+
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "시간표 그룹 저장에 실패했습니다.");
+      }
+
+      const payload = (await res.json().catch(() => ({}))) as { item?: TimetableGroupApiItem };
+      const created = payload.item ? mapApiGroupToState(payload.item) : null;
+      await loadTimetableGroups();
+      return created;
+    },
+    [loadTimetableGroups, moveToLogin]
+  );
+
+  const activateTimetableGroup = useCallback(
+    async (groupId: string) => {
+      const res = await fetch("/api/schedules/groups", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "activate", id: groupId })
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return false;
+      }
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "그룹 활성화에 실패했습니다.");
+      }
+      await loadTimetableGroups();
+      return true;
+    },
+    [loadTimetableGroups, moveToLogin]
+  );
+
+  const renameTimetableGroup = useCallback(
+    async (groupId: string, name: string) => {
+      const nextName = name.trim();
+      if (!nextName) return;
+      const res = await fetch("/api/schedules/groups", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rename", id: groupId, name: nextName })
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "그룹 이름 저장에 실패했습니다.");
+      }
+    },
+    [moveToLogin]
+  );
+
+  const saveTimetableGroupSnapshot = useCallback(
+    async (groupId: string, classIds: string[], snapshotEvents: ScheduleEvent[]) => {
+      const res = await fetch("/api/schedules/groups", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "snapshot",
+          id: groupId,
+          classIds,
+          snapshotEvents
+        })
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "그룹 스냅샷 저장에 실패했습니다.");
+      }
+    },
+    [moveToLogin]
+  );
+
+  const deleteTimetableGroupRecord = useCallback(
+    async (groupId: string) => {
+      const res = await fetch(`/api/schedules/groups?id=${encodeURIComponent(groupId)}`, {
+        method: "DELETE"
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "그룹 삭제에 실패했습니다.");
+      }
+      await loadTimetableGroups();
+    },
+    [loadTimetableGroups, moveToLogin]
+  );
+
   const loadOverviewEvents = useCallback(async () => {
     const query = new URLSearchParams({ weekStart, view: "instructor" });
     const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
@@ -1541,14 +1706,21 @@ export default function SynchroSPage() {
 
     try {
       router.refresh();
-      await Promise.all([loadOptions(), loadWeek({ silent: true }), loadSaveHistory(), loadOverviewEvents(), loadSpecialNotes()]);
+      await Promise.all([
+        loadOptions(),
+        loadWeek({ silent: true }),
+        loadSaveHistory(),
+        loadTimetableGroups(),
+        loadOverviewEvents(),
+        loadSpecialNotes()
+      ]);
       setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "데이터 새로고침에 실패했습니다.");
     } finally {
       setRefreshingData(false);
     }
-  }, [loadOptions, loadOverviewEvents, loadSaveHistory, loadSpecialNotes, loadWeek, refreshingData, router]);
+  }, [loadOptions, loadOverviewEvents, loadSaveHistory, loadSpecialNotes, loadTimetableGroups, loadWeek, refreshingData, router]);
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -2120,24 +2292,18 @@ export default function SynchroSPage() {
         setError("강사/학생 선택 후 다시 시도해 주세요.");
         return;
       }
-      const newGroup: TimetableGroup = {
-        id: crypto.randomUUID(),
+      const created = await createTimetableGroup({
         name: `${weekStart} ${currentTargetLabel} 시간표`,
         roleView,
         targetId: currentTargetId,
         weekStart,
         classIds: existingClassIds,
         snapshotEvents: displayEvents.filter((event) => existingClassIds.includes(event.id)).map((event) => ({ ...event })),
-        isActive: true,
-        createdAt: new Date().toISOString()
-      };
-      setTimetableGroups((prev) => {
-        const next = prev.map((group) =>
-          group.roleView === roleView && group.targetId === currentTargetId ? { ...group, isActive: false } : group
-        );
-        return [newGroup, ...next];
+        isActive: true
       });
-      setSelectedGroupId(newGroup.id);
+      if (created?.id) {
+        setSelectedGroupId(created.id);
+      }
       setError(null);
       setNotice(`현재 시간표를 그룹으로 저장했습니다. (${existingClassIds.length}개 수업)`);
       return;
@@ -2372,24 +2538,18 @@ export default function SynchroSPage() {
 
       const dedupedClassIds = Array.from(new Set(importedClassIds));
       if (dedupedClassIds.length > 0 && currentTargetId) {
-        const newGroup: TimetableGroup = {
-          id: crypto.randomUUID(),
+        const created = await createTimetableGroup({
           name: `${weekStart} ${currentTargetLabel} 시간표`,
           roleView,
           targetId: currentTargetId,
           weekStart,
           classIds: dedupedClassIds,
           snapshotEvents: [],
-          isActive: true,
-          createdAt: new Date().toISOString()
-        };
-        setTimetableGroups((prev) => {
-          const next = prev.map((group) =>
-            group.roleView === roleView && group.targetId === currentTargetId ? { ...group, isActive: false } : group
-          );
-          return [newGroup, ...next];
+          isActive: true
         });
-        setSelectedGroupId(newGroup.id);
+        if (created?.id) {
+          setSelectedGroupId(created.id);
+        }
       }
 
       if (created > 0 || existing > 0) {
@@ -2451,6 +2611,7 @@ export default function SynchroSPage() {
     }
     await loadWeek({ silent: true });
   }, [
+    createTimetableGroup,
     classTypes,
     instructors,
     loadWeek,
@@ -2730,45 +2891,50 @@ export default function SynchroSPage() {
     }
   }, [loadOptions, moveToLogin]);
 
-  const handleActivateGroup = useCallback((groupId: string) => {
-    setParsedNotionItems([]);
-    let activatedSnapshot: ScheduleEvent[] = [];
-    setTimetableGroups((prev) =>
-      prev.map((group) => {
-        if (group.roleView === roleView && group.targetId === currentTargetId) {
-          const nextGroup = { ...group, isActive: group.id === groupId };
-          if (group.id === groupId) {
-            activatedSnapshot = nextGroup.snapshotEvents ?? [];
-          }
-          return nextGroup;
-        }
-        return group;
-      })
-    );
-    if (activatedSnapshot.length > 0) {
-      setEvents(activatedSnapshot.map((event) => ({ ...event })));
-    }
-    setSelectedGroupId(groupId);
-    setNotice("활성 시간표를 변경했습니다.");
-  }, [currentTargetId, roleView]);
+  const handleActivateGroup = useCallback(
+    async (groupId: string) => {
+      setParsedNotionItems([]);
+      await activateTimetableGroup(groupId);
+      const activated = timetableGroups.find((group) => group.id === groupId);
+      const activatedSnapshot = activated?.snapshotEvents ?? [];
+      if (activatedSnapshot.length > 0) {
+        setEvents(activatedSnapshot.map((event) => ({ ...event })));
+      }
+      setSelectedGroupId(groupId);
+      setNotice("활성 시간표를 변경했습니다.");
+    },
+    [activateTimetableGroup, timetableGroups]
+  );
 
-  const handleSelectGroup = useCallback((groupId: string) => {
-    setParsedNotionItems([]);
-    setTimetableGroups((prev) =>
-      prev.map((group) => {
-        if (group.id !== groupId) return group;
-        const snapshot = group.snapshotEvents ?? [];
-        const hasDraftSnapshot = snapshot.some((event) => event.id.startsWith("draft-"));
-        if (snapshot.length > 0 && !hasDraftSnapshot) return group;
-        const seeded = filteredEvents
-          .filter((event) => group.classIds.includes(event.id))
-          .map((event) => ({ ...event }));
-        return { ...group, snapshotEvents: seeded };
-      })
-    );
-    setSelectedGroupId(groupId);
-    setNotice("선택한 그룹 시간표를 표시했습니다.");
-  }, [filteredEvents]);
+  const handleSelectGroup = useCallback(
+    (groupId: string) => {
+      setParsedNotionItems([]);
+      let seededSnapshot: ScheduleEvent[] | null = null;
+      let seededClassIds: string[] = [];
+      setTimetableGroups((prev) =>
+        prev.map((group) => {
+          if (group.id !== groupId) return group;
+          const snapshot = group.snapshotEvents ?? [];
+          const hasDraftSnapshot = snapshot.some((event) => event.id.startsWith("draft-"));
+          if (snapshot.length > 0 && !hasDraftSnapshot) return group;
+          const seeded = filteredEvents
+            .filter((event) => group.classIds.includes(event.id))
+            .map((event) => ({ ...event }));
+          seededSnapshot = seeded;
+          seededClassIds = seeded.map((event) => event.id);
+          return { ...group, classIds: seededClassIds, snapshotEvents: seeded };
+        })
+      );
+      if (seededSnapshot) {
+        void saveTimetableGroupSnapshot(groupId, seededClassIds, seededSnapshot).catch(() => {
+          // Snapshot sync failure should not block selection UX.
+        });
+      }
+      setSelectedGroupId(groupId);
+      setNotice("선택한 그룹 시간표를 표시했습니다.");
+    },
+    [filteredEvents, saveTimetableGroupSnapshot]
+  );
 
   const handleOpenDeleteGroupDialog = useCallback(
     (groupId: string) => {
@@ -2818,6 +2984,14 @@ export default function SynchroSPage() {
         return;
       }
 
+      try {
+        await deleteTimetableGroupRecord(groupId);
+      } catch (groupDeleteError) {
+        setDeleteGroupDialog((prev) => ({ ...prev, submitting: false }));
+        setError(groupDeleteError instanceof Error ? groupDeleteError.message : "그룹 삭제에 실패했습니다.");
+        return;
+      }
+
       setDeleteGroupDialog({ open: false, groupId: null, groupName: "", submitting: false });
       setTimetableGroups((prev) => {
         const next = prev.filter((group) => group.id !== groupId);
@@ -2834,12 +3008,23 @@ export default function SynchroSPage() {
       setNotice("시간표 그룹과 해당 수업을 삭제했습니다.");
       await loadWeek({ silent: true });
     },
-    [loadWeek, moveToLogin, timetableGroups]
+    [deleteTimetableGroupRecord, loadWeek, moveToLogin, timetableGroups]
   );
 
   const handleRenameGroup = useCallback((groupId: string, name: string) => {
     setTimetableGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, name } : group)));
   }, []);
+
+  const handlePersistGroupName = useCallback(
+    async (groupId: string, name: string) => {
+      try {
+        await renameTimetableGroup(groupId, name);
+      } catch (renameError) {
+        setError(renameError instanceof Error ? renameError.message : "그룹 이름 저장에 실패했습니다.");
+      }
+    },
+    [renameTimetableGroup]
+  );
 
   useEffect(() => {
     void loadOptions().catch((loadError) => {
@@ -2852,6 +3037,12 @@ export default function SynchroSPage() {
       setError(loadError instanceof Error ? loadError.message : "저장 기록을 불러오지 못했습니다.");
     });
   }, [loadSaveHistory]);
+
+  useEffect(() => {
+    void loadTimetableGroups().catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "저장된 시간표 그룹을 불러오지 못했습니다.");
+    });
+  }, [loadTimetableGroups]);
 
   useEffect(() => {
     void loadOverviewEvents().catch((loadError) => {
@@ -2885,22 +3076,6 @@ export default function SynchroSPage() {
   }, [mainTab, overviewEntity, overviewVisibleInstructors, selectedInstructorId, selectedStudentId, students]);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("synchro-s-timetable-groups-v1");
-    if (!saved) {
-      setGroupsHydrated(true);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(saved) as TimetableGroup[];
-      setTimetableGroups(parsed);
-    } catch {
-      setTimetableGroups([]);
-    } finally {
-      setGroupsHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
     const savedMemo = window.localStorage.getItem("synchro-s-event-memo-v1");
     if (!savedMemo) return;
     try {
@@ -2909,11 +3084,6 @@ export default function SynchroSPage() {
       setMemoByEventId({});
     }
   }, []);
-
-  useEffect(() => {
-    if (!groupsHydrated) return;
-    window.localStorage.setItem("synchro-s-timetable-groups-v1", JSON.stringify(timetableGroups));
-  }, [groupsHydrated, timetableGroups]);
 
   useEffect(() => {
     window.localStorage.setItem("synchro-s-event-memo-v1", JSON.stringify(memoByEventId));
@@ -3668,13 +3838,22 @@ export default function SynchroSPage() {
                         value={group.name}
                         onClick={(event) => event.stopPropagation()}
                         onChange={(event) => handleRenameGroup(group.id, event.target.value)}
+                        onBlur={(event) => {
+                          void handlePersistGroupName(group.id, event.target.value);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            (event.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
                         className="flex-1 rounded-lg border border-white/30 bg-white/15 px-2 py-1 text-xs font-semibold text-white outline-none placeholder:text-white/70"
                       />
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          handleActivateGroup(group.id);
+                          void handleActivateGroup(group.id);
                         }}
                         className={`rounded-lg border px-2 py-1 text-[11px] font-semibold backdrop-blur-xl ${
                           group.isActive
