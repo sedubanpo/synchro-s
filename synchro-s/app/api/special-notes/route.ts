@@ -26,16 +26,22 @@ export async function GET(req: Request) {
       return jsonError("Authenticated but no app profile or role mapping in public.users", 403);
     }
 
-    if (!canManageSchedules(profile.role)) {
-      return jsonError("Forbidden", 403);
-    }
-
     const { searchParams } = new URL(req.url);
     const targetType = searchParams.get("targetType");
     const targetId = searchParams.get("targetId");
 
     if (!isTargetType(targetType) || !targetId) {
       return jsonError("targetType and targetId are required", 400);
+    }
+
+    if (!canManageSchedules(profile.role)) {
+      if (profile.role !== "instructor") {
+        return jsonError("Forbidden", 403);
+      }
+      const ownInstructorId = (profile as { instructor_id?: string | null }).instructor_id ?? null;
+      if (targetType !== "강사" || !ownInstructorId || ownInstructorId !== targetId) {
+        return jsonError("Forbidden", 403);
+      }
     }
 
     const { data, error } = await supabase

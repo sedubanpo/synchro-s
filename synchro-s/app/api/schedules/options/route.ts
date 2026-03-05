@@ -180,6 +180,7 @@ export async function GET() {
 
     let instructors: { id: string; name: string; secondary?: string; daysOff?: number[] }[] = [];
     let students: { id: string; name: string; secondary?: string }[] = [];
+    const profileInstructorId = (profile as { instructor_id?: string | null }).instructor_id ?? null;
 
     if (profile.role === "admin" || profile.role === "coordinator") {
       const [instructorRes, studentRes] = await Promise.all([
@@ -208,11 +209,10 @@ export async function GET() {
           secondary: studentSchoolByName.get(normalizeName(row.student_name))
         }));
     } else if (profile.role === "instructor") {
-      const { data: ownInstructor, error: ownInstructorError } = await supabase
-        .from("instructors")
-        .select("id,instructor_name,days_off")
-        .eq("user_id", user.id)
-        .single();
+      const instructorQuery = supabase.from("instructors").select("id,instructor_name,days_off");
+      const { data: ownInstructor, error: ownInstructorError } = profileInstructorId
+        ? await instructorQuery.eq("id", profileInstructorId).single()
+        : await instructorQuery.eq("user_id", user.id).single();
 
       if (ownInstructorError || !ownInstructor) {
         return jsonError("Instructor profile not found", 400);
@@ -310,6 +310,8 @@ export async function GET() {
     }
 
     return NextResponse.json({
+      viewerRole: profile.role,
+      viewerName: profile.full_name ?? "",
       instructors,
       students,
       subjects: (subjectRes.data ?? []).map(

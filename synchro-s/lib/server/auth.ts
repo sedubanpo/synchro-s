@@ -1,9 +1,28 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { getSessionCookieName, verifySessionToken } from "@/lib/server/sessionToken";
 
 export type AppUserRole = "admin" | "coordinator" | "instructor" | "student";
 
 export async function getAuthenticatedProfile() {
   const supabase = await createSupabaseServerClient();
+  const cookieStore = cookies();
+  const sheetSession = verifySessionToken(cookieStore.get(getSessionCookieName())?.value);
+  if (sheetSession) {
+    return {
+      supabase,
+      user: { id: `sheet:${sheetSession.instructorId}` },
+      profile: {
+        id: sheetSession.instructorId,
+        role: "instructor" as AppUserRole,
+        full_name: sheetSession.fullName,
+        auth_source: "sheet",
+        instructor_id: sheetSession.instructorId
+      },
+      profileError: null
+    } as const;
+  }
+
   const {
     data: { user },
     error: authError

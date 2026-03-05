@@ -1,6 +1,5 @@
 "use client";
 
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -10,21 +9,21 @@ function LoginPageContent() {
   const searchParams = useSearchParams();
   const nextPath = useMemo(() => searchParams.get("next") || "/synchro-s", [searchParams]);
 
-  const [email, setEmail] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
 
   const verifyAccess = useCallback(async (): Promise<boolean> => {
-    const res = await fetch("/api/schedules/options", { method: "GET", cache: "no-store" });
+      const res = await fetch("/api/schedules/options", { method: "GET", cache: "no-store" });
     if (res.ok) {
       return true;
     }
 
     if (res.status === 403) {
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(payload.error ?? "로그인 계정은 앱 접근 권한이 없습니다. public.users role 매핑을 확인하세요.");
+      setError(payload.error ?? "로그인 계정은 앱 접근 권한이 없습니다.");
       return false;
     }
 
@@ -40,11 +39,8 @@ function LoginPageContent() {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const supabase = createSupabaseBrowserClient();
-        const {
-          data: { session }
-        } = await supabase.auth.getSession();
-        if (session && (await verifyAccess())) {
+        const sessionRes = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
+        if (sessionRes.ok && (await verifyAccess())) {
           router.replace(nextPath);
         }
       } catch {
@@ -62,14 +58,18 @@ function LoginPageContent() {
     setError(null);
 
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password
+      const loginRes = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: loginId,
+          password
+        })
       });
 
-      if (signInError) {
-        throw signInError;
+      if (!loginRes.ok) {
+        const payload = (await loginRes.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "로그인에 실패했습니다.");
       }
 
       if (await verifyAccess()) {
@@ -94,8 +94,7 @@ function LoginPageContent() {
             </div>
             <h1 className="mt-10 text-5xl font-black tracking-tight text-slate-900">Timetable DB Login</h1>
             <p className="mt-4 text-base font-semibold leading-7 text-slate-500">
-              강사/학생 시간표를 조회하고, 노션 데이터를 반영하고, 주간 그룹을 저장하는 운영용 화면입니다.
-              관리자/코디네이터 계정으로 로그인해 주세요.
+              Teachers 시트 기반 아이디/비밀번호로 로그인합니다. 아이디는 휴대전화 번호이며 하이픈(-)이나 010이 누락되어도 인식됩니다.
             </p>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
@@ -113,18 +112,18 @@ function LoginPageContent() {
 
             <form className="mt-10 space-y-4" onSubmit={handleSubmit}>
               <label className="block space-y-1">
-                <span className="text-xs font-bold text-slate-600">Email</span>
+                <span className="text-xs font-bold text-slate-600">아이디 (휴대전화 번호)</span>
                 <input
                   className="w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm font-semibold text-slate-800 outline-none shadow-inner shadow-white/40 focus:border-sky-300"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={loginId}
+                  onChange={(e) => setLoginId(e.target.value)}
                   required
                 />
               </label>
 
               <label className="block space-y-1">
-                <span className="text-xs font-bold text-slate-600">Password</span>
+                <span className="text-xs font-bold text-slate-600">비밀번호</span>
                 <input
                   className="w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm font-semibold text-slate-800 outline-none shadow-inner shadow-white/40 focus:border-sky-300"
                   type="password"

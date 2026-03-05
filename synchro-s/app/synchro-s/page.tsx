@@ -23,6 +23,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 type SubjectOptionWithColor = SubjectOption & { tailwindClass?: string };
 
 type OptionsResponse = {
+  viewerRole?: "admin" | "coordinator" | "instructor" | "student";
+  viewerName?: string;
   instructors: SelectOption[];
   students: SelectOption[];
   subjects: SubjectOptionWithColor[];
@@ -605,6 +607,7 @@ export default function SynchroSPage() {
   const [studentOverviewMode, setStudentOverviewMode] = useState<StudentOverviewMode>("weekday");
   const [weekStart, setWeekStart] = useState<string>(mondayOfCurrentWeek);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
+  const [viewerRole, setViewerRole] = useState<"admin" | "coordinator" | "instructor" | "student">("admin");
   const [overviewEvents, setOverviewEvents] = useState<ScheduleEvent[]>([]);
 
   const [instructors, setInstructors] = useState<SelectOption[]>([]);
@@ -839,6 +842,7 @@ export default function SynchroSPage() {
   );
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
+  const isInstructorReadOnly = viewerRole === "instructor";
   const profileTitle = roleView === "student" ? "학생 프로필" : "강사 프로필";
   const profileName = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
   const profileSecondary = roleView === "student" ? selectedStudentSecondary : selectedInstructorSecondary;
@@ -1193,11 +1197,21 @@ export default function SynchroSPage() {
     setStudents(data.students);
     setSubjects(data.subjects);
     setClassTypes(data.classTypes);
+    if (data.viewerRole) {
+      setViewerRole(data.viewerRole);
+    }
 
-    setSelectedInstructorId((prev) => (data.instructors.some((item) => item.id === prev) ? prev : ""));
+    setSelectedInstructorId((prev) => {
+      if (data.instructors.some((item) => item.id === prev)) return prev;
+      if (data.viewerRole === "instructor" && data.instructors.length > 0) return data.instructors[0]!.id;
+      return "";
+    });
     setSelectedStudentId((prev) => (data.students.some((item) => item.id === prev) ? prev : ""));
 
-    if (data.instructors.length > 0 && data.students.length === 0) {
+    if (data.viewerRole === "instructor") {
+      setMainTab("instructor");
+      setRoleView("instructor");
+    } else if (data.instructors.length > 0 && data.students.length === 0) {
       setRoleView("instructor");
     }
     if (data.students.length > 0 && data.instructors.length === 0) {
@@ -1972,6 +1986,7 @@ export default function SynchroSPage() {
 
   const handleLogout = useCallback(async () => {
     try {
+      await fetch("/api/auth/logout", { method: "POST" });
       const supabase = createSupabaseBrowserClient();
       await supabase.auth.signOut();
     } finally {
@@ -3106,11 +3121,14 @@ export default function SynchroSPage() {
                 앱 소개
               </button>
               <div className="inline-flex rounded-2xl border border-white/55 bg-white/35 p-1 shadow-[0_12px_34px_rgba(31,38,135,0.16)] backdrop-blur-xl">
-                {([
-                  { key: "overview", label: "전체 요약" },
-                  { key: "instructor", label: "강사" },
-                  { key: "student", label: "학생" }
-                ] as const).map((tab) => {
+                {(isInstructorReadOnly
+                  ? ([{ key: "instructor", label: "강사" }] as const)
+                  : ([
+                      { key: "overview", label: "전체 요약" },
+                      { key: "instructor", label: "강사" },
+                      { key: "student", label: "학생" }
+                    ] as const)
+                ).map((tab) => {
                   const active = mainTab === tab.key;
                   const accentClass =
                     tab.key === "overview"
@@ -3201,31 +3219,35 @@ export default function SynchroSPage() {
                   정규수업은 매주 같은 시간에 반복 표시됩니다. 특정 날짜에 배정된 보강/단기 수업(one-off)만 해당 주차에 표시됩니다.
                 </div>
               </div>
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm shadow-blue-500/10 backdrop-blur-md hover:bg-white/55"
-                onClick={() => void handleCopyForNotion()}
-              >
-                <span className="h-2 w-2 rounded-full bg-blue-400" />
-                노션 붙여넣기 복사
-              </button>
-              <button
-                type="button"
-                disabled={syncingSheets}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-emerald-700 shadow-sm shadow-emerald-500/10 backdrop-blur-md hover:bg-white/55 disabled:opacity-60"
-                onClick={() => void handleSyncSheets()}
-              >
-                <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                {syncingSheets ? "시트 동기화 중..." : "명단 동기화"}
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-violet-700 shadow-sm shadow-violet-500/10 backdrop-blur-md hover:bg-white/55"
-                onClick={openSubjectSettingsModal}
-              >
-                <span className="h-2 w-2 rounded-full bg-violet-400" />
-                과목 코드 설정
-              </button>
+              {!isInstructorReadOnly ? (
+                <>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm shadow-blue-500/10 backdrop-blur-md hover:bg-white/55"
+                    onClick={() => void handleCopyForNotion()}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-blue-400" />
+                    노션 붙여넣기 복사
+                  </button>
+                  <button
+                    type="button"
+                    disabled={syncingSheets}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-emerald-700 shadow-sm shadow-emerald-500/10 backdrop-blur-md hover:bg-white/55 disabled:opacity-60"
+                    onClick={() => void handleSyncSheets()}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                    {syncingSheets ? "시트 동기화 중..." : "명단 동기화"}
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-violet-700 shadow-sm shadow-violet-500/10 backdrop-blur-md hover:bg-white/55"
+                    onClick={openSubjectSettingsModal}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-violet-400" />
+                    과목 코드 설정
+                  </button>
+                </>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -3383,6 +3405,7 @@ export default function SynchroSPage() {
       <div className="rounded-xl border border-blue-100 bg-white/60 px-4 py-2 text-xs font-semibold text-slate-600 backdrop-blur-sm">
         노션 시간표는 아래 입력칸에 직접 붙여넣거나 클립보드에서 불러온 뒤, 시간표 미리보기/DB 저장까지 진행할 수 있습니다.
       </div>
+      {!isInstructorReadOnly ? (
       <div className="rounded-xl border border-slate-200 bg-white/70 p-3 backdrop-blur-sm">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <p className="text-xs font-semibold text-slate-600">노션 시간표 원본 텍스트</p>
@@ -3436,6 +3459,11 @@ export default function SynchroSPage() {
           className="h-28 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700"
         />
       </div>
+      ) : (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-xs font-semibold text-sky-700">
+          강사 계정은 본인 시간표 조회만 가능합니다. 편집/저장/삭제 기능은 관리자 계정에서만 사용할 수 있습니다.
+        </div>
+      )}
 
       <section className="grid flex-1 gap-4 xl:grid-cols-[1fr_330px]">
         <div>
@@ -3443,18 +3471,21 @@ export default function SynchroSPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-black text-slate-800">특이사항</p>
-                <p className="text-[11px] font-semibold text-slate-500">시간표 편성 시 참고할 요청사항을 대상별로 기록합니다.</p>
+                <p className="text-[11px] font-semibold text-slate-500">
+                  {isInstructorReadOnly ? "강사 계정은 특이사항을 열람만 할 수 있습니다." : "시간표 편성 시 참고할 요청사항을 대상별로 기록합니다."}
+                </p>
               </div>
               <div className="flex min-w-[280px] flex-1 flex-wrap items-center justify-end gap-2">
                 <input
                   value={specialNoteInput}
                   onChange={(inputEvent) => setSpecialNoteInput(inputEvent.target.value)}
                   placeholder="예: 수학은 안준성T로만 구성 희망"
+                  disabled={isInstructorReadOnly}
                   className="min-w-[220px] flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400"
                 />
                 <button
                   type="button"
-                  disabled={noteSubmitting || !currentTargetId}
+                  disabled={isInstructorReadOnly || noteSubmitting || !currentTargetId}
                   onClick={() => void handleCreateSpecialNote()}
                   className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -3479,7 +3510,7 @@ export default function SynchroSPage() {
                     </p>
                     <button
                       type="button"
-                      disabled={noteSubmitting}
+                      disabled={isInstructorReadOnly || noteSubmitting}
                       onClick={() => void handleDeleteSpecialNote(note.id)}
                       className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                     >
@@ -3527,10 +3558,11 @@ export default function SynchroSPage() {
               daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
               viewMode={timetableViewMode}
               highlightCellTints={activeHighlightCellTints}
-              onEventMove={roleView === "student" ? handleMoveSchedule : undefined}
-              onEventSave={timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
-              onEventDelete={timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
+              onEventMove={!isInstructorReadOnly && roleView === "student" ? handleMoveSchedule : undefined}
+              onEventSave={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
+              onEventDelete={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
               onCellClick={(ctx) => {
+                if (isInstructorReadOnly) return;
                 setInitialCell(ctx);
                 setModalOpen(true);
               }}
