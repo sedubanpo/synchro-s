@@ -76,10 +76,6 @@ export async function POST(req: Request) {
       }
     }
 
-    if (sessionRole === "instructor" && !matched?.id) {
-      return jsonError("Teachers 시트 계정과 매칭되는 활성 강사 정보가 없습니다.", 403);
-    }
-
     const token = buildSessionToken({
       fullName: matched?.instructor_name ?? verified.teacherName,
       role: sessionRole,

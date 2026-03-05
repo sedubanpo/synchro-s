@@ -10,6 +10,30 @@ async function findInstructorIdByUserId(supabase: any, userId: string) {
   return (data?.id as string | undefined) ?? null;
 }
 
+function normalizeNameToken(value: string): string {
+  return value.replace(/^\/+/, "").replace(/\s+/g, "").trim().toLowerCase();
+}
+
+async function findInstructorIdByName(supabase: any, fullName: string) {
+  const { data } = await supabase
+    .from("instructors")
+    .select("id,instructor_name,is_active")
+    .eq("is_active", true);
+
+  if (!data) return null;
+  const token = normalizeNameToken(fullName);
+  if (!token) return null;
+
+  const match =
+    data.find((row: { instructor_name: string }) => normalizeNameToken(row.instructor_name) === token) ??
+    data.find((row: { instructor_name: string }) => {
+      const rowToken = normalizeNameToken(row.instructor_name);
+      return rowToken.includes(token) || token.includes(rowToken);
+    });
+
+  return (match?.id as string | undefined) ?? null;
+}
+
 async function findStudentIdByUserId(supabase: any, userId: string) {
   const { data } = await supabase.from("students").select("id").eq("user_id", userId).single();
   return (data?.id as string | undefined) ?? null;
@@ -45,7 +69,10 @@ export async function GET(req: Request) {
       (profile as { instructor_id?: string | null }).instructor_id ?? null;
 
     if (profile.role === "instructor") {
-      instructorId = profileInstructorId || (await findInstructorIdByUserId(supabase, user.id));
+      instructorId =
+        profileInstructorId ||
+        (await findInstructorIdByUserId(supabase, user.id)) ||
+        (await findInstructorIdByName(supabase, (profile as { full_name?: string | null }).full_name ?? ""));
       if (!instructorId) {
         return jsonError("No instructor profile linked to this account", 400);
       }

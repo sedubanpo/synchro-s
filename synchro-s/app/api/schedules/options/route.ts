@@ -47,6 +47,10 @@ function normalizeName(value: string): string {
   return value.replace(/^\/+/, "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeNameToken(value: string): string {
+  return normalizeName(value).replace(/\s+/g, "").toLowerCase();
+}
+
 function findColumnIndex(headers: string[], candidates: string[]): number {
   const normalizedHeaders = headers.map(normalizeHeader);
   for (const candidate of candidates) {
@@ -61,6 +65,35 @@ async function fetchSheetCsv(spreadsheetId: string, sheetName: string): Promise<
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Google Sheets fetch failed (${sheetName}): ${res.status}`);
   return res.text();
+}
+
+async function findInstructorByName(
+  supabase: any,
+  fullName: string
+): Promise<{ id: string; instructor_name: string; days_off?: number[] | null } | null> {
+  const { data, error } = await supabase
+    .from("instructors")
+    .select("id,instructor_name,days_off,is_active")
+    .eq("is_active", true);
+
+  if (error || !data) return null;
+  const token = normalizeNameToken(fullName);
+  if (!token) return null;
+
+  const exact =
+    data.find((row: { instructor_name: string }) => normalizeNameToken(row.instructor_name) === token) ??
+    data.find((row: { instructor_name: string }) => {
+      const rowToken = normalizeNameToken(row.instructor_name);
+      return rowToken.includes(token) || token.includes(rowToken);
+    });
+
+  if (!exact) return null;
+
+  return {
+    id: exact.id,
+    instructor_name: exact.instructor_name,
+    days_off: exact.days_off ?? []
+  };
 }
 
 async function loadSheetMetaMap(spreadsheetId: string): Promise<{
@@ -213,24 +246,29 @@ export async function GET() {
       const { data: ownInstructor, error: ownInstructorError } = profileInstructorId
         ? await instructorQuery.eq("id", profileInstructorId).single()
         : await instructorQuery.eq("user_id", user.id).single();
+      const fallbackInstructor =
+        ownInstructorError || !ownInstructor
+          ? await findInstructorByName(supabase, (profile as { full_name?: string | null }).full_name ?? "")
+          : null;
+      const resolvedInstructor = ownInstructor ?? fallbackInstructor;
 
-      if (ownInstructorError || !ownInstructor) {
+      if (!resolvedInstructor) {
         return jsonError("Instructor profile not found", 400);
       }
 
       instructors = [
         {
-          id: ownInstructor.id,
-          name: ownInstructor.instructor_name,
-          secondary: teacherSubjectByName.get(normalizeName(ownInstructor.instructor_name)),
-          daysOff: (ownInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7)
+          id: resolvedInstructor.id,
+          name: resolvedInstructor.instructor_name,
+          secondary: teacherSubjectByName.get(normalizeName(resolvedInstructor.instructor_name)),
+          daysOff: (resolvedInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7)
         }
       ];
 
       const { data: classRows, error: classRowsError } = await supabase
         .from("classes")
         .select("id")
-        .eq("instructor_id", ownInstructor.id);
+        .eq("instructor_id", resolvedInstructor.id);
 
       if (classRowsError) throw classRowsError;
 
