@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
     if (error) throw error;
 
-    const matched =
+    let matched =
       (instructors ?? []).find(
         (item: { id: string; instructor_name: string; is_active?: boolean | null }) =>
           item.is_active !== false && normalizeTeacherName(item.instructor_name) === teacherNameToken
@@ -63,6 +63,18 @@ export async function POST(req: Request) {
         const token = normalizeTeacherName(item.instructor_name);
         return token.includes(teacherNameToken) || teacherNameToken.includes(token);
       });
+
+    if (!matched?.id && matchedUser?.id) {
+      const { data: instructorByUser, error: instructorByUserError } = await supabase
+        .from("instructors")
+        .select("id,instructor_name,is_active")
+        .eq("user_id", matchedUser.id)
+        .maybeSingle();
+      if (instructorByUserError) throw instructorByUserError;
+      if (instructorByUser?.id && instructorByUser.is_active !== false) {
+        matched = instructorByUser;
+      }
+    }
 
     if (sessionRole === "instructor" && !matched?.id) {
       return jsonError("Teachers 시트 계정과 매칭되는 활성 강사 정보가 없습니다.", 403);

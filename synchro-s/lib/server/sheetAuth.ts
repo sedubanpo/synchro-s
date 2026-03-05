@@ -54,6 +54,25 @@ function normalizePhone(value: string): string {
   return digits;
 }
 
+function normalizeNumericPassword(value: string): string {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return trimmed;
+  }
+  const normalized = trimmed.replace(/^0+/, "");
+  return normalized.length > 0 ? normalized : "0";
+}
+
+function passwordMatches(inputPassword: string, rowPassword: string): boolean {
+  const input = inputPassword.trim();
+  const row = rowPassword.trim();
+  if (input === row) {
+    return true;
+  }
+  // Google Sheets CSV can coerce numeric-looking passwords (e.g. 030606 -> 306).
+  return normalizeNumericPassword(input) === normalizeNumericPassword(row);
+}
+
 function isPhoneMatch(inputId: string, rowId: string): boolean {
   const input = normalizePhone(inputId);
   const row = normalizePhone(rowId);
@@ -101,7 +120,7 @@ export async function loadTeachersAuthRecords(): Promise<TeacherAuthRecord[]> {
 
 export async function verifyTeacherSheetCredential(loginId: string, password: string): Promise<{ teacherName: string } | null> {
   const records = await loadTeachersAuthRecords();
-  const row = records.find((item) => isPhoneMatch(loginId, item.loginId) && item.password === password.trim());
+  const row = records.find((item) => isPhoneMatch(loginId, item.loginId) && passwordMatches(password, item.password));
   if (!row) return null;
   return { teacherName: row.teacherName };
 }
