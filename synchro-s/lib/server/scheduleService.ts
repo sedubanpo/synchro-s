@@ -62,6 +62,16 @@ const CLASS_SELECT =
 export const INSTRUCTOR_DAY_OFF_MESSAGE = "해당 강사의 휴무일입니다.";
 export const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 
+function normalizeAuditUserId(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+    ? normalized
+    : null;
+}
+
 function normalizeDaysOff(values: unknown): number[] {
   if (!Array.isArray(values)) {
     return [];
@@ -364,6 +374,7 @@ export async function createScheduleWithEnrollments(
   payload: CreateScheduleRequest,
   actorUserId: string
 ) {
+  const auditUserId = normalizeAuditUserId(actorUserId);
   const dedupedStudentIds = Array.from(new Set(payload.studentIds));
   const errors = validateSchedulePayload({ ...payload, studentIds: dedupedStudentIds });
   if (errors.length > 0) {
@@ -390,7 +401,7 @@ export async function createScheduleWithEnrollments(
     start_time: toSqlTime(payload.startTime),
     end_time: toSqlTime(payload.endTime),
     active_from: payload.activeFrom,
-    created_by: actorUserId
+    created_by: auditUserId
   };
 
   const { data: insertedClass, error: classError } = await supabase
@@ -717,6 +728,7 @@ export async function updateScheduleStatus(
   changedBy: string,
   reason?: string
 ) {
+  const auditUserId = normalizeAuditUserId(changedBy);
   const { data: updatedClass, error: updateError } = await supabase
     .from("classes")
     .update({ progress_status: status, updated_at: new Date().toISOString() })
@@ -731,7 +743,7 @@ export async function updateScheduleStatus(
   const { error: logError } = await supabase.from("class_status_logs").insert({
     class_id: classId,
     status,
-    changed_by: changedBy,
+    changed_by: auditUserId,
     reason: reason ?? "manual-update"
   });
 
@@ -749,6 +761,7 @@ export async function moveScheduleSlot(
   actorUserId: string,
   options?: { studentId?: string }
 ) {
+  const auditUserId = normalizeAuditUserId(actorUserId);
   const { data: classRow, error: classError } = await supabase
     .from("classes")
     .select("id,instructor_id,subject_code,class_type_code,schedule_mode,class_date,weekday,start_time,end_time,active_from")
@@ -799,7 +812,7 @@ export async function moveScheduleSlot(
               start_time: toSqlTime(target.startTime),
               end_time: toSqlTime(endTime),
               active_from: classRow.active_from,
-              created_by: actorUserId
+              created_by: auditUserId
             }
           : {
               schedule_mode: classRow.schedule_mode,
@@ -811,7 +824,7 @@ export async function moveScheduleSlot(
               start_time: toSqlTime(target.startTime),
               end_time: toSqlTime(endTime),
               active_from: classRow.active_from,
-              created_by: actorUserId
+              created_by: auditUserId
             };
 
       const { data: insertedClass, error: classInsertError } = await supabase
@@ -849,7 +862,7 @@ export async function moveScheduleSlot(
       const { error: logError } = await supabase.from("class_status_logs").insert({
         class_id: insertedClass.id,
         status: "planned",
-        changed_by: actorUserId,
+        changed_by: auditUserId,
         reason: `drag-move-split:${target.weekday}:${target.startTime}`
       });
       if (logError) throw logError;
@@ -887,7 +900,7 @@ export async function moveScheduleSlot(
   const { error: logError } = await supabase.from("class_status_logs").insert({
     class_id: classId,
     status: "planned",
-    changed_by: actorUserId,
+    changed_by: auditUserId,
     reason: `drag-move:${target.weekday}:${target.startTime}`
   });
 
