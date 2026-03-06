@@ -2616,6 +2616,16 @@ export default function SynchroSPage() {
           message: lines.join("\n")
         });
       }
+    } catch (importError) {
+      const message = importError instanceof Error ? importError.message : "노션 시간표 저장에 실패했습니다.";
+      console.error("[notion-import] save failed", importError);
+      setError(message);
+      setConflictDialog((prev) => ({
+        ...prev,
+        open: true,
+        title: "DB 저장 실패",
+        message
+      }));
     } finally {
       setImportingNotion(false);
       importingNotionRef.current = false;
