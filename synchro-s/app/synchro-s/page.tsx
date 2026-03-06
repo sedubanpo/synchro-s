@@ -1012,9 +1012,6 @@ export default function SynchroSPage() {
 
     const preferredGroup = selectedGroup ?? activeGroup;
     if (preferredGroup) {
-      if (preferredGroup.isActive) {
-        return filteredEvents;
-      }
       const snapshot = preferredGroup.snapshotEvents ?? [];
       const hasDraftSnapshot = snapshot.some((event) => event.id.startsWith("draft-"));
       if (snapshot.length > 0 && !hasDraftSnapshot) {
