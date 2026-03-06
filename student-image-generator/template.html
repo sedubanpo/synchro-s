@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Schedule Image</title>
+  <style>
+    :root {
+      --w: 1080px;
+      --h: 1920px;
+      --text-1: rgba(241, 245, 249, 0.98);
+      --text-2: rgba(226, 232, 240, 0.78);
+      --glass-bg: rgba(255, 255, 255, 0.14);
+      --glass-border: rgba(255, 255, 255, 0.22);
+      --glass-shadow: 0 24px 60px rgba(2, 6, 23, 0.28);
+      --radius-xl: 32px;
+      --radius-lg: 26px;
+      --radius-md: 18px;
+      --blur: blur(24px);
+      --chip-bg: rgba(255, 255, 255, 0.14);
+      --chip-border: rgba(255, 255, 255, 0.26);
+      --chip-text: rgba(240, 249, 255, 0.94);
+      --subject-default: #bcd7ff;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: var(--w); height: var(--h); margin: 0; padding: 0; }
+    body {
+      font-family: Pretendard, Inter, 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: var(--text-1);
+      background:
+        radial-gradient(1200px 860px at 6% -8%, rgba(96, 165, 250, 0.38), transparent 55%),
+        radial-gradient(980px 900px at 90% 12%, rgba(147, 51, 234, 0.24), transparent 58%),
+        linear-gradient(165deg, #0b1220 0%, #111d34 43%, #172845 100%);
+      overflow: hidden;
+      position: relative;
+    }
+    body::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        radial-gradient(rgba(255,255,255,0.08) 0.6px, transparent 0.6px);
+      background-size: 3px 3px;
+      opacity: 0.18;
+      pointer-events: none;
+    }
+
+    .canvas {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding: 40px 34px;
+    }
+
+    .shell {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: var(--radius-xl);
+      background: linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.08));
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.32);
+      backdrop-filter: var(--blur);
+      -webkit-backdrop-filter: var(--blur);
+      overflow: hidden;
+      padding: 30px 26px;
+    }
+
+    .shell::before {
+      content: "";
+      position: absolute;
+      width: 430px;
+      height: 430px;
+      right: -140px;
+      bottom: -100px;
+      background-image: url('https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png');
+      background-size: contain;
+      background-repeat: no-repeat;
+      opacity: 0.12;
+      filter: saturate(0.8);
+      pointer-events: none;
+    }
+
+    .header {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .title {
+      font-size: 24px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+      font-weight: 600;
+      color: var(--text-1);
+      max-width: 86%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--text-2);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      line-height: 1;
+      font-weight: 600;
+      color: var(--chip-text);
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.25);
+      white-space: nowrap;
+    }
+
+    .list {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      gap: 12px;
+    }
+
+    .item {
+      border-radius: var(--radius-lg);
+      border: 1px solid rgba(255,255,255,0.20);
+      background: linear-gradient(145deg, rgba(255,255,255,0.17), rgba(255,255,255,0.08));
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: 0 14px 26px rgba(2, 6, 23, 0.16), inset 0 1px 0 rgba(255,255,255,0.24);
+      padding: 14px 14px 14px 16px;
+      display: grid;
+      grid-template-columns: 156px 1fr;
+      align-items: center;
+      gap: 14px;
+      min-height: 104px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .item::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 12px;
+      bottom: 12px;
+      width: 3px;
+      border-radius: 999px;
+      background: var(--subject-accent, #93c5fd);
+      opacity: 0.92;
+    }
+
+    .time-col { display: grid; gap: 8px; min-width: 0; }
+    .time {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: rgba(248, 250, 252, 0.98);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .duration { width: fit-content; }
+
+    .content-col { display: grid; gap: 8px; min-width: 0; }
+
+    .subject-line {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+      flex-wrap: nowrap;
+    }
+    .subject {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--subject-accent, var(--subject-default));
+      white-space: nowrap;
+    }
+    .teacher {
+      font-size: 14px;
+      font-weight: 400;
+      color: rgba(226, 232, 240, 0.9);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .status-canceled {
+      border-color: rgba(248, 113, 113, 0.44);
+      background: linear-gradient(145deg, rgba(127, 29, 29, 0.32), rgba(69, 10, 10, 0.24));
+    }
+    .status-canceled::before { background: #f87171; }
+
+    .status-break,
+    .status-empty {
+      border-color: rgba(148, 163, 184, 0.36);
+      background: linear-gradient(145deg, rgba(51, 65, 85, 0.48), rgba(30, 41, 59, 0.32));
+      min-height: 82px;
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+    .status-break::before,
+    .status-empty::before { background: rgba(148, 163, 184, 0.82); }
+    .status-break .content-col,
+    .status-empty .content-col { opacity: 0.64; }
+
+    .placeholder {
+      height: 42px;
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      background: linear-gradient(145deg, rgba(148,163,184,0.32), rgba(100,116,139,0.26));
+    }
+
+    .theme-math { --subject-accent: #7ab2ff; }
+    .theme-kor { --subject-accent: #f0c57a; }
+    .theme-eng { --subject-accent: #c6a0ff; }
+    .theme-sci { --subject-accent: #72dfba; }
+    .theme-social { --subject-accent: #ff9fb8; }
+    .theme-default { --subject-accent: #bdd1f7; }
+
+    .truncate-1 {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+  <div class="canvas">
+    <section class="shell">
+      <header class="header">
+        <h1 class="title" id="title"></h1>
+        <div class="meta">
+          <span id="dateLabel"></span>
+          <span class="chip" id="dayStatus"></span>
+        </div>
+      </header>
+      <main class="list" id="list"></main>
+    </section>
+  </div>
+
+  <script>
+    const SUBJECT_THEME = {
+      '수학': 'theme-math',
+      '국어': 'theme-kor',
+      '영어': 'theme-eng',
+      '과학': 'theme-sci',
+      '사회': 'theme-social'
+    };
+
+    function resolveTheme(subject) {
+      if (!subject) return 'theme-default';
+      const key = Object.keys(SUBJECT_THEME).find(k => subject.includes(k));
+      return key ? SUBJECT_THEME[key] : 'theme-default';
+    }
+
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+    }
+
+    function render(data) {
+      const title = document.getElementById('title');
+      const dateLabel = document.getElementById('dateLabel');
+      const dayStatus = document.getElementById('dayStatus');
+      const list = document.getElementById('list');
+
+      title.textContent = `${data.studentName} 학생 시간표`;
+      dateLabel.textContent = data.dateLabel;
+      dayStatus.textContent = data.dayStatus || '당일 시간표';
+
+      list.innerHTML = (data.items || []).map((item) => {
+        const status = item.status || 'scheduled';
+        const theme = resolveTheme(item.subject);
+        const cardClass = ['item', `status-${status}`, theme].join(' ');
+
+        const chips = [];
+        if (item.room && status === 'scheduled') chips.push(`<span class="chip truncate-1">${esc(item.room)}</span>`);
+        if (item.typeTag && status === 'scheduled') chips.push(`<span class="chip truncate-1">${esc(item.typeTag)}</span>`);
+        if (item.statusLabel && status === 'scheduled') chips.push(`<span class="chip truncate-1">${esc(item.statusLabel)}</span>`);
+
+        const contentHtml = (status === 'break' || status === 'empty')
+          ? `<div class="placeholder"></div>`
+          : `
+            <div class="subject-line">
+              <span class="subject">${esc(item.subject || '수업')}</span>
+              <span class="teacher truncate-1">${esc(item.teacher || '')}</span>
+            </div>
+            <div class="chip-row">${chips.join('')}</div>
+          `;
+
+        return `
+          <article class="${cardClass}">
+            <div class="time-col">
+              <div class="time">${esc(item.start)}-${esc(item.end)}시</div>
+              <span class="chip duration">${esc(item.durationLabel || '')}</span>
+            </div>
+            <div class="content-col">${contentHtml}</div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    render(window.__SCHEDULE_DATA__ || {
+      studentName: '샘플 학생',
+      dateLabel: '2/21(토)_방학',
+      dayStatus: '방학',
+      items: []
+    });
+  </script>
+</body>
+</html>

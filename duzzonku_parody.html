@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dujjonku.ai | 두바이쫀득쿠키</title>
+  <style>
+    :root {
+      --bg: #f4f7f9;
+      --ink: #142133;
+      --muted: #5c6c81;
+      --brand: #00a67d;
+      --brand-dark: #0c6b58;
+      --line: #dde5ee;
+      --card: rgba(255, 255, 255, 0.62);
+      --shadow: 0 14px 35px rgba(15, 40, 75, 0.16);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Sora", "Pretendard", "Noto Sans KR", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(800px 340px at 90% -4%, #d7fff2 0%, transparent 55%),
+        radial-gradient(900px 460px at -20% 100%, #dce9ff 0%, transparent 60%),
+        var(--bg);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      height: 66px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      font-size: 1.45rem;
+    }
+
+    .brand-mark {
+      width: 13px;
+      height: 13px;
+      border-radius: 4px;
+      background: linear-gradient(135deg, #12d79b, #119c7d);
+      box-shadow: 8px 0 0 #22efb6, 16px 0 0 #10b088;
+      transform: skewX(-18deg);
+      margin-right: 18px;
+    }
+
+    .brand em { color: var(--brand); font-style: normal; }
+
+    .menu {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      color: #223147;
+      font-size: .95rem;
+      font-weight: 600;
+    }
+
+    .menu span::after { content: " \25BE"; font-size: .72rem; color: #657185; }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .ghost, .solid {
+      border-radius: 9px;
+      padding: 9px 13px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      text-decoration: none;
+      color: #1b2b41;
+      font-size: .9rem;
+    }
+
+    .ghost { background: rgba(255, 255, 255, 0.58); border-color: var(--line); }
+    .solid { background: #1f2430; color: #fff; }
+
+    .hero {
+      min-height: 480px;
+      position: relative;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(20, 27, 40, .68), rgba(20, 27, 40, .32)),
+        url("https://images.unsplash.com/photo-1551024601-bec78aea704b?q=80&w=1600&auto=format&fit=crop") center/cover;
+      transform: scale(1.02);
+    }
+
+    .hero-content {
+      position: relative;
+      color: #fff;
+      width: min(760px, 92%);
+      z-index: 2;
+      animation: enter .7s ease;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4.3vw, 4rem);
+      letter-spacing: -0.03em;
+      line-height: 1.06;
+    }
+
+    .hero p {
+      margin: 16px 0 24px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+
+    .cta {
+      display: inline-block;
+      padding: 13px 21px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #09ba8b, #0f8d72);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 800;
+      border: 1px solid rgba(255,255,255,.38);
+      box-shadow: 0 16px 35px rgba(5, 58, 47, 0.35);
+    }
+
+    .section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 50px 16px;
+    }
+
+    .rate {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr;
+      gap: 16px;
+    }
+
+    .glass {
+      background: var(--card);
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+      padding: 26px;
+    }
+
+    .muted { color: var(--muted); }
+
+    .rate h2 {
+      margin: 0;
+      font-size: clamp(1.6rem, 2.8vw, 2.7rem);
+      letter-spacing: -0.02em;
+    }
+
+    .huge {
+      font-size: clamp(2.4rem, 5vw, 4.8rem);
+      line-height: 1;
+      margin: 10px 0 6px;
+      color: var(--brand-dark);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }
+
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .tag {
+      font-size: .75rem;
+      border-radius: 999px;
+      border: 1px solid #d4dfec;
+      background: #f7fbff;
+      color: #3e4f66;
+      font-weight: 700;
+      padding: 5px 9px;
+    }
+
+    .grid4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .feature {
+      padding: 20px;
+      border-radius: 18px;
+      background: var(--card);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      box-shadow: var(--shadow);
+      min-height: 190px;
+    }
+
+    .feature h3 { margin: 12px 0 8px; }
+
+    .icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 1.2rem;
+      background: linear-gradient(140deg, #1dcf9f, #14886f);
+    }
+
+    .chart {
+      margin-top: 18px;
+      height: 260px;
+      border-radius: 18px;
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,.8);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .bars { display: flex; align-items: end; gap: 8px; height: 160px; }
+    .bar {
+      flex: 1;
+      border-radius: 8px 8px 4px 4px;
+      background: linear-gradient(180deg, #16bb91, #0d7a65);
+      opacity: .92;
+    }
+
+    .bar:nth-child(2n) { background: linear-gradient(180deg, #75b7ff, #367ecf); }
+    .bar:nth-child(3n) { background: linear-gradient(180deg, #f3c26e, #c38616); }
+
+    .labels {
+      display: flex;
+      justify-content: space-between;
+      color: #607087;
+      font-size: .75rem;
+      font-weight: 700;
+    }
+
+    .floating {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 40;
+      display: flex;
+      gap: 9px;
+      align-items: center;
+    }
+
+    .bubble {
+      padding: 10px 13px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.9);
+      border: 1px solid #d8e5f5;
+      box-shadow: var(--shadow);
+      font-weight: 700;
+      font-size: .82rem;
+    }
+
+    .dot {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: linear-gradient(140deg, #11ca98, #0e8b70);
+      box-shadow: var(--shadow);
+    }
+
+    .satire {
+      max-width: 1200px;
+      margin: 0 auto 42px;
+      padding: 0 16px;
+      color: #6a7890;
+      font-size: .85rem;
+      font-weight: 600;
+    }
+
+    @keyframes enter {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1024px) {
+      .menu { display: none; }
+      .rate { grid-template-columns: 1fr; }
+      .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      .actions .ghost { display: none; }
+      .grid4 { grid-template-columns: 1fr; }
+      .hero { min-height: 430px; }
+      .floating { right: 12px; bottom: 12px; }
+      .bubble { max-width: 210px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span>Du<em>jjonku.ai</em></div>
+    <nav class="menu">
+      <span>Purchase Cookies</span>
+      <span>Refinance Dough</span>
+      <span>Cookie Product</span>
+      <span>Toolkit</span>
+      <span>Credit Score(당분)</span>
+      <span>Partners</span>
+    </nav>
+    <div class="actions">
+      <a class="ghost" href="#">Apply pre-bake approval</a>
+      <a class="ghost" href="#">Korean</a>
+      <a class="solid" href="#">Log in</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-content">
+      <h1>쫀득함 폭락! 지금이 두쫀쿠 매수 타이밍</h1>
+      <p>
+        대출 대신 당 충전. 두바이 감성으로 구운 쫀득쿠키를 AI가 취향 분석해 바로 추천합니다.
+        서류? 필요 없음. 오븐 예열? 이미 완료.
+      </p>
+      <a class="cta" href="#">1분 만에 내 쿠키 금리 확인</a>
+    </div>
+  </section>
+
+  <section class="section rate">
+    <article class="glass">
+      <h2>Today’s Best Chew Rate</h2>
+      <p class="muted">Updated: February 20, 2026</p>
+      <p class="muted">샘플 시나리오: 공복 상태 직장인 1인, 야근 2회, 커피 3잔 기준.</p>
+      <p class="muted">실제 쫀득 만족도는 입천장 컨디션과 우유 동반 여부에 따라 달라질 수 있습니다.</p>
+    </article>
+    <article class="glass">
+      <p class="muted" style="margin:0;font-weight:700;">30-Box Conforming</p>
+      <div class="huge">5.250%</div>
+      <p style="margin:0;"><strong>APR 5.335%</strong> &nbsp; Point <strong>$4,200.00</strong></p>
+      <div class="tags">
+        <span class="tag">Same from yesterday</span>
+        <span class="tag" style="color:#0f8a6f;">Chew +0.125%</span>
+        <span class="tag">from last week</span>
+      </div>
+      <p style="margin-top:16px;"><a class="cta" href="#" style="padding:10px 14px;font-size:.9rem;">See My Bite Rate</a></p>
+    </article>
+  </section>
+
+  <section class="section">
+    <div class="grid4">
+      <article class="feature">
+        <div class="icon">%</div>
+        <h3>Lower Chew Rate</h3>
+        <p class="muted">월간 쿠키 지출을 줄이는 가장 합리적 쫀득 플랜 추천.</p>
+      </article>
+      <article class="feature">
+        <div class="icon">$</div>
+        <h3>Maximum Cookie Amount</h3>
+        <p class="muted">AI가 냉장고 잔여 공간을 계산해 최적 박스 수를 제안.</p>
+      </article>
+      <article class="feature">
+        <div class="icon">⚡</div>
+        <h3>Fast Closing</h3>
+        <p class="muted">결제 후 7일 이내 문앞 도착. 늦으면 한 입 더 보상.</p>
+      </article>
+      <article class="feature">
+        <div class="icon">◎</div>
+        <h3>No Spam, No Crumb</h3>
+        <p class="muted">개인정보도 안 팔고, 쿠키 부스러기도 안 흘립니다.</p>
+      </article>
+    </div>
+
+    <div class="chart">
+      <div>
+        <p style="margin:0;color:#0f8a6f;font-weight:800;">Top 5 Gulf Cookie Lenders</p>
+        <h2 style="margin:6px 0 0;">30-Day Fixed Lowest Chew Trends</h2>
+      </div>
+      <div class="bars" aria-label="trend chart">
+        <div class="bar" style="height:67%"></div>
+        <div class="bar" style="height:73%"></div>
+        <div class="bar" style="height:61%"></div>
+        <div class="bar" style="height:80%"></div>
+        <div class="bar" style="height:75%"></div>
+        <div class="bar" style="height:63%"></div>
+        <div class="bar" style="height:84%"></div>
+        <div class="bar" style="height:70%"></div>
+        <div class="bar" style="height:76%"></div>
+        <div class="bar" style="height:66%"></div>
+      </div>
+      <div class="labels">
+        <span>Week 1</span><span>Week 2</span><span>Week 3</span><span>Week 4</span><span>Week 5</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="floating">
+    <div class="bubble">Get Cookie Advice Now!</div>
+    <div class="dot" aria-hidden="true"></div>
+  </div>
+
+  <p class="satire">
+    본 페이지는 유머 목적의 가상 패러디입니다. 실제 금융·대출 서비스와 무관합니다.
+  </p>
+</body>
+</html>

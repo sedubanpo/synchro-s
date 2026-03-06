@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>S-EDU Fast Mirror</title>
+  <style>
+    :root { --bg:#f6f8fc; --card:#ffffff; --text:#0f172a; --muted:#64748b; --line:#e2e8f0; --pri:#1d4ed8; }
+    * { box-sizing:border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+    body { margin:0; background:var(--bg); color:var(--text); }
+    .wrap { max-width:980px; margin:0 auto; padding:16px; }
+    .bar { display:grid; grid-template-columns:1fr 1fr auto auto; gap:8px; margin-bottom:12px; }
+    input, button { height:42px; border-radius:10px; border:1px solid var(--line); padding:0 12px; font-size:14px; }
+    button { cursor:pointer; background:var(--card); }
+    button.primary { background:var(--pri); color:#fff; border-color:var(--pri); }
+    .meta { display:flex; gap:12px; color:var(--muted); font-size:13px; margin-bottom:10px; }
+    .hour { border:1px solid var(--line); border-radius:14px; background:var(--card); margin-bottom:10px; overflow:hidden; }
+    .hhead { padding:10px 12px; border-bottom:1px solid var(--line); font-weight:700; background:#f8fafc; }
+    .row { padding:10px 12px; border-bottom:1px dashed #edf2f7; }
+    .row:last-child { border-bottom:none; }
+    .room { font-size:12px; color:#475569; margin-bottom:4px; font-weight:700; }
+    .line { font-size:14px; color:#0f172a; }
+    .err { color:#b91c1c; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <input id="apiUrl" placeholder="Apps Script Web App URL (exec)" />
+      <input id="sheet" placeholder="시트명 (예: 3/6(금)_개학)" />
+      <input id="teacher" placeholder="강사명(선택)" />
+      <button class="primary" id="loadBtn">불러오기</button>
+    </div>
+    <div class="meta">
+      <div id="version">version: -</div>
+      <div id="elapsed">load: -</div>
+      <div id="count">rows: 0</div>
+    </div>
+    <div id="out"></div>
+  </div>
+
+  <script>
+    const byId = (id) => document.getElementById(id);
+
+    function groupByHour(rows) {
+      const out = {};
+      rows.forEach(r => {
+        const h = String(r.hour);
+        if (!out[h]) out[h] = [];
+        out[h].push(r);
+      });
+      return out;
+    }
+
+    function render(data) {
+      const out = byId('out');
+      const rows = (data && data.rows) || [];
+      byId('version').textContent = 'version: ' + (data.version || '-');
+      byId('count').textContent = 'rows: ' + rows.length;
+      if (!rows.length) {
+        out.innerHTML = '<div class="err">데이터가 없습니다.</div>';
+        return;
+      }
+      const grouped = groupByHour(rows);
+      const hours = Object.keys(grouped).map(Number).sort((a,b)=>a-b);
+      out.innerHTML = hours.map(h => {
+        const start = h + ':00';
+        const end = (h + 1) + ':00';
+        const lines = grouped[String(h)].map(r => {
+          const safeItems = (r.items || []).join(' / ').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          return `<div class="row"><div class="room">${r.room}</div><div class="line">${safeItems}</div></div>`;
+        }).join('');
+        return `<section class="hour"><div class="hhead">${start} - ${end}</div>${lines}</section>`;
+      }).join('');
+    }
+
+    async function load() {
+      const apiUrl = byId('apiUrl').value.trim();
+      const sheet = byId('sheet').value.trim();
+      const teacher = byId('teacher').value.trim();
+      if (!apiUrl || !sheet) return alert('API URL과 시트명을 입력하세요.');
+      const qs = new URLSearchParams({ mode:'api', action:'grid', sheet, lite:'1' });
+      if (teacher) qs.set('teacher', teacher);
+      const t0 = performance.now();
+      const res = await fetch(apiUrl + (apiUrl.includes('?') ? '&' : '?') + qs.toString(), { cache:'no-store' });
+      const json = await res.json();
+      const t1 = performance.now();
+      byId('elapsed').textContent = 'load: ' + Math.round(t1 - t0) + 'ms';
+      if (!json.ok) {
+        byId('out').innerHTML = '<div class="err">오류: ' + (json.error || 'unknown') + '</div>';
+        return;
+      }
+      render(json.data);
+    }
+
+    byId('loadBtn').addEventListener('click', load);
+  </script>
+</body>
+</html>

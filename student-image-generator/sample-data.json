@@ -1,0 +1,51 @@
+{
+  "studentId": "kimhaul_001",
+  "studentName": "김하율",
+  "dateLabel": "2/21(토)_방학",
+  "dayStatus": "방학",
+  "items": [
+    {
+      "start": "10",
+      "end": "13",
+      "subject": "수학",
+      "teacher": "안준성T",
+      "room": "1강의실",
+      "typeTag": "개별",
+      "durationLabel": "3시간",
+      "status": "scheduled",
+      "statusLabel": "정규"
+    },
+    {
+      "start": "13",
+      "end": "14",
+      "subject": "",
+      "teacher": "",
+      "room": "",
+      "typeTag": "",
+      "durationLabel": "1시간",
+      "status": "break"
+    },
+    {
+      "start": "14",
+      "end": "16",
+      "subject": "영어",
+      "teacher": "송경석T",
+      "room": "7강의실",
+      "typeTag": "개별",
+      "durationLabel": "2시간",
+      "status": "scheduled",
+      "statusLabel": "보강"
+    },
+    {
+      "start": "16",
+      "end": "17",
+      "subject": "과학",
+      "teacher": "유소연T",
+      "room": "4강의실",
+      "typeTag": "개별",
+      "durationLabel": "1시간",
+      "status": "canceled",
+      "statusLabel": "당일취소"
+    }
+  ]
+}
