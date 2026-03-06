@@ -3596,125 +3596,131 @@ export default function SynchroSPage() {
           {notice}
         </div>
       ) : null}
-      <div className="rounded-xl border border-blue-100 bg-white/60 px-4 py-2 text-xs font-semibold text-slate-600 backdrop-blur-sm">
-        노션 시간표는 아래 입력칸에 직접 붙여넣거나 클립보드에서 불러온 뒤, 시간표 미리보기/DB 저장까지 진행할 수 있습니다.
-      </div>
-      {!isInstructorReadOnly ? (
-      <div className="rounded-xl border border-slate-200 bg-white/70 p-3 backdrop-blur-sm">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <p className="text-xs font-semibold text-slate-600">노션 시간표 원본 텍스트</p>
-          <button
-            type="button"
-            onClick={() => void handleLoadClipboardToNotionInput()}
-            className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-          >
-            클립보드 불러오기
-          </button>
-          <button
-            type="button"
-            onClick={handleApplyNotionInput}
-            className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-          >
-            시간표에 반영
-          </button>
-          <button
-            type="button"
-            disabled={importingNotion}
-            onClick={() => void handleImportNotionToServer()}
-            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-          >
-            {importingNotion ? "저장 중..." : "DB로 저장"}
-          </button>
-          <button
-            type="button"
-            disabled={!undoState || importingNotion}
-            onClick={() => void handleUndoLastChange()}
-            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            되돌리기
-          </button>
-          {notionPreview ? (
-            <button
-              type="button"
-              onClick={() => void handleCopyForNotion()}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-            >
-              현재 주차 내보내기 복사
-            </button>
-          ) : null}
-        </div>
-        <textarea
-          value={notionTextValue}
-          onChange={(event) => {
-            setNotionInput(event.target.value);
-            setParsedNotionItems([]);
-          }}
-          placeholder="노션 표를 그대로 붙여넣으세요. 예: 시간, 월요일, 화요일..."
-          className="h-28 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700"
-        />
-      </div>
-      ) : (
-        <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-xs font-semibold text-sky-700">
-          강사 계정은 본인 시간표 조회만 가능합니다. 편집/저장/삭제 기능은 관리자 계정에서만 사용할 수 있습니다.
-        </div>
-      )}
+      {roleView === "student" ? (
+        <>
+          <div className="rounded-xl border border-blue-100 bg-white/60 px-4 py-2 text-xs font-semibold text-slate-600 backdrop-blur-sm">
+            노션 시간표는 아래 입력칸에 직접 붙여넣거나 클립보드에서 불러온 뒤, 시간표 미리보기/DB 저장까지 진행할 수 있습니다.
+          </div>
+          {!isInstructorReadOnly ? (
+            <div className="rounded-xl border border-slate-200 bg-white/70 p-3 backdrop-blur-sm">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <p className="text-xs font-semibold text-slate-600">노션 시간표 원본 텍스트</p>
+                <button
+                  type="button"
+                  onClick={() => void handleLoadClipboardToNotionInput()}
+                  className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                >
+                  클립보드 불러오기
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyNotionInput}
+                  className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+                >
+                  시간표에 반영
+                </button>
+                <button
+                  type="button"
+                  disabled={importingNotion}
+                  onClick={() => void handleImportNotionToServer()}
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                >
+                  {importingNotion ? "저장 중..." : "DB로 저장"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!undoState || importingNotion}
+                  onClick={() => void handleUndoLastChange()}
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  되돌리기
+                </button>
+                {notionPreview ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyForNotion()}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    현재 주차 내보내기 복사
+                  </button>
+                ) : null}
+              </div>
+              <textarea
+                value={notionTextValue}
+                onChange={(event) => {
+                  setNotionInput(event.target.value);
+                  setParsedNotionItems([]);
+                }}
+                placeholder="노션 표를 그대로 붙여넣으세요. 예: 시간, 월요일, 화요일..."
+                className="h-28 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700"
+              />
+            </div>
+          ) : (
+            <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-xs font-semibold text-sky-700">
+              강사 계정은 본인 시간표 조회만 가능합니다. 편집/저장/삭제 기능은 관리자 계정에서만 사용할 수 있습니다.
+            </div>
+          )}
+        </>
+      ) : null}
 
       <section className="grid flex-1 gap-4 xl:grid-cols-[1fr_330px]">
         <div>
-          <div className="mb-3 rounded-2xl border border-white/55 bg-white/55 px-3 py-3 shadow-sm backdrop-blur-md">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-black text-slate-800">특이사항</p>
-                <p className="text-[11px] font-semibold text-slate-500">
-                  {isInstructorReadOnly ? "강사 계정은 특이사항을 열람만 할 수 있습니다." : "시간표 편성 시 참고할 요청사항을 대상별로 기록합니다."}
-                </p>
-              </div>
-              <div className="flex min-w-[280px] flex-1 flex-wrap items-center justify-end gap-2">
-                <input
-                  value={specialNoteInput}
-                  onChange={(inputEvent) => setSpecialNoteInput(inputEvent.target.value)}
-                  placeholder="예: 수학은 안준성T로만 구성 희망"
-                  disabled={isInstructorReadOnly}
-                  className="min-w-[220px] flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400"
-                />
-                <button
-                  type="button"
-                  disabled={isInstructorReadOnly || noteSubmitting || !currentTargetId}
-                  onClick={() => void handleCreateSpecialNote()}
-                  className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {noteSubmitting ? "저장 중..." : "등록"}
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 max-h-36 space-y-1.5 overflow-y-auto pr-1">
-              {notesLoading ? (
-                <p className="text-xs font-semibold text-slate-500">불러오는 중...</p>
-              ) : specialNotes.length === 0 ? (
-                <p className="text-xs font-semibold text-slate-500">아직 등록된 특이사항이 없습니다.</p>
-              ) : (
-                specialNotes.map((note) => (
-                  <div
-                    key={note.id}
-                    className="flex items-center justify-between gap-3 rounded-2xl border border-white/60 bg-white/65 px-3 py-2"
+          {roleView === "student" ? (
+            <div className="mb-3 rounded-2xl border border-white/55 bg-white/55 px-3 py-3 shadow-sm backdrop-blur-md">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-800">특이사항</p>
+                  <p className="text-[11px] font-semibold text-slate-500">
+                    {isInstructorReadOnly ? "강사 계정은 특이사항을 열람만 할 수 있습니다." : "시간표 편성 시 참고할 요청사항을 대상별로 기록합니다."}
+                  </p>
+                </div>
+                <div className="flex min-w-[280px] flex-1 flex-wrap items-center justify-end gap-2">
+                  <input
+                    value={specialNoteInput}
+                    onChange={(inputEvent) => setSpecialNoteInput(inputEvent.target.value)}
+                    placeholder="예: 수학은 안준성T로만 구성 희망"
+                    disabled={isInstructorReadOnly}
+                    className="min-w-[220px] flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400"
+                  />
+                  <button
+                    type="button"
+                    disabled={isInstructorReadOnly || noteSubmitting || !currentTargetId}
+                    onClick={() => void handleCreateSpecialNote()}
+                    className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <p className="min-w-0 text-xs font-semibold leading-5 text-slate-700">
-                      <span className="font-black text-slate-500">[{formatSpecialNoteTimestamp(note.createdAt)}]</span>{" "}
-                      {note.content}
-                    </p>
-                    <button
-                      type="button"
-                      disabled={isInstructorReadOnly || noteSubmitting}
-                      onClick={() => void handleDeleteSpecialNote(note.id)}
-                      className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    {noteSubmitting ? "저장 중..." : "등록"}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 max-h-36 space-y-1.5 overflow-y-auto pr-1">
+                {notesLoading ? (
+                  <p className="text-xs font-semibold text-slate-500">불러오는 중...</p>
+                ) : specialNotes.length === 0 ? (
+                  <p className="text-xs font-semibold text-slate-500">아직 등록된 특이사항이 없습니다.</p>
+                ) : (
+                  specialNotes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-white/60 bg-white/65 px-3 py-2"
                     >
-                      X 삭제
-                    </button>
-                  </div>
-                ))
-              )}
+                      <p className="min-w-0 text-xs font-semibold leading-5 text-slate-700">
+                        <span className="font-black text-slate-500">[{formatSpecialNoteTimestamp(note.createdAt)}]</span>{" "}
+                        {note.content}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={isInstructorReadOnly || noteSubmitting}
+                        onClick={() => void handleDeleteSpecialNote(note.id)}
+                        className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                      >
+                        X 삭제
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          ) : null}
           <div className="mb-3 flex items-center justify-between rounded-2xl border border-white/55 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-md">
             <div>
               <p className="text-sm font-black text-slate-800">시간표 보기 모드</p>
