@@ -2282,7 +2282,23 @@ export default function SynchroSPage() {
   }, [buildUndoState, instructors, notionTextValue, selectedInstructorId]);
 
   const handleImportNotionToServer = useCallback(async () => {
-    if (parsedNotionItems.length === 0) {
+    const normalizedNotionText = notionTextValue.trim();
+    const parsedItemsForSave =
+      parsedNotionItems.length > 0
+        ? parsedNotionItems
+        : normalizedNotionText.length > 0
+          ? parseNotionTextToItems(normalizedNotionText)
+          : [];
+
+    if (parsedNotionItems.length === 0 && parsedItemsForSave.length > 0) {
+      setParsedNotionItems(parsedItemsForSave);
+    }
+
+    if (parsedItemsForSave.length === 0) {
+      if (normalizedNotionText.length > 0) {
+        setError("붙여넣은 노션 텍스트를 수업 데이터로 해석하지 못했습니다. [시간표에 반영] 결과를 먼저 확인해 주세요.");
+        return;
+      }
       const existingClassIds = Array.from(new Set(displayEvents.map((event) => event.id).filter((id) => !id.startsWith("draft-"))));
       if (existingClassIds.length === 0) {
         setError("저장할 시간표가 없습니다. 노션 반영 또는 수업 추가 후 다시 시도해 주세요.");
@@ -2313,7 +2329,7 @@ export default function SynchroSPage() {
     importingNotionRef.current = true;
     setImportProgress({
       active: true,
-      total: parsedNotionItems.length,
+      total: parsedItemsForSave.length,
       done: 0,
       label: "노션 시간표를 서버에 저장 중입니다..."
     });
@@ -2375,8 +2391,8 @@ export default function SynchroSPage() {
     try {
       const preparedItems: { item: ParsedNotionItem; payload: ScheduleFormInput }[] = [];
 
-      for (let idx = 0; idx < parsedNotionItems.length; idx += 1) {
-        const item = parsedNotionItems[idx] as ParsedNotionItem;
+      for (let idx = 0; idx < parsedItemsForSave.length; idx += 1) {
+        const item = parsedItemsForSave[idx] as ParsedNotionItem;
         const subject = resolveSubjectCached(item.subjectLabel);
         const classType = resolveClassTypeCached(item.classTypeLabel);
 
@@ -2616,6 +2632,7 @@ export default function SynchroSPage() {
     instructors,
     loadWeek,
     moveToLogin,
+    notionTextValue,
     parsedNotionItems,
     selectedInstructorId,
     selectedStudentId,
