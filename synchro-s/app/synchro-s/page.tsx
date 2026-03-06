@@ -823,6 +823,7 @@ export default function SynchroSPage() {
     const grouped = new Map<string, SelectOption[]>();
     const labelForDay = (weekday: Weekday) => DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
     const schoolLabel = (secondary?: string) => secondary?.split("·")[0]?.trim() || "학교 정보 없음";
+    const weekdayOrder = ["월", "화", "수", "목", "금", "토", "일", "이번 주 수업 없음"];
     const eventsByStudent = new Map<string, ScheduleEvent[]>();
 
     for (const event of overviewEvents) {
@@ -857,17 +858,55 @@ export default function SynchroSPage() {
     }
 
     return [...grouped.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], "ko"))
-      .map(([label, items]) => ({
+      .sort((a, b) => {
+        if (studentOverviewMode === "weekday") {
+          const aIndex = weekdayOrder.indexOf(a[0]);
+          const bIndex = weekdayOrder.indexOf(b[0]);
+          const normalizedA = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+          const normalizedB = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+          if (normalizedA !== normalizedB) {
+            return normalizedA - normalizedB;
+          }
+        }
+        return a[0].localeCompare(b[0], "ko");
+      })
+      .map(([label, items], index) => ({
         label,
-        items: [...items].sort((a, b) => a.name.localeCompare(b.name, "ko"))
+        items: [...items].sort((a, b) => a.name.localeCompare(b.name, "ko")),
+        toneClass:
+          studentOverviewMode === "weekday"
+            ? [
+                "border-sky-100/80 bg-[linear-gradient(135deg,rgba(239,246,255,0.88),rgba(219,234,254,0.78))]",
+                "border-cyan-100/80 bg-[linear-gradient(135deg,rgba(236,254,255,0.88),rgba(207,250,254,0.72))]",
+                "border-indigo-100/80 bg-[linear-gradient(135deg,rgba(238,242,255,0.88),rgba(224,231,255,0.78))]",
+                "border-violet-100/80 bg-[linear-gradient(135deg,rgba(245,243,255,0.88),rgba(237,233,254,0.78))]",
+                "border-emerald-100/80 bg-[linear-gradient(135deg,rgba(236,253,245,0.88),rgba(209,250,229,0.76))]",
+                "border-amber-100/80 bg-[linear-gradient(135deg,rgba(255,251,235,0.9),rgba(254,243,199,0.76))]",
+                "border-rose-100/80 bg-[linear-gradient(135deg,rgba(255,241,242,0.9),rgba(255,228,230,0.78))]",
+                "border-slate-200/80 bg-[linear-gradient(135deg,rgba(248,250,252,0.92),rgba(226,232,240,0.78))]"
+              ][Math.min(index, 7)]
+            : [
+                "border-white/60 bg-white/55",
+                "border-sky-100/80 bg-[linear-gradient(135deg,rgba(239,246,255,0.82),rgba(219,234,254,0.68))]",
+                "border-emerald-100/80 bg-[linear-gradient(135deg,rgba(236,253,245,0.82),rgba(209,250,229,0.68))]",
+                "border-violet-100/80 bg-[linear-gradient(135deg,rgba(245,243,255,0.82),rgba(237,233,254,0.68))]"
+              ][index % 4]
       }));
   }, [overviewEvents, studentOverviewMode, students]);
   const overviewDisplayGroups = useMemo(
     () =>
       overviewEntity === "instructor"
-        ? overviewInstructorGroups.map((group) => ({ label: group.subject, items: group.items }))
-        : overviewStudentGroups.map((group) => ({ label: group.label, items: group.items })),
+        ? overviewInstructorGroups.map((group, index) => ({
+            label: group.subject,
+            items: group.items,
+            toneClass: [
+              "border-white/60 bg-white/55",
+              "border-sky-100/80 bg-[linear-gradient(135deg,rgba(239,246,255,0.82),rgba(219,234,254,0.68))]",
+              "border-indigo-100/80 bg-[linear-gradient(135deg,rgba(238,242,255,0.82),rgba(224,231,255,0.68))]",
+              "border-cyan-100/80 bg-[linear-gradient(135deg,rgba(236,254,255,0.82),rgba(207,250,254,0.68))]"
+            ][index % 4]
+          }))
+        : overviewStudentGroups.map((group) => ({ label: group.label, items: group.items, toneClass: group.toneClass })),
     [overviewEntity, overviewInstructorGroups, overviewStudentGroups]
   );
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
@@ -4068,7 +4107,7 @@ export default function SynchroSPage() {
                   {overviewDisplayGroups.map((group) => (
                     <div
                       key={`overview-group-${overviewEntity}-${group.label}`}
-                      className="rounded-2xl border border-white/60 bg-white/55 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
+                      className={`rounded-2xl border px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] ${group.toneClass ?? "border-white/60 bg-white/55"}`}
                     >
                       <div className="flex items-center gap-2">
                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
