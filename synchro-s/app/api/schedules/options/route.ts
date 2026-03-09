@@ -4,6 +4,14 @@ import { NextResponse } from "next/server";
 
 const DEFAULT_SPREADSHEET_ID = "1ByPeH0bZZrZDvW_yPkCpQCIuk724_Gt7uudUj_Ue8Ho";
 
+type InstructorRow = {
+  id: string;
+  instructor_name: string;
+  days_off?: number[] | null;
+  available_time_slots?: string[] | null;
+  is_active?: boolean | null;
+};
+
 function parseCsvLine(line: string): string[] {
   const out: string[] = [];
   let current = "";
@@ -70,11 +78,8 @@ async function fetchSheetCsv(spreadsheetId: string, sheetName: string): Promise<
 async function findInstructorByName(
   supabase: any,
   fullName: string
-): Promise<{ id: string; instructor_name: string; days_off?: number[] | null } | null> {
-  const { data, error } = await supabase
-    .from("instructors")
-    .select("id,instructor_name,days_off,is_active")
-    .eq("is_active", true);
+): Promise<InstructorRow | null> {
+  const { data, error } = await selectInstructorRows(supabase, true);
 
   if (error || !data) return null;
   const token = normalizeNameToken(fullName);
@@ -92,7 +97,41 @@ async function findInstructorByName(
   return {
     id: exact.id,
     instructor_name: exact.instructor_name,
-    days_off: exact.days_off ?? []
+    days_off: exact.days_off ?? [],
+    available_time_slots: exact.available_time_slots ?? []
+  };
+}
+
+async function selectInstructorRows(supabase: any, onlyActive = false): Promise<{ data: InstructorRow[] | null; error: any }> {
+  const runSelect = async (selectClause: string) => {
+    let query = supabase.from("instructors").select(selectClause);
+    if (onlyActive) {
+      query = query.eq("is_active", true);
+    }
+    return query;
+  };
+
+  const primary = await runSelect("id,instructor_name,days_off,available_time_slots,is_active");
+  if (!primary.error) {
+    return { data: (primary.data ?? []) as InstructorRow[], error: null };
+  }
+
+  const message = `${primary.error?.message ?? ""} ${primary.error?.details ?? ""}`;
+  if (!message.includes("available_time_slots")) {
+    return primary;
+  }
+
+  const fallback = await runSelect("id,instructor_name,days_off,is_active");
+  if (fallback.error) {
+    return { data: null, error: fallback.error };
+  }
+
+  return {
+    data: ((fallback.data ?? []) as InstructorRow[]).map((row) => ({
+      ...row,
+      available_time_slots: []
+    })),
+    error: null
   };
 }
 
@@ -211,25 +250,33 @@ export async function GET() {
       spreadsheetId
     );
 
-    let instructors: { id: string; name: string; secondary?: string; daysOff?: number[] }[] = [];
+    let instructors: { id: string; name: string; secondary?: string; daysOff?: number[]; availableTimeSlots?: string[] }[] = [];
     let students: { id: string; name: string; secondary?: string }[] = [];
     const profileInstructorId = (profile as { instructor_id?: string | null }).instructor_id ?? null;
 
     if (profile.role === "admin" || profile.role === "coordinator") {
       const [instructorRes, studentRes] = await Promise.all([
-        supabase.from("instructors").select("id,instructor_name,days_off").eq("is_active", true).order("instructor_name"),
+        selectInstructorRows(supabase, true).then((result) => ({
+          ...result,
+          data: (result.data ?? []).sort((a: { instructor_name: string }, b: { instructor_name: string }) =>
+            a.instructor_name.localeCompare(b.instructor_name, "ko")
+          )
+        })),
         supabase.from("students").select("id,student_name,is_active").order("student_name")
       ]);
 
       if (instructorRes.error) throw instructorRes.error;
       if (studentRes.error) throw studentRes.error;
 
-      instructors = (instructorRes.data ?? []).map((row: { id: string; instructor_name: string; days_off?: number[] | null }) => ({
+      instructors = (instructorRes.data ?? []).map(
+        (row: { id: string; instructor_name: string; days_off?: number[] | null; available_time_slots?: string[] | null }) => ({
         id: row.id,
         name: row.instructor_name,
         secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
-        daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7)
-      }));
+        daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7),
+        availableTimeSlots: (row.available_time_slots ?? []).filter((value) => typeof value === "string" && /^\d{2}:\d{2}$/.test(value))
+      })
+      );
       students = (studentRes.data ?? [])
         .filter((row: { student_name: string; is_active: boolean }) => {
           const normalized = normalizeName(row.student_name);
@@ -242,10 +289,27 @@ export async function GET() {
           secondary: studentSchoolByName.get(normalizeName(row.student_name))
         }));
     } else if (profile.role === "instructor") {
-      const instructorQuery = supabase.from("instructors").select("id,instructor_name,days_off");
-      const { data: ownInstructor, error: ownInstructorError } = profileInstructorId
-        ? await instructorQuery.eq("id", profileInstructorId).single()
-        : await instructorQuery.eq("user_id", user.id).single();
+      const instructorQuery = async (selectClause: string) => {
+        const query = supabase.from("instructors").select(selectClause);
+        return profileInstructorId ? query.eq("id", profileInstructorId).single() : query.eq("user_id", user.id).single();
+      };
+      let ownInstructor: InstructorRow | null = null;
+      let ownInstructorError: any = null;
+      {
+        const initial = await instructorQuery("id,instructor_name,days_off,available_time_slots");
+        ownInstructor = (initial.data as InstructorRow | null) ?? null;
+        ownInstructorError = initial.error;
+      }
+      if (ownInstructorError) {
+        const message = `${ownInstructorError.message ?? ""} ${ownInstructorError.details ?? ""}`;
+        if (message.includes("available_time_slots")) {
+          const fallback = await instructorQuery("id,instructor_name,days_off");
+          ownInstructor = fallback.data
+            ? ({ ...((fallback.data as unknown as InstructorRow) ?? {}), available_time_slots: [] } as InstructorRow)
+            : null;
+          ownInstructorError = fallback.error;
+        }
+      }
       const fallbackInstructor =
         ownInstructorError || !ownInstructor
           ? await findInstructorByName(supabase, (profile as { full_name?: string | null }).full_name ?? "")
@@ -261,7 +325,10 @@ export async function GET() {
           id: resolvedInstructor.id,
           name: resolvedInstructor.instructor_name,
           secondary: teacherSubjectByName.get(normalizeName(resolvedInstructor.instructor_name)),
-          daysOff: (resolvedInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7)
+          daysOff: (resolvedInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
+          availableTimeSlots: (resolvedInstructor.available_time_slots ?? []).filter(
+            (value: string) => typeof value === "string" && /^\d{2}:\d{2}$/.test(value)
+          )
         }
       ];
 
@@ -328,11 +395,20 @@ export async function GET() {
       }
 
       if (ownStudent.default_instructor_id) {
-        const { data: defaultInstructor } = await supabase
+        let { data: defaultInstructor } = await supabase
           .from("instructors")
-          .select("id,instructor_name,days_off")
+          .select("id,instructor_name,days_off,available_time_slots")
           .eq("id", ownStudent.default_instructor_id)
           .single();
+
+        if (!defaultInstructor) {
+          const fallback = await supabase
+            .from("instructors")
+            .select("id,instructor_name,days_off")
+            .eq("id", ownStudent.default_instructor_id)
+            .single();
+          defaultInstructor = fallback.data ? { ...fallback.data, available_time_slots: [] } : fallback.data;
+        }
 
         if (defaultInstructor) {
           instructors = [
@@ -340,7 +416,10 @@ export async function GET() {
               id: defaultInstructor.id,
               name: defaultInstructor.instructor_name,
               secondary: teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name)),
-              daysOff: (defaultInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7)
+              daysOff: (defaultInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
+              availableTimeSlots: (defaultInstructor.available_time_slots ?? []).filter(
+                (value: string) => typeof value === "string" && /^\d{2}:\d{2}$/.test(value)
+              )
             }
           ];
         }

@@ -286,6 +286,15 @@ function normalizeDaysOff(daysOff?: Weekday[]): Weekday[] {
   return Array.from(new Set(daysOff.filter((value): value is Weekday => value >= 1 && value <= 7))).sort((a, b) => a - b) as Weekday[];
 }
 
+function normalizeAvailableTimeSlots(slots?: string[]): string[] {
+  if (!Array.isArray(slots)) {
+    return [];
+  }
+  return Array.from(new Set(slots.filter((value): value is string => /^\d{2}:\d{2}$/.test(value)))).sort((a, b) =>
+    a.localeCompare(b)
+  );
+}
+
 function toKoreanHourRange(startTime: string): string {
   const [hour, minute] = startTime.split(":").map(Number);
   const endHour = hour + 1;
@@ -732,6 +741,8 @@ export default function SynchroSPage() {
   const [showStudentPicker, setShowStudentPicker] = useState(false);
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
   const [savingInstructorDaysOff, setSavingInstructorDaysOff] = useState(false);
+  const [savingInstructorAvailability, setSavingInstructorAvailability] = useState(false);
+  const [hideEmptyDays, setHideEmptyDays] = useState(false);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
   const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
@@ -832,6 +843,10 @@ export default function SynchroSPage() {
   );
   const selectedInstructorDaysOff = useMemo(
     () => normalizeDaysOff(selectedInstructorOption?.daysOff),
+    [selectedInstructorOption]
+  );
+  const selectedInstructorAvailableTimeSlots = useMemo(
+    () => normalizeAvailableTimeSlots(selectedInstructorOption?.availableTimeSlots),
     [selectedInstructorOption]
   );
   const overviewVisibleInstructors = useMemo(
@@ -1049,6 +1064,8 @@ export default function SynchroSPage() {
         for (const instructor of overviewVisibleInstructors) {
           if (!instructorMatchesSubject(instructor, selectedSubjectForPlacement.label)) continue;
           if (normalizeDaysOff(instructor.daysOff).includes(weekday)) continue;
+          const availableTimeSlots = normalizeAvailableTimeSlots(instructor.availableTimeSlots);
+          if (availableTimeSlots.length > 0 && !availableTimeSlots.includes(startTime)) continue;
 
           const overlaps = groupedUniverseEvents.filter(
             (event) =>
@@ -1470,6 +1487,67 @@ export default function SynchroSPage() {
     [getInstructorDaysOff, moveToLogin, selectedInstructorId, selectedInstructorLabel]
   );
 
+  const handleToggleInstructorAvailableTime = useCallback(
+    async (startTime: string) => {
+      if (!selectedInstructorId) {
+        setConflictDialog({ open: true, title: "강사 선택 필요", message: "먼저 가능 시간을 설정할 강사를 선택해 주세요." });
+        return;
+      }
+
+      const currentSlots = normalizeAvailableTimeSlots(
+        instructors.find((item) => item.id === selectedInstructorId)?.availableTimeSlots
+      );
+      const nextSlots = currentSlots.includes(startTime)
+        ? currentSlots.filter((value) => value !== startTime)
+        : [...currentSlots, startTime].sort((a, b) => a.localeCompare(b));
+
+      setSavingInstructorAvailability(true);
+      setError(null);
+
+      try {
+        const res = await fetch(`/api/instructors/${selectedInstructorId}/availability`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ availableTimeSlots: nextSlots })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? "강사 가능 시간 저장에 실패했습니다.");
+        }
+
+        const data = (await res.json().catch(() => ({}))) as { availableTimeSlots?: string[] };
+        const resolvedSlots = normalizeAvailableTimeSlots(data.availableTimeSlots ?? nextSlots);
+        setInstructors((prev) =>
+          prev.map((item) =>
+            item.id === selectedInstructorId
+              ? {
+                  ...item,
+                  availableTimeSlots: resolvedSlots
+                }
+              : item
+          )
+        );
+
+        setNotice(
+          resolvedSlots.length > 0
+            ? `${selectedInstructorLabel} 강사의 수업 가능 시간을 저장했습니다.`
+            : `${selectedInstructorLabel} 강사의 시간 제한을 해제했습니다.`
+        );
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "강사 가능 시간 저장에 실패했습니다.");
+      } finally {
+        setSavingInstructorAvailability(false);
+      }
+    },
+    [instructors, moveToLogin, selectedInstructorId, selectedInstructorLabel]
+  );
+
   const buildUndoState = useCallback(
     (label: string, restoreMove?: UndoState["restoreMove"]): UndoState => ({
       label,
@@ -1529,6 +1607,8 @@ export default function SynchroSPage() {
         setSubjectColor(subject.code, subject.tailwindClass);
       }
     });
+
+    setError((prev) => (prev === "Bad Request" ? null : prev));
   }, [moveToLogin]);
 
   const loadSubjectSettings = useCallback(async () => {
@@ -1692,6 +1772,7 @@ export default function SynchroSPage() {
 
       const data = (await res.json()) as WeekResponse;
       setEvents(data.events);
+      setError((prev) => (prev === "Bad Request" ? null : prev));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load week schedule");
       setEvents([]);
@@ -1725,6 +1806,7 @@ export default function SynchroSPage() {
         targetLabel: `${item.target_type}: ${item.target_name}`
       }))
     );
+    setError((prev) => (prev === "Bad Request" ? null : prev));
   }, [moveToLogin]);
 
   const loadTimetableGroups = useCallback(async () => {
@@ -1742,6 +1824,7 @@ export default function SynchroSPage() {
 
     const data = (await res.json().catch(() => ({}))) as TimetableGroupsResponse;
     setTimetableGroups((data.items ?? []).map(mapApiGroupToState));
+    setError((prev) => (prev === "Bad Request" ? null : prev));
   }, [moveToLogin]);
 
   const createTimetableGroup = useCallback(
@@ -1863,16 +1946,33 @@ export default function SynchroSPage() {
   );
 
   const loadOverviewEvents = useCallback(async () => {
+    if (showIntroPage || mainTab !== "overview") {
+      setOverviewEvents([]);
+      return;
+    }
+
+    const targetView = overviewEntity;
     const query = new URLSearchParams({
       weekStart,
-      view: viewerRole === "student" ? "student" : "instructor"
+      view: targetView
     });
-    if (viewerRole === "instructor" && selectedInstructorId) {
+
+    if (targetView === "instructor") {
+      if (!selectedInstructorId) {
+        setOverviewEvents([]);
+        return;
+      }
       query.set("instructorId", selectedInstructorId);
     }
-    if (viewerRole === "student" && selectedStudentId) {
+
+    if (targetView === "student") {
+      if (!selectedStudentId) {
+        setOverviewEvents([]);
+        return;
+      }
       query.set("studentId", selectedStudentId);
     }
+
     const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
 
     if (res.status === 401) {
@@ -1887,7 +1987,8 @@ export default function SynchroSPage() {
 
     const data = (await res.json()) as WeekResponse;
     setOverviewEvents(data.events);
-  }, [moveToLogin, selectedInstructorId, selectedStudentId, viewerRole, weekStart]);
+    setError((prev) => (prev === "Bad Request" ? null : prev));
+  }, [mainTab, moveToLogin, overviewEntity, selectedInstructorId, selectedStudentId, showIntroPage, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
     if (showIntroPage || mainTab === "overview" || !currentTargetId) {
@@ -1922,6 +2023,7 @@ export default function SynchroSPage() {
           content: item.content
         }))
       );
+      setError((prev) => (prev === "Bad Request" ? null : prev));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "특이사항을 불러오지 못했습니다.");
       setSpecialNotes([]);
@@ -1995,11 +2097,11 @@ export default function SynchroSPage() {
       router.refresh();
       await Promise.all([
         loadOptions(),
-        loadWeek({ silent: true }),
         loadSaveHistory(),
         loadTimetableGroups(),
-        loadOverviewEvents(),
-        loadSpecialNotes()
+        !showIntroPage && mainTab !== "overview" && mainTab !== "new" ? loadWeek({ silent: true }) : Promise.resolve(),
+        !showIntroPage && mainTab === "overview" ? loadOverviewEvents() : Promise.resolve(),
+        !showIntroPage && mainTab !== "overview" && mainTab !== "new" ? loadSpecialNotes() : Promise.resolve()
       ]);
       setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
     } catch (refreshError) {
@@ -2007,7 +2109,18 @@ export default function SynchroSPage() {
     } finally {
       setRefreshingData(false);
     }
-  }, [loadOptions, loadOverviewEvents, loadSaveHistory, loadSpecialNotes, loadTimetableGroups, loadWeek, refreshingData, router]);
+  }, [
+    loadOptions,
+    loadOverviewEvents,
+    loadSaveHistory,
+    loadSpecialNotes,
+    loadTimetableGroups,
+    loadWeek,
+    mainTab,
+    refreshingData,
+    router,
+    showIntroPage
+  ]);
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -3403,12 +3516,22 @@ export default function SynchroSPage() {
   }, [loadOverviewEvents, mainTab, showIntroPage]);
 
   useEffect(() => {
+    if (showIntroPage || mainTab === "overview" || mainTab === "new") {
+      setLoading(false);
+      setEvents([]);
+      return;
+    }
     void loadWeek();
-  }, [loadWeek]);
+  }, [loadWeek, mainTab, showIntroPage]);
 
   useEffect(() => {
+    if (showIntroPage || mainTab === "overview" || mainTab === "new") {
+      setSpecialNotes([]);
+      setNotesLoading(false);
+      return;
+    }
     void loadSpecialNotes();
-  }, [loadSpecialNotes]);
+  }, [loadSpecialNotes, mainTab, showIntroPage]);
 
   useEffect(() => {
     if (mainTab !== "overview") {
@@ -3514,6 +3637,14 @@ export default function SynchroSPage() {
     }
 
     const supabase = createSupabaseBrowserClient();
+    const reloadActiveScreen = () => {
+      if (!showIntroPage && mainTab !== "overview" && mainTab !== "new") {
+        void loadWeek({ silent: true });
+      }
+      if (!showIntroPage && mainTab === "overview") {
+        void loadOverviewEvents();
+      }
+    };
     const channel = supabase
       .channel("synchro-s-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "classes" }, () => {
@@ -3521,31 +3652,28 @@ export default function SynchroSPage() {
           pendingRealtimeReloadRef.current = true;
           return;
         }
-        void loadWeek({ silent: true });
-        void loadOverviewEvents();
+        reloadActiveScreen();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "class_enrollments" }, () => {
         if (importingNotionRef.current) {
           pendingRealtimeReloadRef.current = true;
           return;
         }
-        void loadWeek({ silent: true });
-        void loadOverviewEvents();
+        reloadActiveScreen();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "class_overrides" }, () => {
         if (importingNotionRef.current) {
           pendingRealtimeReloadRef.current = true;
           return;
         }
-        void loadWeek({ silent: true });
-        void loadOverviewEvents();
+        reloadActiveScreen();
       })
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadOverviewEvents, loadWeek]);
+  }, [loadOverviewEvents, loadWeek, mainTab, showIntroPage]);
 
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-[1760px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 2xl:max-w-[1880px] xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
@@ -3844,6 +3972,38 @@ export default function SynchroSPage() {
                         );
                       })}
                     </div>
+                    <div className="mt-3 border-t border-white/45 pt-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Available Time</p>
+                        <span className="text-[10px] font-semibold text-slate-500">
+                          {savingInstructorAvailability
+                            ? "저장 중..."
+                            : selectedInstructorAvailableTimeSlots.length > 0
+                              ? `${selectedInstructorAvailableTimeSlots.length}개 설정`
+                              : "전체 시간 허용"}
+                        </span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-4 gap-1">
+                        {TIME_SLOTS.map((slot) => {
+                          const active = selectedInstructorAvailableTimeSlots.includes(slot);
+                          return (
+                            <button
+                              key={`available-time-${slot}`}
+                              type="button"
+                              disabled={savingInstructorAvailability}
+                              onClick={() => void handleToggleInstructorAvailableTime(slot)}
+                              className={`rounded-2xl border px-0 py-1.5 text-[10px] font-bold transition ${
+                                active
+                                  ? "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]"
+                                  : "border-white/50 bg-white/55 text-slate-600 hover:bg-white/70"
+                              } disabled:opacity-60`}
+                            >
+                              {slot}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -4074,27 +4234,40 @@ export default function SynchroSPage() {
           <div className="mb-3 flex items-center justify-between rounded-2xl border border-white/55 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-md">
             <div>
               <p className="text-sm font-black text-slate-800">시간표 보기 모드</p>
-              <p className="text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환할 수 있습니다.</p>
+              <p className="text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환하고 빈 요일을 접을 수 있습니다.</p>
             </div>
-            <div className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/70 p-1">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setTimetableViewMode("detailed")}
-                className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                  timetableViewMode === "detailed" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                onClick={() => setHideEmptyDays((prev) => !prev)}
+                className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                  hideEmptyDays
+                    ? "border-sky-300 bg-sky-500/15 text-sky-700 shadow-sm shadow-sky-200/70"
+                    : "border-white/60 bg-white/70 text-slate-600 hover:bg-slate-100"
                 }`}
               >
-                상세
+                빈 요일 숨기기 {hideEmptyDays ? "ON" : "OFF"}
               </button>
-              <button
-                type="button"
-                onClick={() => setTimetableViewMode("summary")}
-                className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                  timetableViewMode === "summary" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                심플 뷰
-              </button>
+              <div className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/70 p-1">
+                <button
+                  type="button"
+                  onClick={() => setTimetableViewMode("detailed")}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                    timetableViewMode === "detailed" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  상세
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTimetableViewMode("summary")}
+                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                    timetableViewMode === "summary" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  심플 뷰
+                </button>
+              </div>
             </div>
           </div>
           {loading ? (
@@ -4105,6 +4278,7 @@ export default function SynchroSPage() {
               days={DAYS}
               timeSlots={TIME_SLOTS}
               events={displayEvents}
+              hideEmptyDays={hideEmptyDays}
               daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
               viewMode={timetableViewMode}
               highlightCellTints={activeHighlightCellTints}
