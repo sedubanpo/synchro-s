@@ -50,6 +50,7 @@ export type SelectOption = {
   name: string;
   secondary?: string;
   daysOff?: Weekday[];
+  availableTimeSlots?: string[];
 };
 
 export type TimetableViewMode = "detailed" | "summary";

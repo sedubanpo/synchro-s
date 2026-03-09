@@ -10,6 +10,7 @@ type TimetableGridProps = {
   timeSlots: string[];
   events: ScheduleEvent[];
   daysOff?: Weekday[];
+  hideEmptyDays?: boolean;
   viewMode?: TimetableViewMode;
   highlightCellTints?: Record<string, string>;
   onCellClick: (ctx: { weekday: Weekday; startTime: string }) => void;
@@ -70,6 +71,7 @@ export function TimetableGrid({
   timeSlots,
   events,
   daysOff = [],
+  hideEmptyDays = false,
   viewMode = "detailed",
   highlightCellTints,
   onCellClick,
@@ -137,6 +139,9 @@ export function TimetableGrid({
     }
   }
 
+  const visibleDays = hideEmptyDays ? days.filter((day) => activeDaySet.has(day.key)) : days;
+  const renderDays = visibleDays.length > 0 ? visibleDays : days;
+
   const moveByPayload = async (payload: { classId: string; durationMinutes: number }, weekday: Weekday, startTime: string) => {
     if (!canMoveEvents || !onEventMove) return;
     if (!payload.classId || Number.isNaN(payload.durationMinutes)) return;
@@ -195,7 +200,7 @@ export function TimetableGrid({
             <th className="sticky left-0 top-0 z-30 w-28 border-b border-r border-slate-200 bg-slate-50 px-2 py-3 text-center font-extrabold text-slate-600">
               시간
             </th>
-            {days.map((day) => (
+            {renderDays.map((day) => (
               <th
                 key={day.key}
                 className={`sticky top-0 z-20 w-[158px] border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
@@ -243,7 +248,7 @@ export function TimetableGrid({
                 {toRangeLabel(slot)}
               </td>
 
-              {days.map((day) => {
+              {renderDays.map((day) => {
                 const cellKey = `${day.key}-${slot}`;
                 const entries = eventMap.get(cellKey) ?? [];
                 const isEmpty = entries.length === 0;

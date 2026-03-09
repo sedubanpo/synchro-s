@@ -1,6 +1,7 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { getAuthenticatedProfile } from "@/lib/server/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { weekRange } from "@/lib/time";
 import { fetchWeeklySchedule } from "@/lib/server/scheduleService";
 import type { RoleView } from "@/types/schedule";
 import { NextResponse } from "next/server";
@@ -83,6 +84,23 @@ export async function GET(req: Request) {
       if (!studentId) {
         return jsonError("No student profile linked to this account", 400);
       }
+    }
+
+    const emptyResponse = (() => {
+      const range = weekRange(weekStart);
+      return {
+        weekStart: range.weekStart,
+        weekEnd: range.weekEnd,
+        events: []
+      };
+    })();
+
+    if (view === "instructor" && !instructorId) {
+      return NextResponse.json(emptyResponse);
+    }
+
+    if (view === "student" && !studentId) {
+      return NextResponse.json(emptyResponse);
     }
 
     const response = await fetchWeeklySchedule(supabase, {
