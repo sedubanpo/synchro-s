@@ -73,7 +73,7 @@ type ImportProgress = {
   label: string;
 };
 
-type MainTab = "overview" | RoleView;
+type MainTab = "overview" | "new" | RoleView;
 
 type ConflictDialogState = {
   open: boolean;
@@ -164,6 +164,29 @@ type SpecialNotesResponse = {
 type OverviewEntity = RoleView;
 type InstructorOverviewMode = "subject" | "weekday" | "dayOff";
 type StudentOverviewMode = "weekday" | "school" | "classType";
+type RecommendationMode = "new" | "join";
+
+type NewPlacementDraft = {
+  subjectCode: string;
+  classTypeCode: string;
+  preferredWeekdays: Weekday[];
+  preferredTimes: string[];
+  note: string;
+};
+
+type RecommendationItem = {
+  key: string;
+  instructorId: string;
+  instructorName: string;
+  instructorSecondary?: string;
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+  mode: RecommendationMode;
+  classTypeLabel: string;
+  reason: string;
+  existingStudentNames: string[];
+};
 
 const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 const EXCLUDED_OVERVIEW_INSTRUCTORS = new Set(["홍성우", "안종성", "김용찬", "에스에듀"]);
@@ -350,6 +373,33 @@ function parseTimeLabel(raw: string): { startTime: string; endTime: string } | n
     return null;
   }
   return { startTime, endTime };
+}
+
+function addMinutesToClock(time: string, minutes: number): string {
+  const next = timeToMinutes(time) + minutes;
+  const safe = Math.max(0, Math.min(next, 24 * 60));
+  const hour = Math.floor(safe / 60);
+  const minute = safe % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function subjectAliases(label: string): string[] {
+  const normalized = normalizeLookupToken(label);
+  if (normalized.includes("수학")) return ["수학", "math"];
+  if (normalized.includes("영어")) return ["영어", "english", "eng"];
+  if (normalized.includes("국어")) return ["국어", "korean"];
+  if (normalized.includes("과학")) return ["과학", "science"];
+  if (normalized.includes("사회") || normalized.includes("사탐")) return ["사회", "사탐", "social"];
+  return [label];
+}
+
+function instructorMatchesSubject(instructor: SelectOption, subjectLabel: string): boolean {
+  const secondary = normalizeLookupToken(instructor.secondary ?? "");
+  if (!secondary) return true;
+  return subjectAliases(subjectLabel).some((alias) => {
+    const token = normalizeLookupToken(alias);
+    return secondary.includes(token) || token.includes(secondary);
+  });
 }
 
 function parseCellClassText(cell: string): {
@@ -706,6 +756,13 @@ export default function SynchroSPage() {
   const [specialNoteInput, setSpecialNoteInput] = useState("");
   const [notesLoading, setNotesLoading] = useState(false);
   const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [newPlacementDraft, setNewPlacementDraft] = useState<NewPlacementDraft>({
+    subjectCode: "",
+    classTypeCode: "",
+    preferredWeekdays: [],
+    preferredTimes: [],
+    note: ""
+  });
   const [memoByEventId, setMemoByEventId] = useState<Record<string, string>>({});
   const [timetableGroups, setTimetableGroups] = useState<TimetableGroup[]>([]);
   const [groupPage, setGroupPage] = useState(1);
@@ -957,14 +1014,145 @@ export default function SynchroSPage() {
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
   const isInstructorReadOnly = viewerRole === "instructor";
-  const profileTitle = roleView === "student" ? "학생 프로필" : "강사 프로필";
-  const profileName = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
-  const profileSecondary = roleView === "student" ? selectedStudentSecondary : selectedInstructorSecondary;
+  const selectedSubjectForPlacement = useMemo(
+    () => subjects.find((subject) => subject.code === newPlacementDraft.subjectCode) ?? null,
+    [newPlacementDraft.subjectCode, subjects]
+  );
+  const selectedClassTypeForPlacement = useMemo(
+    () => classTypes.find((type) => type.code === newPlacementDraft.classTypeCode) ?? null,
+    [classTypes, newPlacementDraft.classTypeCode]
+  );
+  const groupedUniverseEvents = useMemo(() => {
+    const eventMap = new Map<string, ScheduleEvent>();
+    for (const group of timetableGroups) {
+      if (!group.isActive || group.roleView !== "student") continue;
+      for (const event of group.snapshotEvents ?? []) {
+        eventMap.set(event.id, event);
+      }
+    }
+    for (const event of events) {
+      eventMap.set(event.id, event);
+    }
+    return [...eventMap.values()];
+  }, [events, timetableGroups]);
+  const placementRecommendations = useMemo(() => {
+    if (!selectedSubjectForPlacement || !selectedClassTypeForPlacement) return [] as RecommendationItem[];
+    if (newPlacementDraft.preferredWeekdays.length === 0 || newPlacementDraft.preferredTimes.length === 0) return [] as RecommendationItem[];
+
+    const strictRequest = isStrictConflictClassType(selectedClassTypeForPlacement.code, selectedClassTypeForPlacement.label);
+    const recommendations: RecommendationItem[] = [];
+    const seen = new Set<string>();
+
+    for (const weekday of [...newPlacementDraft.preferredWeekdays].sort((a, b) => a - b)) {
+      for (const startTime of [...newPlacementDraft.preferredTimes].sort()) {
+        const endTime = addMinutesToClock(startTime, 60);
+        for (const instructor of overviewVisibleInstructors) {
+          if (!instructorMatchesSubject(instructor, selectedSubjectForPlacement.label)) continue;
+          if (normalizeDaysOff(instructor.daysOff).includes(weekday)) continue;
+
+          const overlaps = groupedUniverseEvents.filter(
+            (event) =>
+              event.instructorId === instructor.id &&
+              event.weekday === weekday &&
+              hasTimeOverlap(startTime, endTime, event.startTime, event.endTime)
+          );
+
+          let next: RecommendationItem | null = null;
+
+          if (strictRequest) {
+            if (overlaps.length === 0) {
+              next = {
+                key: `${instructor.id}-${weekday}-${startTime}-new`,
+                instructorId: instructor.id,
+                instructorName: instructor.name,
+                instructorSecondary: instructor.secondary,
+                weekday,
+                startTime,
+                endTime,
+                mode: "new",
+                classTypeLabel: selectedClassTypeForPlacement.label,
+                reason: "1:1/2:1 신규 배정 가능",
+                existingStudentNames: []
+              };
+            }
+          } else {
+            const hasStrictOverlap = overlaps.some((event) => isStrictConflictClassType(event.classTypeCode, event.classTypeLabel));
+            const sameSubjectRegular = overlaps.filter(
+              (event) =>
+                !isStrictConflictClassType(event.classTypeCode, event.classTypeLabel) &&
+                normalizeLookupToken(event.subjectCode) === normalizeLookupToken(selectedSubjectForPlacement.code)
+            );
+
+            if (!hasStrictOverlap && sameSubjectRegular.length > 0) {
+              next = {
+                key: `${instructor.id}-${weekday}-${startTime}-join-${sameSubjectRegular[0]!.id}`,
+                instructorId: instructor.id,
+                instructorName: instructor.name,
+                instructorSecondary: instructor.secondary,
+                weekday,
+                startTime,
+                endTime,
+                mode: "join",
+                classTypeLabel: sameSubjectRegular[0]!.classTypeLabel,
+                reason: "기존 개별정규 수업에 합류 가능",
+                existingStudentNames: Array.from(new Set(sameSubjectRegular.flatMap((event) => event.studentNames))).slice(0, 4)
+              };
+            } else if (!hasStrictOverlap && overlaps.length === 0) {
+              next = {
+                key: `${instructor.id}-${weekday}-${startTime}-new`,
+                instructorId: instructor.id,
+                instructorName: instructor.name,
+                instructorSecondary: instructor.secondary,
+                weekday,
+                startTime,
+                endTime,
+                mode: "new",
+                classTypeLabel: selectedClassTypeForPlacement.label,
+                reason: "개별정규 신규 편성 가능",
+                existingStudentNames: []
+              };
+            }
+          }
+
+          if (next && !seen.has(next.key)) {
+            seen.add(next.key);
+            recommendations.push(next);
+          }
+        }
+      }
+    }
+
+    return recommendations.sort((a, b) => {
+      if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+      if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+      if (a.mode !== b.mode) return a.mode === "join" ? -1 : 1;
+      return a.instructorName.localeCompare(b.instructorName, "ko");
+    });
+  }, [groupedUniverseEvents, newPlacementDraft.preferredTimes, newPlacementDraft.preferredWeekdays, overviewVisibleInstructors, selectedClassTypeForPlacement, selectedSubjectForPlacement]);
+  const profileTitle =
+    mainTab === "new" ? "신규 배정 추천" : roleView === "student" ? "학생 프로필" : "강사 프로필";
+  const profileName =
+    mainTab === "new" ? "신규 시간표 추천" : roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
+  const profileSecondary =
+    mainTab === "new"
+      ? "등원 희망 요일/시간과 과목을 기준으로 배치 가능한 시간표를 추천합니다."
+      : roleView === "student"
+        ? selectedStudentSecondary
+        : selectedInstructorSecondary;
   const profileAccentClass =
-    roleView === "student"
-      ? "from-emerald-400/18 via-white/30 to-teal-300/12 text-emerald-700"
-      : "from-sky-400/18 via-white/30 to-indigo-300/12 text-sky-700";
-  const profileInitial = (profileName === "학생 선택" || profileName === "강사 선택" ? roleView === "student" ? "학" : "강" : profileName)
+    mainTab === "new"
+      ? "from-fuchsia-300/18 via-white/30 to-cyan-300/12 text-fuchsia-700"
+      : roleView === "student"
+        ? "from-emerald-400/18 via-white/30 to-teal-300/12 text-emerald-700"
+        : "from-sky-400/18 via-white/30 to-indigo-300/12 text-sky-700";
+  const profileInitial = (mainTab === "new"
+    ? "신"
+    : profileName === "학생 선택" || profileName === "강사 선택"
+      ? roleView === "student"
+        ? "학"
+        : "강"
+      : profileName
+  )
     .trim()
     .charAt(0);
   const getInstructorDaysOff = useCallback(
@@ -1190,6 +1378,7 @@ export default function SynchroSPage() {
 
   const handleMainTabChange = useCallback(
     (next: MainTab) => {
+      setError(null);
       setMainTab(next);
       setSearchKeyword("");
       setShowStudentPicker(false);
@@ -1207,6 +1396,12 @@ export default function SynchroSPage() {
         if (overviewEntity === "student" && students.length > 0 && !students.some((item) => item.id === selectedStudentId)) {
           setSelectedStudentId(students[0]!.id);
         }
+        return;
+      }
+
+      if (next === "new") {
+        setShowIntroPage(false);
+        setRoleView("student");
         return;
       }
 
@@ -3199,10 +3394,13 @@ export default function SynchroSPage() {
   }, [loadTimetableGroups]);
 
   useEffect(() => {
+    if (showIntroPage || mainTab !== "overview") {
+      return;
+    }
     void loadOverviewEvents().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "전체 요약 데이터를 불러오지 못했습니다.");
     });
-  }, [loadOverviewEvents]);
+  }, [loadOverviewEvents, mainTab, showIntroPage]);
 
   useEffect(() => {
     void loadWeek();
@@ -3228,6 +3426,14 @@ export default function SynchroSPage() {
       setSelectedStudentId(students[0]!.id);
     }
   }, [mainTab, overviewEntity, overviewVisibleInstructors, selectedInstructorId, selectedStudentId, students]);
+
+  useEffect(() => {
+    setNewPlacementDraft((prev) => ({
+      ...prev,
+      subjectCode: prev.subjectCode || subjects[0]?.code || "",
+      classTypeCode: prev.classTypeCode || classTypes[0]?.code || ""
+    }));
+  }, [classTypes, subjects]);
 
   useEffect(() => {
     const savedMemo = window.localStorage.getItem("synchro-s-event-memo-v1");
@@ -3442,7 +3648,10 @@ export default function SynchroSPage() {
             <div className="flex flex-wrap items-center justify-end gap-2 rounded-[28px] border border-white/45 bg-white/30 p-3 shadow-lg shadow-slate-900/5 backdrop-blur-md">
               <button
                 type="button"
-                onClick={() => setShowIntroPage(true)}
+                onClick={() => {
+                  setError(null);
+                  setShowIntroPage(true);
+                }}
                 className="inline-flex items-center gap-2 rounded-full border border-white/45 bg-white/45 px-4 py-2 text-xs font-bold text-slate-700 shadow-sm shadow-white/20 hover:bg-white/60"
               >
                 <span className="h-2 w-2 rounded-full bg-sky-400" />
@@ -3453,6 +3662,7 @@ export default function SynchroSPage() {
                   ? ([{ key: "instructor", label: "강사" }] as const)
                   : ([
                       { key: "overview", label: "전체 요약" },
+                      { key: "new", label: "신규" },
                       { key: "instructor", label: "강사" },
                       { key: "student", label: "학생" }
                     ] as const)
@@ -3461,6 +3671,8 @@ export default function SynchroSPage() {
                   const accentClass =
                     tab.key === "overview"
                       ? "shadow-[inset_0_-2px_0_rgba(99,102,241,0.42),0_7px_16px_rgba(99,102,241,0.22)]"
+                      : tab.key === "new"
+                        ? "shadow-[inset_0_-2px_0_rgba(217,70,239,0.42),0_7px_16px_rgba(217,70,239,0.22)]"
                       : tab.key === "instructor"
                         ? "shadow-[inset_0_-2px_0_rgba(59,130,246,0.45),0_7px_16px_rgba(59,130,246,0.24)]"
                         : "shadow-[inset_0_-2px_0_rgba(16,185,129,0.45),0_7px_16px_rgba(16,185,129,0.24)]";
@@ -3589,7 +3801,11 @@ export default function SynchroSPage() {
                       {showIntroPage ? "Home Guide" : mainTab === "overview" ? "Overview Dashboard" : profileTitle}
                     </p>
                     <p className="truncate text-lg font-black text-slate-900">
-                      {showIntroPage ? "운영 가이드 홈화면" : mainTab === "overview" ? "강사 스케줄 모아보기" : profileName}
+                      {showIntroPage
+                        ? "운영 가이드 홈화면"
+                        : mainTab === "overview"
+                          ? "강사 스케줄 모아보기"
+                          : profileName}
                     </p>
                     <p className="truncate text-xs font-semibold text-slate-500">
                       {showIntroPage
@@ -3600,7 +3816,7 @@ export default function SynchroSPage() {
                     </p>
                   </div>
                 </div>
-                {!showIntroPage && mainTab !== "overview" && roleView === "instructor" && selectedInstructorId ? (
+                {!showIntroPage && mainTab !== "overview" && mainTab !== "new" && roleView === "instructor" && selectedInstructorId ? (
                   <div className="mt-3 rounded-2xl border border-white/45 bg-white/35 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Days Off</p>
@@ -3632,7 +3848,7 @@ export default function SynchroSPage() {
                 ) : null}
               </div>
 
-              {!showIntroPage && mainTab !== "overview" ? (
+              {!showIntroPage && mainTab !== "overview" && mainTab !== "new" ? (
                 roleView === "instructor" ? (
                   <div className="relative z-[120]">
                     <button
@@ -3718,7 +3934,7 @@ export default function SynchroSPage() {
         </div>
       </section>
 
-      {!showIntroPage && mainTab !== "overview" ? (
+      {!showIntroPage && mainTab !== "overview" && mainTab !== "new" ? (
         <>
       {error ? (
         <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
@@ -4293,6 +4509,209 @@ export default function SynchroSPage() {
                   </div>
                 </div>
               </aside>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {!showIntroPage && mainTab === "new" ? (
+        <>
+          {error ? (
+            <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+              {notice}
+            </div>
+          ) : null}
+          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+            <div className="grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+              <div className="rounded-[26px] border border-white/55 bg-white/45 p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">New Placement</p>
+                <h2 className="mt-2 text-2xl font-black text-slate-900">신규 시간표 추천</h2>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                  희망 과목, 수업 유형, 등원 가능 요일과 시간을 선택하면 현재 저장된 시간표 그룹 기준으로 가능한 배정 후보를 추천합니다.
+                </p>
+
+                <div className="mt-5 grid gap-4">
+                  <label className="grid gap-2">
+                    <span className="text-xs font-bold text-slate-600">과목</span>
+                    <select
+                      value={newPlacementDraft.subjectCode}
+                      onChange={(event) => setNewPlacementDraft((prev) => ({ ...prev, subjectCode: event.target.value }))}
+                      className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-sm font-semibold text-slate-800 outline-none"
+                    >
+                      {subjects.map((subject) => (
+                        <option key={`new-subject-${subject.code}`} value={subject.code}>
+                          {subject.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-2">
+                    <span className="text-xs font-bold text-slate-600">수업 유형</span>
+                    <select
+                      value={newPlacementDraft.classTypeCode}
+                      onChange={(event) => setNewPlacementDraft((prev) => ({ ...prev, classTypeCode: event.target.value }))}
+                      className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-sm font-semibold text-slate-800 outline-none"
+                    >
+                      {classTypes.map((type) => (
+                        <option key={`new-class-type-${type.code}`} value={type.code}>
+                          {type.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div>
+                    <p className="text-xs font-bold text-slate-600">희망 요일</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {DAYS.map((day) => {
+                        const active = newPlacementDraft.preferredWeekdays.includes(day.key);
+                        return (
+                          <button
+                            key={`new-day-${day.key}`}
+                            type="button"
+                            onClick={() =>
+                              setNewPlacementDraft((prev) => ({
+                                ...prev,
+                                preferredWeekdays: active
+                                  ? prev.preferredWeekdays.filter((value) => value !== day.key)
+                                  : [...prev.preferredWeekdays, day.key]
+                              }))
+                            }
+                            className={`rounded-full px-4 py-2 text-xs font-black transition ${
+                              active
+                                ? "bg-[linear-gradient(135deg,rgba(217,70,239,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(168,85,247,0.24)]"
+                                : "border border-white/60 bg-white/70 text-slate-600 hover:bg-white"
+                            }`}
+                          >
+                            {day.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold text-slate-600">희망 시간</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {TIME_SLOTS.map((slot) => {
+                        const active = newPlacementDraft.preferredTimes.includes(slot);
+                        return (
+                          <button
+                            key={`new-time-${slot}`}
+                            type="button"
+                            onClick={() =>
+                              setNewPlacementDraft((prev) => ({
+                                ...prev,
+                                preferredTimes: active
+                                  ? prev.preferredTimes.filter((value) => value !== slot)
+                                  : [...prev.preferredTimes, slot]
+                              }))
+                            }
+                            className={`rounded-full px-3 py-2 text-xs font-black transition ${
+                              active
+                                ? "bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.22)]"
+                                : "border border-white/60 bg-white/70 text-slate-600 hover:bg-white"
+                            }`}
+                          >
+                            {toKoreanHourRange(slot)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <label className="grid gap-2">
+                    <span className="text-xs font-bold text-slate-600">메모</span>
+                    <textarea
+                      value={newPlacementDraft.note}
+                      onChange={(event) => setNewPlacementDraft((prev) => ({ ...prev, note: event.target.value }))}
+                      placeholder="예: 주 2회 희망, 토요일 우선"
+                      className="h-24 rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-400"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-[26px] border border-white/55 bg-[linear-gradient(160deg,rgba(244,244,255,0.82),rgba(255,255,255,0.54),rgba(224,242,254,0.62))] p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Recommendation</p>
+                    <h3 className="mt-2 text-xl font-black text-slate-900">추천 시간표 후보</h3>
+                  </div>
+                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-2 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Results</p>
+                    <p className="text-lg font-black text-slate-900">{placementRecommendations.length}건</p>
+                  </div>
+                </div>
+
+                {placementRecommendations.length === 0 ? (
+                  <div className="mt-4 rounded-3xl border border-dashed border-slate-200 bg-white/65 px-5 py-8 text-sm font-semibold leading-7 text-slate-500">
+                    과목, 수업 유형, 희망 요일과 시간을 선택하면 저장된 시간표 그룹 기준으로 가능한 배정 후보를 보여줍니다.
+                    <br />
+                    개별정규는 기존 같은 과목 그룹 합류를 우선 추천하고, 같은 시간에 1:1 수업이 있으면 제외합니다.
+                  </div>
+                ) : (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {placementRecommendations.map((item) => {
+                      const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? `${item.weekday}`;
+                      return (
+                        <div
+                          key={item.key}
+                          className={`rounded-3xl border px-4 py-4 shadow-[0_14px_34px_rgba(148,163,184,0.12)] ${
+                            item.mode === "join"
+                              ? "border-amber-100 bg-[linear-gradient(145deg,rgba(255,247,237,0.88),rgba(254,243,199,0.62))]"
+                              : "border-emerald-100 bg-[linear-gradient(145deg,rgba(236,253,245,0.88),rgba(209,250,229,0.62))]"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">{weekdayLabel}</p>
+                              <p className="mt-1 text-lg font-black text-slate-900">
+                                {item.instructorName}
+                                {item.instructorSecondary ? <span className="ml-2 text-sm font-bold text-slate-500">{item.instructorSecondary}</span> : null}
+                              </p>
+                            </div>
+                            <span
+                              className={`rounded-full px-3 py-1 text-[11px] font-black ${
+                                item.mode === "join" ? "bg-amber-500/90 text-white" : "bg-emerald-500/90 text-white"
+                              }`}
+                            >
+                              {item.mode === "join" ? "합류" : "신규"}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <span className="rounded-full border border-white/60 bg-white/80 px-3 py-1 text-xs font-black text-slate-700">
+                              {item.startTime}-{item.endTime}
+                            </span>
+                            <span className="rounded-full border border-white/60 bg-white/80 px-3 py-1 text-xs font-black text-slate-700">
+                              {item.classTypeLabel}
+                            </span>
+                          </div>
+                          <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">{item.reason}</p>
+                          {item.existingStudentNames.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {item.existingStudentNames.map((name) => (
+                                <span
+                                  key={`${item.key}-${name}`}
+                                  className="rounded-full border border-white/60 bg-white/78 px-2.5 py-1 text-[11px] font-bold text-slate-600"
+                                >
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         </>
