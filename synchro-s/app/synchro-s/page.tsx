@@ -843,7 +843,7 @@ export default function SynchroSPage() {
     const schoolLabel = (secondary?: string) => secondary?.split("·")[0]?.trim() || "학교 정보 없음";
     const weekdayOrder = ["월", "화", "수", "목", "금", "토", "일", "수업 없음"];
     const eventsByStudent = new Map<string, ScheduleEvent[]>();
-    const activeGroupByStudent = new Map<string, TimetableGroup>();
+    const preferredGroupByStudent = new Map<string, TimetableGroup>();
 
     for (const event of overviewEvents) {
       for (const studentId of event.studentIds) {
@@ -853,15 +853,35 @@ export default function SynchroSPage() {
       }
     }
 
-    for (const group of timetableGroups) {
-      if (group.roleView !== "student" || !group.isActive) continue;
-      activeGroupByStudent.set(group.targetId, group);
+    const studentScopedGroups = timetableGroups
+      .filter((group) => group.roleView === "student")
+      .sort((a, b) => {
+        if (a.isActive !== b.isActive) {
+          return a.isActive ? -1 : 1;
+        }
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+
+    for (const group of studentScopedGroups) {
+      if (!preferredGroupByStudent.has(group.targetId)) {
+        preferredGroupByStudent.set(group.targetId, group);
+      }
     }
 
     for (const student of students) {
-      const linkedEvents = activeGroupByStudent.get(student.id)?.snapshotEvents?.length
-        ? activeGroupByStudent.get(student.id)?.snapshotEvents ?? []
-        : eventsByStudent.get(student.id) ?? [];
+      const preferredGroup = preferredGroupByStudent.get(student.id) ?? null;
+      const studentWeekEvents = eventsByStudent.get(student.id) ?? [];
+      const groupSnapshotEvents = preferredGroup?.snapshotEvents ?? [];
+      const groupLinkedEvents =
+        preferredGroup && preferredGroup.classIds.length > 0
+          ? studentWeekEvents.filter((event) => preferredGroup.classIds.includes(event.id))
+          : [];
+      const linkedEvents =
+        groupSnapshotEvents.length > 0
+          ? groupSnapshotEvents
+          : groupLinkedEvents.length > 0
+            ? groupLinkedEvents
+            : studentWeekEvents;
       let keys: string[] = [];
 
       if (studentOverviewMode === "weekday") {
