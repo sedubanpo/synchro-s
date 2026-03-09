@@ -114,6 +114,8 @@ type UndoState = {
 type SaveHistoryEntry = {
   id: string;
   timestampLabel: string;
+  targetType: "학생" | "강사";
+  targetName: string;
   targetLabel: string;
 };
 
@@ -297,6 +299,22 @@ function formatSpecialNoteTimestamp(dateISO: string): string {
   }).formatToParts(new Date(dateISO));
   const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return `${pick("year")}.${pick("month")}.${pick("day")} ${pick("hour")}:${pick("minute")}`;
+}
+
+function findOptionByName(items: SelectOption[], targetName: string): SelectOption | null {
+  const target = normalizePersonName(targetName);
+  if (!target) {
+    return null;
+  }
+
+  return (
+    items.find((item) => normalizePersonName(item.name) === target) ??
+    items.find((item) => {
+      const token = normalizePersonName(item.name);
+      return token.includes(target) || target.includes(token);
+    }) ??
+    null
+  );
 }
 
 function parseTimeLabel(raw: string): { startTime: string; endTime: string } | null {
@@ -823,8 +841,9 @@ export default function SynchroSPage() {
     const grouped = new Map<string, SelectOption[]>();
     const labelForDay = (weekday: Weekday) => DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
     const schoolLabel = (secondary?: string) => secondary?.split("·")[0]?.trim() || "학교 정보 없음";
-    const weekdayOrder = ["월", "화", "수", "목", "금", "토", "일", "이번 주 수업 없음"];
+    const weekdayOrder = ["월", "화", "수", "목", "금", "토", "일", "수업 없음"];
     const eventsByStudent = new Map<string, ScheduleEvent[]>();
+    const activeGroupByStudent = new Map<string, TimetableGroup>();
 
     for (const event of overviewEvents) {
       for (const studentId of event.studentIds) {
@@ -834,8 +853,15 @@ export default function SynchroSPage() {
       }
     }
 
+    for (const group of timetableGroups) {
+      if (group.roleView !== "student" || !group.isActive) continue;
+      activeGroupByStudent.set(group.targetId, group);
+    }
+
     for (const student of students) {
-      const linkedEvents = eventsByStudent.get(student.id) ?? [];
+      const linkedEvents = activeGroupByStudent.get(student.id)?.snapshotEvents?.length
+        ? activeGroupByStudent.get(student.id)?.snapshotEvents ?? []
+        : eventsByStudent.get(student.id) ?? [];
       let keys: string[] = [];
 
       if (studentOverviewMode === "weekday") {
@@ -847,7 +873,7 @@ export default function SynchroSPage() {
       }
 
       if (keys.length === 0) {
-        keys = [studentOverviewMode === "weekday" ? "이번 주 수업 없음" : studentOverviewMode === "classType" ? "유형 없음" : "학교 정보 없음"];
+        keys = [studentOverviewMode === "weekday" ? "수업 없음" : studentOverviewMode === "classType" ? "유형 없음" : "학교 정보 없음"];
       }
 
       for (const key of keys) {
@@ -892,7 +918,7 @@ export default function SynchroSPage() {
                 "border-violet-100/80 bg-[linear-gradient(135deg,rgba(245,243,255,0.82),rgba(237,233,254,0.68))]"
               ][index % 4]
       }));
-  }, [overviewEvents, studentOverviewMode, students]);
+  }, [overviewEvents, studentOverviewMode, students, timetableGroups]);
   const overviewDisplayGroups = useMemo(
     () =>
       overviewEntity === "instructor"
@@ -1480,6 +1506,8 @@ export default function SynchroSPage() {
       (data.items ?? []).map((item) => ({
         id: item.id,
         timestampLabel: formatSaveHistoryTimestamp(new Date(item.created_at)),
+        targetType: item.target_type,
+        targetName: item.target_name,
         targetLabel: `${item.target_type}: ${item.target_name}`
       }))
     );
@@ -3078,6 +3106,41 @@ export default function SynchroSPage() {
     setTimetableGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, name } : group)));
   }, []);
 
+  const handleSelectSaveHistoryTarget = useCallback(
+    (entry: SaveHistoryEntry) => {
+      setShowIntroPage(false);
+      setSearchKeyword("");
+      setShowStudentPicker(false);
+      setShowInstructorPicker(false);
+      setSelectedGroupId(null);
+
+      if (entry.targetType === "학생") {
+        const matchedStudent = findOptionByName(students, entry.targetName);
+        if (!matchedStudent) {
+          setError(`저장 기록 대상 학생을 찾지 못했습니다: ${entry.targetName}`);
+          return;
+        }
+        setMainTab("student");
+        setRoleView("student");
+        setSelectedStudentId(matchedStudent.id);
+      } else {
+        const matchedInstructor = findOptionByName(instructors, entry.targetName);
+        if (!matchedInstructor) {
+          setError(`저장 기록 대상 강사를 찾지 못했습니다: ${entry.targetName}`);
+          return;
+        }
+        setMainTab("instructor");
+        setRoleView("instructor");
+        setSelectedInstructorId(matchedInstructor.id);
+      }
+
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    },
+    [instructors, students]
+  );
+
   const handlePersistGroupName = useCallback(
     async (groupId: string, name: string) => {
       try {
@@ -3287,10 +3350,14 @@ export default function SynchroSPage() {
                   {saveHistory.map((entry) => (
                     <div key={entry.id} className="relative">
                       <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full border border-white/70 bg-[linear-gradient(135deg,rgba(96,165,250,0.95),rgba(167,243,208,0.9))] shadow-[0_4px_10px_rgba(96,165,250,0.25)]" />
-                      <div className="rounded-2xl border border-white/45 bg-white/34 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSaveHistoryTarget(entry)}
+                        className="w-full rounded-2xl border border-white/45 bg-white/34 px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition hover:border-sky-200/80 hover:bg-white/55"
+                      >
                         <p className="text-[11px] font-black tracking-wide text-slate-700">[{entry.timestampLabel}]</p>
                         <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
-                      </div>
+                      </button>
                     </div>
                   ))}
                 </div>
