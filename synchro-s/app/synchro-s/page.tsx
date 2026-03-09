@@ -868,20 +868,19 @@ export default function SynchroSPage() {
         }
         return b.createdAt.localeCompare(a.createdAt);
       });
-      const firstSnapshotGroup = studentGroups.find((group) => (group.snapshotEvents?.length ?? 0) > 0) ?? null;
-      const groupedClassIds = Array.from(
-        new Set(
-          studentGroups.flatMap((group) => (Array.isArray(group.classIds) ? group.classIds : [])).filter(Boolean)
-        )
-      );
-      const groupLinkedEvents =
-        groupedClassIds.length > 0 ? studentWeekEvents.filter((event) => groupedClassIds.includes(event.id)) : [];
+      const preferredGroup = studentGroups[0] ?? null;
+      const snapshotPool = studentGroups.flatMap((group) => group.snapshotEvents ?? []);
+      const preferredSnapshot = preferredGroup?.snapshotEvents ?? [];
+      const groupedClassIds = Array.from(new Set(studentGroups.flatMap((group) => group.classIds ?? []).filter(Boolean)));
+      const groupLinkedEvents = groupedClassIds.length > 0 ? studentWeekEvents.filter((event) => groupedClassIds.includes(event.id)) : [];
       const linkedEvents =
-        firstSnapshotGroup && (firstSnapshotGroup.snapshotEvents?.length ?? 0) > 0
-          ? firstSnapshotGroup.snapshotEvents ?? []
-          : groupLinkedEvents.length > 0
-            ? groupLinkedEvents
-            : studentWeekEvents;
+        preferredSnapshot.length > 0
+          ? preferredSnapshot
+          : snapshotPool.length > 0
+            ? snapshotPool
+            : groupLinkedEvents.length > 0
+              ? groupLinkedEvents
+              : studentWeekEvents;
       let keys: string[] = [];
 
       if (studentOverviewMode === "weekday") {
@@ -1669,7 +1668,16 @@ export default function SynchroSPage() {
   );
 
   const loadOverviewEvents = useCallback(async () => {
-    const query = new URLSearchParams({ weekStart, view: "instructor" });
+    const query = new URLSearchParams({
+      weekStart,
+      view: viewerRole === "student" ? "student" : "instructor"
+    });
+    if (viewerRole === "instructor" && selectedInstructorId) {
+      query.set("instructorId", selectedInstructorId);
+    }
+    if (viewerRole === "student" && selectedStudentId) {
+      query.set("studentId", selectedStudentId);
+    }
     const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
 
     if (res.status === 401) {
@@ -1684,7 +1692,7 @@ export default function SynchroSPage() {
 
     const data = (await res.json()) as WeekResponse;
     setOverviewEvents(data.events);
-  }, [moveToLogin, weekStart]);
+  }, [moveToLogin, selectedInstructorId, selectedStudentId, viewerRole, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
     if (showIntroPage || mainTab === "overview" || !currentTargetId) {
