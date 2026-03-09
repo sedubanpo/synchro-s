@@ -843,7 +843,7 @@ export default function SynchroSPage() {
     const schoolLabel = (secondary?: string) => secondary?.split("·")[0]?.trim() || "학교 정보 없음";
     const weekdayOrder = ["월", "화", "수", "목", "금", "토", "일", "수업 없음"];
     const eventsByStudent = new Map<string, ScheduleEvent[]>();
-    const preferredGroupByStudent = new Map<string, TimetableGroup>();
+    const groupsByStudent = new Map<string, TimetableGroup[]>();
 
     for (const event of overviewEvents) {
       for (const studentId of event.studentIds) {
@@ -853,32 +853,32 @@ export default function SynchroSPage() {
       }
     }
 
-    const studentScopedGroups = timetableGroups
-      .filter((group) => group.roleView === "student")
-      .sort((a, b) => {
+    const studentScopedGroups = timetableGroups.filter((group) => group.roleView === "student");
+    for (const group of studentScopedGroups) {
+      const bucket = groupsByStudent.get(group.targetId) ?? [];
+      bucket.push(group);
+      groupsByStudent.set(group.targetId, bucket);
+    }
+
+    for (const student of students) {
+      const studentWeekEvents = eventsByStudent.get(student.id) ?? [];
+      const studentGroups = [...(groupsByStudent.get(student.id) ?? [])].sort((a, b) => {
         if (a.isActive !== b.isActive) {
           return a.isActive ? -1 : 1;
         }
         return b.createdAt.localeCompare(a.createdAt);
       });
-
-    for (const group of studentScopedGroups) {
-      if (!preferredGroupByStudent.has(group.targetId)) {
-        preferredGroupByStudent.set(group.targetId, group);
-      }
-    }
-
-    for (const student of students) {
-      const preferredGroup = preferredGroupByStudent.get(student.id) ?? null;
-      const studentWeekEvents = eventsByStudent.get(student.id) ?? [];
-      const groupSnapshotEvents = preferredGroup?.snapshotEvents ?? [];
+      const firstSnapshotGroup = studentGroups.find((group) => (group.snapshotEvents?.length ?? 0) > 0) ?? null;
+      const groupedClassIds = Array.from(
+        new Set(
+          studentGroups.flatMap((group) => (Array.isArray(group.classIds) ? group.classIds : [])).filter(Boolean)
+        )
+      );
       const groupLinkedEvents =
-        preferredGroup && preferredGroup.classIds.length > 0
-          ? studentWeekEvents.filter((event) => preferredGroup.classIds.includes(event.id))
-          : [];
+        groupedClassIds.length > 0 ? studentWeekEvents.filter((event) => groupedClassIds.includes(event.id)) : [];
       const linkedEvents =
-        groupSnapshotEvents.length > 0
-          ? groupSnapshotEvents
+        firstSnapshotGroup && (firstSnapshotGroup.snapshotEvents?.length ?? 0) > 0
+          ? firstSnapshotGroup.snapshotEvents ?? []
           : groupLinkedEvents.length > 0
             ? groupLinkedEvents
             : studentWeekEvents;
