@@ -21,6 +21,11 @@ type WeeklyQuery = {
   studentId?: string | null;
 };
 
+type ClassIdsWeekQuery = {
+  weekStart: string;
+  classIds: string[];
+};
+
 type OverrideRow = {
   class_id: string;
   override_date: string;
@@ -719,6 +724,126 @@ export async function fetchWeeklySchedule(
     weekEnd,
     events
   };
+}
+
+export async function fetchEventsForClassIdsInWeek(
+  supabase: SupabaseLike,
+  params: ClassIdsWeekQuery
+): Promise<ScheduleEvent[]> {
+  const classIds = Array.from(new Set(params.classIds.filter(Boolean)));
+  if (classIds.length === 0) {
+    return [];
+  }
+
+  const { weekStart, weekEnd } = weekRange(params.weekStart);
+
+  const { data: classRows, error: classError } = await supabase
+    .from("classes")
+    .select(CLASS_SELECT)
+    .in("id", classIds);
+
+  if (classError) {
+    throw classError;
+  }
+
+  const rows = (classRows ?? []) as ClassRow[];
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const [enrollmentRes, overrideRes] = await Promise.all([
+    supabase
+      .from("class_enrollments")
+      .select("class_id,student_id,students(id,student_name)")
+      .in("class_id", classIds),
+    supabase
+      .from("class_overrides")
+      .select(
+        "class_id,override_date,action,override_instructor_id,override_start_time,override_end_time,override_status"
+      )
+      .in("class_id", classIds)
+      .gte("override_date", weekStart)
+      .lte("override_date", weekEnd)
+  ]);
+
+  if (enrollmentRes.error) throw enrollmentRes.error;
+  if (overrideRes.error) throw overrideRes.error;
+
+  const enrollments = (enrollmentRes.data ?? []) as EnrollmentRow[];
+  const overrides = (overrideRes.data ?? []) as OverrideRow[];
+
+  const enrollmentMap = new Map<string, EnrollmentRow[]>();
+  for (const enrollment of enrollments) {
+    const bucket = enrollmentMap.get(enrollment.class_id) ?? [];
+    bucket.push(enrollment);
+    enrollmentMap.set(enrollment.class_id, bucket);
+  }
+
+  const overrideMap = new Map<string, OverrideRow>();
+  for (const override of overrides) {
+    overrideMap.set(buildOverrideKey(override.class_id, override.override_date), override);
+  }
+
+  const instructorNameMap = new Map<string, string>();
+  for (const row of rows) {
+    if (row.instructors?.id && row.instructors.instructor_name) {
+      instructorNameMap.set(row.instructors.id, row.instructors.instructor_name);
+    }
+  }
+
+  const missingInstructorIds = Array.from(
+    new Set(
+      overrides
+        .map((override) => override.override_instructor_id)
+        .filter((value): value is string => typeof value === "string" && value.length > 0 && !instructorNameMap.has(value))
+    )
+  );
+
+  if (missingInstructorIds.length > 0) {
+    const { data: extraInstructors } = await supabase
+      .from("instructors")
+      .select("id,instructor_name")
+      .in("id", missingInstructorIds);
+
+    for (const instructor of extraInstructors ?? []) {
+      instructorNameMap.set(instructor.id, instructor.instructor_name);
+    }
+  }
+
+  const events: ScheduleEvent[] = [];
+
+  for (const row of rows) {
+    if (row.schedule_mode === "recurring") {
+      if (!row.weekday) continue;
+      const classDate = addDays(weekStart, row.weekday - 1);
+
+      if (classDate < row.active_from) continue;
+      if (row.active_to && classDate > row.active_to) continue;
+
+      const override = overrideMap.get(buildOverrideKey(row.id, classDate));
+      if (override?.action === "cancel") continue;
+
+      events.push(classToEvent(row, classDate, row.weekday, enrollmentMap, instructorNameMap, override));
+      continue;
+    }
+
+    if (!row.class_date) continue;
+    if (row.class_date < weekStart || row.class_date > weekEnd) continue;
+
+    const override = overrideMap.get(buildOverrideKey(row.id, row.class_date));
+    if (override?.action === "cancel") continue;
+
+    events.push(
+      classToEvent(row, row.class_date, dateToWeekday(row.class_date), enrollmentMap, instructorNameMap, override)
+    );
+  }
+
+  events.sort((a, b) => {
+    if (a.classDate !== b.classDate) return a.classDate.localeCompare(b.classDate);
+    return a.startTime.localeCompare(b.startTime);
+  });
+
+  return events;
 }
 
 export async function updateScheduleStatus(

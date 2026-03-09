@@ -1,5 +1,6 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
+import { fetchEventsForClassIdsInWeek } from "@/lib/server/scheduleService";
 import { NextResponse } from "next/server";
 
 type GroupMutationPayload =
@@ -82,20 +83,33 @@ export async function GET(req: Request) {
     const { data, error } = await query;
     if (error) throw error;
 
-    return NextResponse.json({
-      items: (data ?? []).map((row: any) => ({
-        id: row.id,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        roleView: row.role_view,
-        targetId: row.target_id,
-        weekStart: row.week_start,
-        name: row.name,
-        classIds: Array.isArray(row.class_ids) ? row.class_ids : [],
-        snapshotEvents: Array.isArray(row.snapshot_events) ? row.snapshot_events : [],
-        isActive: row.is_active === true
-      }))
-    });
+    const items = await Promise.all(
+      (data ?? []).map(async (row: any) => {
+        const classIds = Array.isArray(row.class_ids) ? row.class_ids : [];
+        const rawSnapshotEvents = Array.isArray(row.snapshot_events) ? row.snapshot_events : [];
+        const snapshotEvents =
+          rawSnapshotEvents.length > 0
+            ? rawSnapshotEvents
+            : classIds.length > 0
+              ? await fetchEventsForClassIdsInWeek(supabase, { weekStart: row.week_start, classIds })
+              : [];
+
+        return {
+          id: row.id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          roleView: row.role_view,
+          targetId: row.target_id,
+          weekStart: row.week_start,
+          name: row.name,
+          classIds,
+          snapshotEvents,
+          isActive: row.is_active === true
+        };
+      })
+    );
+
+    return NextResponse.json({ items });
   } catch (error) {
     return jsonError(errorMessage(error), 500);
   }
