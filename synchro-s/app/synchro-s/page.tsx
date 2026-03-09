@@ -1608,7 +1608,7 @@ export default function SynchroSPage() {
       }
     });
 
-    setError((prev) => (prev === "Bad Request" ? null : prev));
+    setError(null);
   }, [moveToLogin]);
 
   const loadSubjectSettings = useCallback(async () => {
@@ -1772,7 +1772,7 @@ export default function SynchroSPage() {
 
       const data = (await res.json()) as WeekResponse;
       setEvents(data.events);
-      setError((prev) => (prev === "Bad Request" ? null : prev));
+      setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load week schedule");
       setEvents([]);
@@ -1806,7 +1806,7 @@ export default function SynchroSPage() {
         targetLabel: `${item.target_type}: ${item.target_name}`
       }))
     );
-    setError((prev) => (prev === "Bad Request" ? null : prev));
+    setError(null);
   }, [moveToLogin]);
 
   const loadTimetableGroups = useCallback(async () => {
@@ -1824,7 +1824,7 @@ export default function SynchroSPage() {
 
     const data = (await res.json().catch(() => ({}))) as TimetableGroupsResponse;
     setTimetableGroups((data.items ?? []).map(mapApiGroupToState));
-    setError((prev) => (prev === "Bad Request" ? null : prev));
+    setError(null);
   }, [moveToLogin]);
 
   const createTimetableGroup = useCallback(
@@ -1987,7 +1987,7 @@ export default function SynchroSPage() {
 
     const data = (await res.json()) as WeekResponse;
     setOverviewEvents(data.events);
-    setError((prev) => (prev === "Bad Request" ? null : prev));
+    setError(null);
   }, [mainTab, moveToLogin, overviewEntity, selectedInstructorId, selectedStudentId, showIntroPage, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
@@ -2023,7 +2023,7 @@ export default function SynchroSPage() {
           content: item.content
         }))
       );
-      setError((prev) => (prev === "Bad Request" ? null : prev));
+      setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "특이사항을 불러오지 못했습니다.");
       setSpecialNotes([]);
@@ -3534,6 +3534,12 @@ export default function SynchroSPage() {
   }, [loadSpecialNotes, mainTab, showIntroPage]);
 
   useEffect(() => {
+    if (error === "Bad Request") {
+      setError(null);
+    }
+  }, [error, mainTab, roleView, selectedInstructorId, selectedStudentId, showIntroPage]);
+
+  useEffect(() => {
     if (mainTab !== "overview") {
       return;
     }
@@ -4235,19 +4241,19 @@ export default function SynchroSPage() {
             <div>
               <p className="text-sm font-black text-slate-800">시간표 보기 모드</p>
               <p className="text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환하고 빈 요일을 접을 수 있습니다.</p>
-            </div>
-            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setHideEmptyDays((prev) => !prev)}
-                className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                className={`mt-2 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold transition ${
                   hideEmptyDays
                     ? "border-sky-300 bg-sky-500/15 text-sky-700 shadow-sm shadow-sky-200/70"
-                    : "border-white/60 bg-white/70 text-slate-600 hover:bg-slate-100"
+                    : "border-slate-200 bg-white/80 text-slate-600 hover:bg-white"
                 }`}
               >
                 빈 요일 숨기기 {hideEmptyDays ? "ON" : "OFF"}
               </button>
+            </div>
+            <div className="flex items-center gap-2">
               <div className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/70 p-1">
                 <button
                   type="button"
