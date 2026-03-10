@@ -7,6 +7,7 @@ import { setSubjectColor } from "@/lib/subjectColors";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { timeToMinutes } from "@/lib/time";
 import type {
+  AvailableTimeSlotsByDay,
   ClassTypeOption,
   ConflictResult,
   RoleView,
@@ -293,6 +294,63 @@ function normalizeAvailableTimeSlots(slots?: string[]): string[] {
   return Array.from(new Set(slots.filter((value): value is string => /^\d{2}:\d{2}$/.test(value)))).sort((a, b) =>
     a.localeCompare(b)
   );
+}
+
+function normalizeAvailableTimeSlotsByDay(slotsByDay?: AvailableTimeSlotsByDay): AvailableTimeSlotsByDay {
+  if (!slotsByDay || typeof slotsByDay !== "object" || Array.isArray(slotsByDay)) {
+    return {};
+  }
+
+  const normalized: AvailableTimeSlotsByDay = {};
+  for (const [rawWeekday, rawSlots] of Object.entries(slotsByDay)) {
+    const weekday = Number(rawWeekday);
+    if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7) {
+      continue;
+    }
+
+    const slots = normalizeAvailableTimeSlots(rawSlots);
+    if (slots.length > 0) {
+      normalized[weekday as Weekday] = slots;
+    }
+  }
+
+  return normalized;
+}
+
+function flattenAvailableTimeSlotsByDay(slotsByDay?: AvailableTimeSlotsByDay, fallback?: string[]): string[] {
+  const merged = new Set<string>();
+
+  for (const slots of Object.values(normalizeAvailableTimeSlotsByDay(slotsByDay))) {
+    for (const slot of slots ?? []) {
+      merged.add(slot);
+    }
+  }
+
+  if (merged.size === 0) {
+    for (const slot of normalizeAvailableTimeSlots(fallback)) {
+      merged.add(slot);
+    }
+  }
+
+  return [...merged].sort((a, b) => a.localeCompare(b));
+}
+
+function getInstructorAvailableTimeSlotsForWeekday(instructor: SelectOption | null | undefined, weekday: Weekday): string[] {
+  const slotsByDay = normalizeAvailableTimeSlotsByDay(instructor?.availableTimeSlotsByDay);
+  const daySpecificSlots = normalizeAvailableTimeSlots(slotsByDay[weekday]);
+  if (daySpecificSlots.length > 0) {
+    return daySpecificSlots;
+  }
+
+  return normalizeAvailableTimeSlots(instructor?.availableTimeSlots);
+}
+
+async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (payload.error?.trim()) {
+    return payload.error;
+  }
+  return `${fallback} (HTTP ${response.status})`;
 }
 
 function toKoreanHourRange(startTime: string): string {
@@ -742,6 +800,7 @@ export default function SynchroSPage() {
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
   const [savingInstructorDaysOff, setSavingInstructorDaysOff] = useState(false);
   const [savingInstructorAvailability, setSavingInstructorAvailability] = useState(false);
+  const [availabilityEditorWeekday, setAvailabilityEditorWeekday] = useState<Weekday>(1);
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
@@ -845,9 +904,13 @@ export default function SynchroSPage() {
     () => normalizeDaysOff(selectedInstructorOption?.daysOff),
     [selectedInstructorOption]
   );
-  const selectedInstructorAvailableTimeSlots = useMemo(
-    () => normalizeAvailableTimeSlots(selectedInstructorOption?.availableTimeSlots),
+  const selectedInstructorAvailableTimeSlotsByDay = useMemo(
+    () => normalizeAvailableTimeSlotsByDay(selectedInstructorOption?.availableTimeSlotsByDay),
     [selectedInstructorOption]
+  );
+  const selectedInstructorAvailableTimeSlots = useMemo(
+    () => getInstructorAvailableTimeSlotsForWeekday(selectedInstructorOption, availabilityEditorWeekday),
+    [availabilityEditorWeekday, selectedInstructorOption]
   );
   const overviewVisibleInstructors = useMemo(
     () => instructors.filter((item) => !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
@@ -1064,7 +1127,7 @@ export default function SynchroSPage() {
         for (const instructor of overviewVisibleInstructors) {
           if (!instructorMatchesSubject(instructor, selectedSubjectForPlacement.label)) continue;
           if (normalizeDaysOff(instructor.daysOff).includes(weekday)) continue;
-          const availableTimeSlots = normalizeAvailableTimeSlots(instructor.availableTimeSlots);
+          const availableTimeSlots = getInstructorAvailableTimeSlotsForWeekday(instructor, weekday);
           if (availableTimeSlots.length > 0 && !availableTimeSlots.includes(startTime)) continue;
 
           const overlaps = groupedUniverseEvents.filter(
@@ -1146,6 +1209,43 @@ export default function SynchroSPage() {
       return a.instructorName.localeCompare(b.instructorName, "ko");
     });
   }, [groupedUniverseEvents, newPlacementDraft.preferredTimes, newPlacementDraft.preferredWeekdays, overviewVisibleInstructors, selectedClassTypeForPlacement, selectedSubjectForPlacement]);
+  const overviewDisplayEvents = useMemo(() => {
+    if (overviewEntity === "instructor") {
+      if (!selectedInstructorId) {
+        return [];
+      }
+      return overviewEvents.filter((event) => event.instructorId === selectedInstructorId);
+    }
+
+    if (!selectedStudentId) {
+      return [];
+    }
+
+    const studentWeekEvents = overviewEvents.filter((event) => event.studentIds.includes(selectedStudentId));
+    const studentGroups = timetableGroups
+      .filter((group) => group.roleView === "student" && group.targetId === selectedStudentId)
+      .sort((a, b) => {
+        if (a.isActive !== b.isActive) {
+          return a.isActive ? -1 : 1;
+        }
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+
+    const preferredGroup = studentGroups[0] ?? null;
+    const snapshotPool = studentGroups.flatMap((group) => group.snapshotEvents ?? []);
+    const preferredSnapshot = preferredGroup?.snapshotEvents ?? [];
+    const groupedClassIds = Array.from(new Set(studentGroups.flatMap((group) => group.classIds ?? []).filter(Boolean)));
+    const groupLinkedEvents =
+      groupedClassIds.length > 0 ? studentWeekEvents.filter((event) => groupedClassIds.includes(event.id)) : [];
+
+    return preferredSnapshot.length > 0
+      ? preferredSnapshot
+      : snapshotPool.length > 0
+        ? snapshotPool
+        : groupLinkedEvents.length > 0
+          ? groupLinkedEvents
+          : studentWeekEvents;
+  }, [overviewEntity, overviewEvents, selectedInstructorId, selectedStudentId, timetableGroups]);
   const profileTitle =
     mainTab === "new" ? "신규 배정 추천" : roleView === "student" ? "학생 프로필" : "강사 프로필";
   const profileName =
@@ -1292,7 +1392,7 @@ export default function SynchroSPage() {
   ]);
   const displayEvents = useMemo(() => {
     if (mainTab === "overview") {
-      return filteredEvents;
+      return overviewDisplayEvents;
     }
     if (roleView === "instructor" && activeStudentEventsForInstructor.length > 0) {
       // 강사 탭은 라이브 DB 결과를 기준으로, 활성 학생 그룹 스냅샷을 보정해서 합본을 표시한다.
@@ -1311,7 +1411,7 @@ export default function SynchroSPage() {
     }
     if (draftEvents.length > 0) return draftEvents;
     return filteredEvents;
-  }, [activeGroup, activeStudentEventsForInstructor, draftEvents, filteredEvents, mainTab, roleView, selectedGroup]);
+  }, [activeGroup, activeStudentEventsForInstructor, draftEvents, filteredEvents, mainTab, overviewDisplayEvents, roleView, selectedGroup]);
   const activeHighlightCellTints = useMemo(() => {
     if (displayEvents.length === 0) return {};
     const chainEvents = [...displayEvents]
@@ -1494,12 +1594,21 @@ export default function SynchroSPage() {
         return;
       }
 
-      const currentSlots = normalizeAvailableTimeSlots(
-        instructors.find((item) => item.id === selectedInstructorId)?.availableTimeSlots
-      );
+      const selectedInstructor = instructors.find((item) => item.id === selectedInstructorId);
+      const currentByDay = normalizeAvailableTimeSlotsByDay(selectedInstructor?.availableTimeSlotsByDay);
+      const currentSlots = getInstructorAvailableTimeSlotsForWeekday(selectedInstructor, availabilityEditorWeekday);
       const nextSlots = currentSlots.includes(startTime)
         ? currentSlots.filter((value) => value !== startTime)
         : [...currentSlots, startTime].sort((a, b) => a.localeCompare(b));
+      const nextByDay: AvailableTimeSlotsByDay = {
+        ...currentByDay
+      };
+
+      if (nextSlots.length > 0) {
+        nextByDay[availabilityEditorWeekday] = nextSlots;
+      } else {
+        delete nextByDay[availabilityEditorWeekday];
+      }
 
       setSavingInstructorAvailability(true);
       setError(null);
@@ -1508,7 +1617,7 @@ export default function SynchroSPage() {
         const res = await fetch(`/api/instructors/${selectedInstructorId}/availability`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ availableTimeSlots: nextSlots })
+          body: JSON.stringify({ availableTimeSlotsByDay: nextByDay })
         });
 
         if (res.status === 401) {
@@ -1517,27 +1626,33 @@ export default function SynchroSPage() {
         }
 
         if (!res.ok) {
-          const payload = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(payload.error ?? "강사 가능 시간 저장에 실패했습니다.");
+          throw new Error(await getApiErrorMessage(res, "강사 가능 시간 저장에 실패했습니다."));
         }
 
-        const data = (await res.json().catch(() => ({}))) as { availableTimeSlots?: string[] };
-        const resolvedSlots = normalizeAvailableTimeSlots(data.availableTimeSlots ?? nextSlots);
+        const data = (await res.json().catch(() => ({}))) as {
+          availableTimeSlots?: string[];
+          availableTimeSlotsByDay?: AvailableTimeSlotsByDay;
+        };
+        const resolvedByDay = normalizeAvailableTimeSlotsByDay(data.availableTimeSlotsByDay ?? nextByDay);
+        const resolvedSlots = flattenAvailableTimeSlotsByDay(resolvedByDay, data.availableTimeSlots ?? nextSlots);
         setInstructors((prev) =>
           prev.map((item) =>
             item.id === selectedInstructorId
               ? {
                   ...item,
-                  availableTimeSlots: resolvedSlots
+                  availableTimeSlots: resolvedSlots,
+                  availableTimeSlotsByDay: resolvedByDay
                 }
               : item
           )
         );
 
+        const weekdayLabel = DAYS.find((day) => day.key === availabilityEditorWeekday)?.label ?? `${availabilityEditorWeekday}`;
+        const resolvedDaySlots = normalizeAvailableTimeSlots(resolvedByDay[availabilityEditorWeekday]);
         setNotice(
-          resolvedSlots.length > 0
-            ? `${selectedInstructorLabel} 강사의 수업 가능 시간을 저장했습니다.`
-            : `${selectedInstructorLabel} 강사의 시간 제한을 해제했습니다.`
+          resolvedDaySlots.length > 0
+            ? `${selectedInstructorLabel} 강사의 ${weekdayLabel} 가능 시간을 저장했습니다.`
+            : `${selectedInstructorLabel} 강사의 ${weekdayLabel} 시간 제한을 해제했습니다.`
         );
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : "강사 가능 시간 저장에 실패했습니다.");
@@ -1545,7 +1660,7 @@ export default function SynchroSPage() {
         setSavingInstructorAvailability(false);
       }
     },
-    [instructors, moveToLogin, selectedInstructorId, selectedInstructorLabel]
+    [availabilityEditorWeekday, instructors, moveToLogin, selectedInstructorId, selectedInstructorLabel]
   );
 
   const buildUndoState = useCallback(
@@ -1571,8 +1686,7 @@ export default function SynchroSPage() {
     }
 
     if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(err.error ?? "Failed to load options");
+      throw new Error(await getApiErrorMessage(res, "/api/schedules/options 호출에 실패했습니다."));
     }
 
     const data = (await res.json()) as OptionsResponse;
@@ -1766,8 +1880,7 @@ export default function SynchroSPage() {
       }
 
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? "Failed to load week schedule");
+        throw new Error(await getApiErrorMessage(res, "/api/schedules/week 호출에 실패했습니다."));
       }
 
       const data = (await res.json()) as WeekResponse;
@@ -1957,22 +2070,6 @@ export default function SynchroSPage() {
       view: targetView
     });
 
-    if (targetView === "instructor") {
-      if (!selectedInstructorId) {
-        setOverviewEvents([]);
-        return;
-      }
-      query.set("instructorId", selectedInstructorId);
-    }
-
-    if (targetView === "student") {
-      if (!selectedStudentId) {
-        setOverviewEvents([]);
-        return;
-      }
-      query.set("studentId", selectedStudentId);
-    }
-
     const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
 
     if (res.status === 401) {
@@ -1981,14 +2078,13 @@ export default function SynchroSPage() {
     }
 
     if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(err.error ?? "전체 요약 데이터를 불러오지 못했습니다.");
+      throw new Error(await getApiErrorMessage(res, "/api/schedules/week overview 호출에 실패했습니다."));
     }
 
     const data = (await res.json()) as WeekResponse;
     setOverviewEvents(data.events);
     setError(null);
-  }, [mainTab, moveToLogin, overviewEntity, selectedInstructorId, selectedStudentId, showIntroPage, weekStart]);
+  }, [mainTab, moveToLogin, overviewEntity, showIntroPage, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
     if (showIntroPage || mainTab === "overview" || !currentTargetId) {
@@ -3985,9 +4081,30 @@ export default function SynchroSPage() {
                           {savingInstructorAvailability
                             ? "저장 중..."
                             : selectedInstructorAvailableTimeSlots.length > 0
-                              ? `${selectedInstructorAvailableTimeSlots.length}개 설정`
-                              : "전체 시간 허용"}
+                              ? `${DAYS.find((day) => day.key === availabilityEditorWeekday)?.label ?? availabilityEditorWeekday} ${selectedInstructorAvailableTimeSlots.length}개 설정`
+                              : `${DAYS.find((day) => day.key === availabilityEditorWeekday)?.label ?? availabilityEditorWeekday} 전체 시간 허용`}
                         </span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-7 gap-1">
+                        {DAYS.map((day) => {
+                          const active = day.key === availabilityEditorWeekday;
+                          const daySlots = normalizeAvailableTimeSlots(selectedInstructorAvailableTimeSlotsByDay[day.key]);
+                          return (
+                            <button
+                              key={`available-day-${day.key}`}
+                              type="button"
+                              onClick={() => setAvailabilityEditorWeekday(day.key)}
+                              className={`rounded-2xl border px-0 py-1.5 text-[11px] font-bold transition ${
+                                active
+                                  ? "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]"
+                                  : "border-white/50 bg-white/55 text-slate-600 hover:bg-white/70"
+                              }`}
+                            >
+                              {day.label}
+                              {daySlots.length > 0 ? ` ${daySlots.length}` : ""}
+                            </button>
+                          );
+                        })}
                       </div>
                       <div className="mt-2 grid grid-cols-4 gap-1">
                         {TIME_SLOTS.map((slot) => {

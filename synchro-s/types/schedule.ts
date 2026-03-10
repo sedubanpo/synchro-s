@@ -1,4 +1,5 @@
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type AvailableTimeSlotsByDay = Partial<Record<Weekday, string[]>>;
 
 export type RoleView = "instructor" | "student";
 export type ScheduleMode = "recurring" | "one_off";
@@ -51,6 +52,7 @@ export type SelectOption = {
   secondary?: string;
   daysOff?: Weekday[];
   availableTimeSlots?: string[];
+  availableTimeSlotsByDay?: AvailableTimeSlotsByDay;
 };
 
 export type TimetableViewMode = "detailed" | "summary";

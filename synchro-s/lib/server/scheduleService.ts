@@ -568,10 +568,7 @@ export async function fetchWeeklySchedule(
 
   let studentClassIds: string[] | null = null;
 
-  if (params.view === "student") {
-    if (!params.studentId) {
-      throw new Error("studentId is required for student view query");
-    }
+  if (params.view === "student" && params.studentId) {
     studentClassIds = await loadClassIdsForStudent(supabase, params.studentId);
     if (studentClassIds.length === 0) {
       return { weekStart, weekEnd, events: [] };

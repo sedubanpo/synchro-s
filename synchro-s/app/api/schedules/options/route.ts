@@ -9,6 +9,7 @@ type InstructorRow = {
   instructor_name: string;
   days_off?: number[] | null;
   available_time_slots?: string[] | null;
+  available_time_slots_by_day?: Record<string, unknown> | null;
   is_active?: boolean | null;
 };
 
@@ -98,8 +99,58 @@ async function findInstructorByName(
     id: exact.id,
     instructor_name: exact.instructor_name,
     days_off: exact.days_off ?? [],
-    available_time_slots: exact.available_time_slots ?? []
+    available_time_slots: exact.available_time_slots ?? [],
+    available_time_slots_by_day: exact.available_time_slots_by_day ?? {}
   };
+}
+
+function normalizeAvailableTimeSlots(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(values.filter((value): value is string => typeof value === "string" && /^\d{2}:\d{2}$/.test(value)))
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeAvailableTimeSlotsByDay(values: unknown): Record<string, string[]> {
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    return {};
+  }
+
+  const normalized: Record<string, string[]> = {};
+  for (const [rawWeekday, rawSlots] of Object.entries(values)) {
+    const weekday = Number(rawWeekday);
+    if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7) {
+      continue;
+    }
+
+    const slots = normalizeAvailableTimeSlots(rawSlots);
+    if (slots.length > 0) {
+      normalized[String(weekday)] = slots;
+    }
+  }
+
+  return normalized;
+}
+
+function flattenAvailableTimeSlots(byDay: Record<string, string[]>, fallback: unknown): string[] {
+  const merged = new Set<string>();
+
+  for (const slots of Object.values(byDay)) {
+    for (const slot of slots) {
+      merged.add(slot);
+    }
+  }
+
+  if (merged.size === 0) {
+    for (const slot of normalizeAvailableTimeSlots(fallback)) {
+      merged.add(slot);
+    }
+  }
+
+  return [...merged].sort((a, b) => a.localeCompare(b));
 }
 
 async function selectInstructorRows(supabase: any, onlyActive = false): Promise<{ data: InstructorRow[] | null; error: any }> {
@@ -111,14 +162,25 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
     return query;
   };
 
-  const primary = await runSelect("id,instructor_name,days_off,available_time_slots,is_active");
+  const primary = await runSelect("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day,is_active");
   if (!primary.error) {
     return { data: (primary.data ?? []) as InstructorRow[], error: null };
   }
 
   const message = `${primary.error?.message ?? ""} ${primary.error?.details ?? ""}`;
-  if (!message.includes("available_time_slots")) {
+  if (!message.includes("available_time_slots_by_day") && !message.includes("available_time_slots")) {
     return primary;
+  }
+
+  const legacyFallback = await runSelect("id,instructor_name,days_off,available_time_slots,is_active");
+  if (!legacyFallback.error) {
+    return {
+      data: ((legacyFallback.data ?? []) as InstructorRow[]).map((row) => ({
+        ...row,
+        available_time_slots_by_day: {}
+      })),
+      error: null
+    };
   }
 
   const fallback = await runSelect("id,instructor_name,days_off,is_active");
@@ -129,7 +191,8 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
   return {
     data: ((fallback.data ?? []) as InstructorRow[]).map((row) => ({
       ...row,
-      available_time_slots: []
+      available_time_slots: [],
+      available_time_slots_by_day: {}
     })),
     error: null
   };
@@ -250,7 +313,14 @@ export async function GET() {
       spreadsheetId
     );
 
-    let instructors: { id: string; name: string; secondary?: string; daysOff?: number[]; availableTimeSlots?: string[] }[] = [];
+    let instructors: {
+      id: string;
+      name: string;
+      secondary?: string;
+      daysOff?: number[];
+      availableTimeSlots?: string[];
+      availableTimeSlotsByDay?: Record<string, string[]>;
+    }[] = [];
     let students: { id: string; name: string; secondary?: string }[] = [];
     const profileInstructorId = (profile as { instructor_id?: string | null }).instructor_id ?? null;
 
@@ -268,15 +338,17 @@ export async function GET() {
       if (instructorRes.error) throw instructorRes.error;
       if (studentRes.error) throw studentRes.error;
 
-      instructors = (instructorRes.data ?? []).map(
-        (row: { id: string; instructor_name: string; days_off?: number[] | null; available_time_slots?: string[] | null }) => ({
-        id: row.id,
-        name: row.instructor_name,
-        secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
-        daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7),
-        availableTimeSlots: (row.available_time_slots ?? []).filter((value) => typeof value === "string" && /^\d{2}:\d{2}$/.test(value))
-      })
-      );
+      instructors = (instructorRes.data ?? []).map((row: InstructorRow) => {
+        const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(row.available_time_slots_by_day);
+        return {
+          id: row.id,
+          name: row.instructor_name,
+          secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
+          daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7),
+          availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, row.available_time_slots),
+          availableTimeSlotsByDay
+        };
+      });
       students = (studentRes.data ?? [])
         .filter((row: { student_name: string; is_active: boolean }) => {
           const normalized = normalizeName(row.student_name);
@@ -296,16 +368,29 @@ export async function GET() {
       let ownInstructor: InstructorRow | null = null;
       let ownInstructorError: any = null;
       {
-        const initial = await instructorQuery("id,instructor_name,days_off,available_time_slots");
+        const initial = await instructorQuery("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day");
         ownInstructor = (initial.data as InstructorRow | null) ?? null;
         ownInstructorError = initial.error;
       }
       if (ownInstructorError) {
         const message = `${ownInstructorError.message ?? ""} ${ownInstructorError.details ?? ""}`;
-        if (message.includes("available_time_slots")) {
+        if (message.includes("available_time_slots_by_day")) {
+          const fallback = await instructorQuery("id,instructor_name,days_off,available_time_slots");
+          ownInstructor = fallback.data
+            ? ({
+                ...((fallback.data as unknown as InstructorRow) ?? {}),
+                available_time_slots_by_day: {}
+              } as InstructorRow)
+            : null;
+          ownInstructorError = fallback.error;
+        } else if (message.includes("available_time_slots")) {
           const fallback = await instructorQuery("id,instructor_name,days_off");
           ownInstructor = fallback.data
-            ? ({ ...((fallback.data as unknown as InstructorRow) ?? {}), available_time_slots: [] } as InstructorRow)
+            ? ({
+                ...((fallback.data as unknown as InstructorRow) ?? {}),
+                available_time_slots: [],
+                available_time_slots_by_day: {}
+              } as InstructorRow)
             : null;
           ownInstructorError = fallback.error;
         }
@@ -320,15 +405,15 @@ export async function GET() {
         return jsonError("Instructor profile not found", 400);
       }
 
+      const resolvedByDay = normalizeAvailableTimeSlotsByDay(resolvedInstructor.available_time_slots_by_day);
       instructors = [
         {
           id: resolvedInstructor.id,
           name: resolvedInstructor.instructor_name,
           secondary: teacherSubjectByName.get(normalizeName(resolvedInstructor.instructor_name)),
           daysOff: (resolvedInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
-          availableTimeSlots: (resolvedInstructor.available_time_slots ?? []).filter(
-            (value: string) => typeof value === "string" && /^\d{2}:\d{2}$/.test(value)
-          )
+          availableTimeSlots: flattenAvailableTimeSlots(resolvedByDay, resolvedInstructor.available_time_slots),
+          availableTimeSlotsByDay: resolvedByDay
         }
       ];
 
@@ -397,29 +482,31 @@ export async function GET() {
       if (ownStudent.default_instructor_id) {
         let { data: defaultInstructor } = await supabase
           .from("instructors")
-          .select("id,instructor_name,days_off,available_time_slots")
+          .select("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day")
           .eq("id", ownStudent.default_instructor_id)
           .single();
 
         if (!defaultInstructor) {
           const fallback = await supabase
             .from("instructors")
-            .select("id,instructor_name,days_off")
+            .select("id,instructor_name,days_off,available_time_slots")
             .eq("id", ownStudent.default_instructor_id)
             .single();
-          defaultInstructor = fallback.data ? { ...fallback.data, available_time_slots: [] } : fallback.data;
+          defaultInstructor = fallback.data
+            ? { ...fallback.data, available_time_slots_by_day: {} }
+            : fallback.data;
         }
 
         if (defaultInstructor) {
+          const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(defaultInstructor.available_time_slots_by_day);
           instructors = [
             {
               id: defaultInstructor.id,
               name: defaultInstructor.instructor_name,
               secondary: teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name)),
               daysOff: (defaultInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
-              availableTimeSlots: (defaultInstructor.available_time_slots ?? []).filter(
-                (value: string) => typeof value === "string" && /^\d{2}:\d{2}$/.test(value)
-              )
+              availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, defaultInstructor.available_time_slots),
+              availableTimeSlotsByDay
             }
           ];
         }

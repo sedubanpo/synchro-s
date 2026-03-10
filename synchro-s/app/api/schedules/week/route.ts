@@ -86,23 +86,6 @@ export async function GET(req: Request) {
       }
     }
 
-    const emptyResponse = (() => {
-      const range = weekRange(weekStart);
-      return {
-        weekStart: range.weekStart,
-        weekEnd: range.weekEnd,
-        events: []
-      };
-    })();
-
-    if (view === "instructor" && !instructorId) {
-      return NextResponse.json(emptyResponse);
-    }
-
-    if (view === "student" && !studentId) {
-      return NextResponse.json(emptyResponse);
-    }
-
     const response = await fetchWeeklySchedule(supabase, {
       weekStart,
       view,
