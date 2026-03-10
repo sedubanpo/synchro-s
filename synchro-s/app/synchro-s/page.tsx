@@ -345,6 +345,50 @@ function getInstructorAvailableTimeSlotsForWeekday(instructor: SelectOption | nu
   return normalizeAvailableTimeSlots(instructor?.availableTimeSlots);
 }
 
+function eventMatchesInstructorOption(event: ScheduleEvent, instructor: SelectOption): boolean {
+  if (event.instructorId === instructor.id) {
+    return true;
+  }
+
+  const eventName = normalizePersonName(event.instructorName);
+  const instructorName = normalizePersonName(instructor.name);
+  return Boolean(eventName && instructorName && eventName === instructorName);
+}
+
+function mergeScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
+  const dedup = new Map<string, ScheduleEvent>();
+
+  for (const event of events) {
+    const key = [
+      event.classDate,
+      event.weekday,
+      event.startTime,
+      event.endTime,
+      normalizeLookupToken(event.subjectCode),
+      normalizeLookupToken(event.classTypeCode),
+      normalizePersonName(event.instructorName)
+    ].join("::");
+
+    const existing = dedup.get(key);
+    if (!existing) {
+      dedup.set(key, event);
+      continue;
+    }
+
+    dedup.set(key, {
+      ...existing,
+      studentIds: Array.from(new Set([...(existing.studentIds ?? []), ...(event.studentIds ?? [])])),
+      studentNames: Array.from(new Set([...(existing.studentNames ?? []), ...(event.studentNames ?? [])]))
+    });
+  }
+
+  return [...dedup.values()].sort((a, b) => {
+    if (a.classDate !== b.classDate) return a.classDate.localeCompare(b.classDate);
+    if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+    return a.instructorName.localeCompare(b.instructorName, "ko");
+  });
+}
+
 async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
   if (payload.error?.trim()) {
@@ -912,6 +956,34 @@ export default function SynchroSPage() {
     () => getInstructorAvailableTimeSlotsForWeekday(selectedInstructorOption, availabilityEditorWeekday),
     [availabilityEditorWeekday, selectedInstructorOption]
   );
+  const overviewUniverseEvents = useMemo(() => {
+    const collected = [...overviewEvents];
+    const relevantGroups = timetableGroups
+      .filter((group) => group.roleView === "instructor" || (group.roleView === "student" && group.isActive))
+      .sort((a, b) => {
+        if (a.isActive !== b.isActive) {
+          return a.isActive ? -1 : 1;
+        }
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+
+    for (const group of relevantGroups) {
+      const snapshot = group.snapshotEvents ?? [];
+      if (snapshot.length > 0) {
+        collected.push(...snapshot);
+      }
+
+      if (group.classIds.length > 0) {
+        const snapshotKeys = new Set(snapshot.map((event) => `${event.id}:${event.classDate}`));
+        const linkedLiveEvents = overviewEvents.filter(
+          (event) => group.classIds.includes(event.id) && !snapshotKeys.has(`${event.id}:${event.classDate}`)
+        );
+        collected.push(...linkedLiveEvents);
+      }
+    }
+
+    return mergeScheduleEvents(collected);
+  }, [overviewEvents, timetableGroups]);
   const overviewVisibleInstructors = useMemo(
     () => instructors.filter((item) => !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
     [instructors]
@@ -933,21 +1005,12 @@ export default function SynchroSPage() {
 
     const grouped = new Map<string, SelectOption[]>();
     const labelForDay = (weekday: Weekday) => DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
-    const eventsByInstructor = new Map<string, ScheduleEvent[]>();
-    for (const event of overviewEvents) {
-      const bucket = eventsByInstructor.get(event.instructorId) ?? [];
-      bucket.push(event);
-      eventsByInstructor.set(event.instructorId, bucket);
-    }
-
     for (const instructor of overviewVisibleInstructors) {
       let key = "기타";
       if (instructorOverviewMode === "subject") {
         key = normalizeSubjectLabel(instructor.secondary);
       } else if (instructorOverviewMode === "weekday") {
-        const activeDays = Array.from(
-          new Set((eventsByInstructor.get(instructor.id) ?? []).map((event) => event.weekday))
-        ).sort((a, b) => a - b);
+        const activeDays = Array.from(new Set(overviewUniverseEvents.filter((event) => eventMatchesInstructorOption(event, instructor)).map((event) => event.weekday))).sort((a, b) => a - b);
         key = activeDays.length > 0 ? activeDays.map((day) => labelForDay(day)).join(" · ") : "이번 주 수업 없음";
       } else {
         const daysOff = normalizeDaysOff(instructor.daysOff);
@@ -971,7 +1034,7 @@ export default function SynchroSPage() {
         subject,
         items: [...items].sort((a, b) => a.name.localeCompare(b.name, "ko"))
       }));
-  }, [instructorOverviewMode, overviewEvents, overviewVisibleInstructors]);
+  }, [instructorOverviewMode, overviewUniverseEvents, overviewVisibleInstructors]);
   const overviewStudentGroups = useMemo(() => {
     const grouped = new Map<string, SelectOption[]>();
     const labelForDay = (weekday: Weekday) => DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
@@ -1211,10 +1274,10 @@ export default function SynchroSPage() {
   }, [groupedUniverseEvents, newPlacementDraft.preferredTimes, newPlacementDraft.preferredWeekdays, overviewVisibleInstructors, selectedClassTypeForPlacement, selectedSubjectForPlacement]);
   const overviewDisplayEvents = useMemo(() => {
     if (overviewEntity === "instructor") {
-      if (!selectedInstructorId) {
+      if (!selectedInstructorOption) {
         return [];
       }
-      return overviewEvents.filter((event) => event.instructorId === selectedInstructorId);
+      return overviewUniverseEvents.filter((event) => eventMatchesInstructorOption(event, selectedInstructorOption));
     }
 
     if (!selectedStudentId) {
@@ -1245,7 +1308,7 @@ export default function SynchroSPage() {
         : groupLinkedEvents.length > 0
           ? groupLinkedEvents
           : studentWeekEvents;
-  }, [overviewEntity, overviewEvents, selectedInstructorId, selectedStudentId, timetableGroups]);
+  }, [overviewEntity, overviewEvents, overviewUniverseEvents, selectedInstructorOption, selectedStudentId, timetableGroups]);
   const profileTitle =
     mainTab === "new" ? "신규 배정 추천" : roleView === "student" ? "학생 프로필" : "강사 프로필";
   const profileName =

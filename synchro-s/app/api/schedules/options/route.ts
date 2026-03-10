@@ -153,6 +153,11 @@ function flattenAvailableTimeSlots(byDay: Record<string, string[]>, fallback: un
   return [...merged].sort((a, b) => a.localeCompare(b));
 }
 
+function hasMissingColumn(error: unknown, column: string): boolean {
+  const message = `${(error as { message?: string })?.message ?? ""} ${(error as { details?: string })?.details ?? ""}`;
+  return new RegExp(`['"]${column}['"]`).test(message) || message.includes(column);
+}
+
 async function selectInstructorRows(supabase: any, onlyActive = false): Promise<{ data: InstructorRow[] | null; error: any }> {
   const runSelect = async (selectClause: string) => {
     let query = supabase.from("instructors").select(selectClause);
@@ -167,25 +172,45 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
     return { data: (primary.data ?? []) as InstructorRow[], error: null };
   }
 
-  const message = `${primary.error?.message ?? ""} ${primary.error?.details ?? ""}`;
-  if (!message.includes("available_time_slots_by_day") && !message.includes("available_time_slots")) {
+  const missingLegacy = hasMissingColumn(primary.error, "available_time_slots") && !hasMissingColumn(primary.error, "available_time_slots_by_day");
+  const missingByDay = hasMissingColumn(primary.error, "available_time_slots_by_day");
+
+  if (!missingLegacy && !missingByDay) {
     return primary;
   }
 
-  const legacyFallback = await runSelect("id,instructor_name,days_off,available_time_slots,is_active");
-  if (!legacyFallback.error) {
-    return {
-      data: ((legacyFallback.data ?? []) as InstructorRow[]).map((row) => ({
-        ...row,
-        available_time_slots_by_day: {}
-      })),
-      error: null
-    };
+  if (missingLegacy) {
+    const byDayFallback = await runSelect("id,instructor_name,days_off,available_time_slots_by_day,is_active");
+    if (!byDayFallback.error) {
+      return {
+        data: ((byDayFallback.data ?? []) as InstructorRow[]).map((row) => ({
+          ...row,
+          available_time_slots: []
+        })),
+        error: null
+      };
+    }
+  }
+
+  if (missingByDay) {
+    const legacyFallback = await runSelect("id,instructor_name,days_off,available_time_slots,is_active");
+    if (!legacyFallback.error) {
+      return {
+        data: ((legacyFallback.data ?? []) as InstructorRow[]).map((row) => ({
+          ...row,
+          available_time_slots_by_day: {}
+        })),
+        error: null
+      };
+    }
   }
 
   const fallback = await runSelect("id,instructor_name,days_off,is_active");
   if (fallback.error) {
-    return { data: null, error: fallback.error };
+    return {
+      data: null,
+      error: fallback.error
+    };
   }
 
   return {
@@ -195,6 +220,61 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
       available_time_slots_by_day: {}
     })),
     error: null
+  };
+}
+
+async function selectSingleInstructorWithFallback(runQuery: (selectClause: string) => any) {
+  const primary = await runQuery("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day");
+  if (!primary.error) {
+    return {
+      data: (primary.data as InstructorRow | null) ?? null,
+      error: null
+    };
+  }
+
+  const missingLegacy = hasMissingColumn(primary.error, "available_time_slots") && !hasMissingColumn(primary.error, "available_time_slots_by_day");
+  const missingByDay = hasMissingColumn(primary.error, "available_time_slots_by_day");
+
+  if (missingLegacy) {
+    const byDayFallback = await runQuery("id,instructor_name,days_off,available_time_slots_by_day");
+    if (!byDayFallback.error) {
+      return {
+        data: byDayFallback.data
+          ? ({
+              ...(byDayFallback.data as InstructorRow),
+              available_time_slots: []
+            } as InstructorRow)
+          : null,
+        error: null
+      };
+    }
+  }
+
+  if (missingByDay) {
+    const legacyFallback = await runQuery("id,instructor_name,days_off,available_time_slots");
+    if (!legacyFallback.error) {
+      return {
+        data: legacyFallback.data
+          ? ({
+              ...(legacyFallback.data as InstructorRow),
+              available_time_slots_by_day: {}
+            } as InstructorRow)
+          : null,
+        error: null
+      };
+    }
+  }
+
+  const fallback = await runQuery("id,instructor_name,days_off");
+  return {
+    data: fallback.data
+      ? ({
+          ...(fallback.data as InstructorRow),
+          available_time_slots: [],
+          available_time_slots_by_day: {}
+        } as InstructorRow)
+      : null,
+    error: fallback.error
   };
 }
 
@@ -365,36 +445,9 @@ export async function GET() {
         const query = supabase.from("instructors").select(selectClause);
         return profileInstructorId ? query.eq("id", profileInstructorId).single() : query.eq("user_id", user.id).single();
       };
-      let ownInstructor: InstructorRow | null = null;
-      let ownInstructorError: any = null;
-      {
-        const initial = await instructorQuery("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day");
-        ownInstructor = (initial.data as InstructorRow | null) ?? null;
-        ownInstructorError = initial.error;
-      }
-      if (ownInstructorError) {
-        const message = `${ownInstructorError.message ?? ""} ${ownInstructorError.details ?? ""}`;
-        if (message.includes("available_time_slots_by_day")) {
-          const fallback = await instructorQuery("id,instructor_name,days_off,available_time_slots");
-          ownInstructor = fallback.data
-            ? ({
-                ...((fallback.data as unknown as InstructorRow) ?? {}),
-                available_time_slots_by_day: {}
-              } as InstructorRow)
-            : null;
-          ownInstructorError = fallback.error;
-        } else if (message.includes("available_time_slots")) {
-          const fallback = await instructorQuery("id,instructor_name,days_off");
-          ownInstructor = fallback.data
-            ? ({
-                ...((fallback.data as unknown as InstructorRow) ?? {}),
-                available_time_slots: [],
-                available_time_slots_by_day: {}
-              } as InstructorRow)
-            : null;
-          ownInstructorError = fallback.error;
-        }
-      }
+      const ownInstructorResult = await selectSingleInstructorWithFallback(instructorQuery);
+      const ownInstructor = ownInstructorResult.data;
+      const ownInstructorError = ownInstructorResult.error;
       const fallbackInstructor =
         ownInstructorError || !ownInstructor
           ? await findInstructorByName(supabase, (profile as { full_name?: string | null }).full_name ?? "")
@@ -480,22 +533,10 @@ export async function GET() {
       }
 
       if (ownStudent.default_instructor_id) {
-        let { data: defaultInstructor } = await supabase
-          .from("instructors")
-          .select("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day")
-          .eq("id", ownStudent.default_instructor_id)
-          .single();
-
-        if (!defaultInstructor) {
-          const fallback = await supabase
-            .from("instructors")
-            .select("id,instructor_name,days_off,available_time_slots")
-            .eq("id", ownStudent.default_instructor_id)
-            .single();
-          defaultInstructor = fallback.data
-            ? { ...fallback.data, available_time_slots_by_day: {} }
-            : fallback.data;
-        }
+        const defaultInstructorResult = await selectSingleInstructorWithFallback((selectClause) =>
+          supabase.from("instructors").select(selectClause).eq("id", ownStudent.default_instructor_id).single()
+        );
+        const defaultInstructor = defaultInstructorResult.data;
 
         if (defaultInstructor) {
           const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(defaultInstructor.available_time_slots_by_day);

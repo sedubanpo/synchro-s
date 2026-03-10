@@ -106,6 +106,11 @@ function isMissingByDayColumn(error: unknown): boolean {
   return message.includes("available_time_slots_by_day");
 }
 
+function isMissingLegacyColumn(error: unknown): boolean {
+  const message = `${(error as { message?: string })?.message ?? ""} ${(error as { details?: string })?.details ?? ""}`;
+  return /['"]available_time_slots['"]/.test(message) || message.includes(" available_time_slots ");
+}
+
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     const { supabase, user, profile } = await getAuthenticatedProfile();
@@ -134,7 +139,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const normalizedLegacySlots = normalizeAvailableTimeSlots(payload.availableTimeSlots ?? []);
     const flattenedSlots = flattenAvailableTimeSlots(normalizedByDay, normalizedLegacySlots);
 
-    const { data, error } = await supabase
+    const primary = await supabase
       .from("instructors")
       .update({
         available_time_slots: flattenedSlots,
@@ -144,10 +149,59 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       .select("id,available_time_slots,available_time_slots_by_day")
       .single();
 
+    let data = primary.data;
+    let error = primary.error;
+
+    if (error && isMissingLegacyColumn(error) && !isMissingByDayColumn(error)) {
+      const byDayOnly = await supabase
+        .from("instructors")
+        .update({
+          available_time_slots_by_day: normalizedByDay
+        })
+        .eq("id", params.id)
+        .select("id,available_time_slots_by_day")
+        .single();
+
+      data = byDayOnly.data
+        ? {
+            ...byDayOnly.data,
+            available_time_slots: flattenedSlots
+          }
+        : null;
+      error = byDayOnly.error;
+    }
+
     if (error || !data) {
-      if (isMissingByDayColumn(error)) {
+      if (isMissingByDayColumn(error) && !isMissingLegacyColumn(error)) {
+        const legacyOnly = await supabase
+          .from("instructors")
+          .update({
+            available_time_slots: flattenedSlots
+          })
+          .eq("id", params.id)
+          .select("id,available_time_slots")
+          .single();
+
+        data = legacyOnly.data
+          ? {
+              ...legacyOnly.data,
+              available_time_slots_by_day: normalizedByDay
+            }
+          : null;
+        error = legacyOnly.error;
+      }
+    }
+
+    if (error || !data) {
+      if (isMissingByDayColumn(error) && !isMissingLegacyColumn(error)) {
         return jsonError(
           "instructors.available_time_slots_by_day 컬럼이 없습니다. Supabase에 0008_instructor_available_time_slots_by_day.sql 마이그레이션을 적용해 주세요.",
+          400
+        );
+      }
+      if (isMissingLegacyColumn(error) && !isMissingByDayColumn(error)) {
+        return jsonError(
+          "instructors.available_time_slots 컬럼이 없습니다. 운영 DB에 0007_instructor_available_time_slots.sql이 누락된 상태입니다. 현재 코드는 0008만으로도 저장되도록 보정됐으니, 이 메시지가 계속 보이면 새 배포가 반영됐는지 확인해 주세요.",
           400
         );
       }
