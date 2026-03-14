@@ -25,6 +25,38 @@ export type ConflictResult = {
   conflicts: { classId: string; reason: string }[];
 };
 
+export type ConflictLogEntry = {
+  id: string;
+  createdAt: string;
+  weekStart?: string | null;
+  targetType?: "학생" | "강사" | null;
+  targetName?: string | null;
+  studentName: string;
+  instructorName?: string | null;
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+  reason: string;
+  details?: string | null;
+  source: string;
+  rawText?: string | null;
+};
+
+export type ConflictLogCreateInput = {
+  weekStart?: string;
+  targetType?: "학생" | "강사";
+  targetName?: string;
+  studentName: string;
+  instructorName?: string;
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+  reason: string;
+  details?: string;
+  source: string;
+  rawText?: string;
+};
+
 export type ScheduleEvent = {
   id: string;
   scheduleMode: ScheduleMode;

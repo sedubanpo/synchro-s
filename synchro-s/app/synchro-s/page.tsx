@@ -9,6 +9,8 @@ import { timeToMinutes } from "@/lib/time";
 import type {
   AvailableTimeSlotsByDay,
   ClassTypeOption,
+  ConflictLogCreateInput,
+  ConflictLogEntry,
   ConflictResult,
   RoleView,
   ScheduleEvent,
@@ -74,7 +76,7 @@ type ImportProgress = {
   label: string;
 };
 
-type MainTab = "overview" | "new" | RoleView;
+type MainTab = "overview" | "new" | "issues" | RoleView;
 
 type ConflictDialogState = {
   open: boolean;
@@ -160,6 +162,10 @@ type SpecialNotesResponse = {
     target_id: string;
     content: string;
   }[];
+};
+
+type ConflictLogsResponse = {
+  items?: ConflictLogEntry[];
 };
 
 type OverviewEntity = RoleView;
@@ -437,6 +443,31 @@ function formatSpecialNoteTimestamp(dateISO: string): string {
   }).formatToParts(new Date(dateISO));
   const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return `${pick("year")}.${pick("month")}.${pick("day")} ${pick("hour")}:${pick("minute")}`;
+}
+
+function formatConflictLogTimestamp(dateISO: string): string {
+  const parts = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(dateISO));
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${pick("month")}/${pick("day")} ${pick("hour")}:${pick("minute")}`;
+}
+
+function weekdayLabel(weekday: Weekday): string {
+  return DAYS.find((day) => day.key === weekday)?.label ?? `${weekday}`;
+}
+
+function summarizeConflictReason(conflict: ConflictResult): string {
+  if (!conflict.hasConflict || conflict.conflicts.length === 0) {
+    return "시간표 충돌";
+  }
+
+  return Array.from(new Set(conflict.conflicts.map((item) => item.reason.trim()).filter(Boolean))).join(" | ") || "시간표 충돌";
 }
 
 function findOptionByName(items: SelectOption[], targetName: string): SelectOption | null {
@@ -870,6 +901,8 @@ export default function SynchroSPage() {
     label: ""
   });
   const [saveHistory, setSaveHistory] = useState<SaveHistoryEntry[]>([]);
+  const [conflictLogs, setConflictLogs] = useState<ConflictLogEntry[]>([]);
+  const [conflictLogsLoading, setConflictLogsLoading] = useState(false);
   const [specialNotes, setSpecialNotes] = useState<SpecialNoteItem[]>([]);
   const [specialNoteInput, setSpecialNoteInput] = useState("");
   const [notesLoading, setNotesLoading] = useState(false);
@@ -910,6 +943,7 @@ export default function SynchroSPage() {
   }, [calendarMonth]);
   const monthCells = useMemo(() => buildMonthCells(calendarMonth), [calendarMonth]);
   const keyword = searchKeyword.trim().toLowerCase();
+  const isWorkspaceTab = mainTab === "student" || mainTab === "instructor";
   const eventsWithMemo = useMemo(
     () =>
       events.map((event) => ({
@@ -1314,23 +1348,41 @@ export default function SynchroSPage() {
           : studentWeekEvents;
   }, [overviewEntity, overviewEvents, overviewUniverseEvents, selectedInstructorOption, selectedStudentId, timetableGroups]);
   const profileTitle =
-    mainTab === "new" ? "신규 배정 추천" : roleView === "student" ? "학생 프로필" : "강사 프로필";
+    mainTab === "new"
+      ? "신규 배정 추천"
+      : mainTab === "issues"
+        ? "오류 기록"
+        : roleView === "student"
+          ? "학생 프로필"
+          : "강사 프로필";
   const profileName =
-    mainTab === "new" ? "신규 시간표 추천" : roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
+    mainTab === "new"
+      ? "신규 시간표 추천"
+      : mainTab === "issues"
+        ? "시간표 오류/충돌 기록"
+        : roleView === "student"
+          ? selectedStudentLabel
+          : selectedInstructorLabel;
   const profileSecondary =
     mainTab === "new"
       ? "등원 희망 요일/시간과 과목을 기준으로 배치 가능한 시간표를 추천합니다."
+      : mainTab === "issues"
+        ? "저장된 충돌과 입력 오류를 학생명, 요일, 시간, 사유 기준으로 다시 확인합니다."
       : roleView === "student"
         ? selectedStudentSecondary
         : selectedInstructorSecondary;
   const profileAccentClass =
     mainTab === "new"
       ? "from-fuchsia-300/18 via-white/30 to-cyan-300/12 text-fuchsia-700"
+      : mainTab === "issues"
+        ? "from-amber-300/18 via-white/30 to-rose-300/12 text-amber-700"
       : roleView === "student"
         ? "from-emerald-400/18 via-white/30 to-teal-300/12 text-emerald-700"
         : "from-sky-400/18 via-white/30 to-indigo-300/12 text-sky-700";
   const profileInitial = (mainTab === "new"
     ? "신"
+    : mainTab === "issues"
+      ? "오"
     : profileName === "학생 선택" || profileName === "강사 선택"
       ? roleView === "student"
         ? "학"
@@ -1555,6 +1607,28 @@ export default function SynchroSPage() {
     roleView === "instructor"
       ? "before:absolute before:-inset-2 before:-z-10 before:rounded-[28px] before:bg-[radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.32),transparent_60%)]"
       : "before:absolute before:-inset-2 before:-z-10 before:rounded-[28px] before:bg-[radial-gradient(circle_at_85%_20%,rgba(16,185,129,0.32),transparent_60%)]";
+  const filteredConflictLogs = useMemo(
+    () =>
+      keyword.length === 0
+        ? conflictLogs
+        : conflictLogs.filter((item) => {
+            const searchable = [
+              item.studentName,
+              item.instructorName ?? "",
+              weekdayLabel(item.weekday),
+              item.startTime,
+              item.endTime,
+              item.reason,
+              item.details ?? "",
+              item.source,
+              item.targetName ?? ""
+            ]
+              .join(" ")
+              .toLowerCase();
+            return searchable.includes(keyword);
+          }),
+    [conflictLogs, keyword]
+  );
 
   const moveToLogin = useCallback(() => {
     router.replace(`/login?next=${encodeURIComponent("/synchro-s")}`);
@@ -1563,6 +1637,7 @@ export default function SynchroSPage() {
   const handleMainTabChange = useCallback(
     (next: MainTab) => {
       setError(null);
+      setShowIntroPage(false);
       setMainTab(next);
       setSearchKeyword("");
       setShowStudentPicker(false);
@@ -1584,8 +1659,11 @@ export default function SynchroSPage() {
       }
 
       if (next === "new") {
-        setShowIntroPage(false);
         setRoleView("student");
+        return;
+      }
+
+      if (next === "issues") {
         return;
       }
 
@@ -1989,6 +2067,72 @@ export default function SynchroSPage() {
     setError(null);
   }, [moveToLogin]);
 
+  const loadConflictLogs = useCallback(async () => {
+    setConflictLogsLoading(true);
+
+    try {
+      const res = await fetch("/api/conflict-logs", { method: "GET", cache: "no-store" });
+
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "오류 기록을 불러오지 못했습니다."));
+      }
+
+      const data = (await res.json().catch(() => ({}))) as ConflictLogsResponse;
+      setConflictLogs(data.items ?? []);
+      setError(null);
+    } catch (loadError) {
+      setConflictLogs([]);
+      setError(loadError instanceof Error ? loadError.message : "오류 기록을 불러오지 못했습니다.");
+    } finally {
+      setConflictLogsLoading(false);
+    }
+  }, [moveToLogin]);
+
+  const resolveStudentNames = useCallback(
+    (studentIds: string[]) =>
+      studentIds
+        .map((studentId) => students.find((item) => item.id === studentId)?.name ?? "")
+        .filter(Boolean),
+    [students]
+  );
+
+  const recordConflictLogs = useCallback(
+    async (items: ConflictLogCreateInput[]) => {
+      if (items.length === 0) {
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/conflict-logs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          throw new Error(await getApiErrorMessage(res, "오류 기록 저장에 실패했습니다."));
+        }
+
+        if (mainTab === "issues") {
+          await loadConflictLogs();
+        }
+      } catch (recordError) {
+        console.error("[conflict-logs] failed to persist conflict logs", recordError);
+      }
+    },
+    [loadConflictLogs, mainTab, moveToLogin]
+  );
+
   const loadTimetableGroups = useCallback(async () => {
     const res = await fetch("/api/schedules/groups", { method: "GET", cache: "no-store" });
 
@@ -2154,7 +2298,7 @@ export default function SynchroSPage() {
   }, [mainTab, moveToLogin, overviewEntity, showIntroPage, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
-    if (showIntroPage || mainTab === "overview" || !currentTargetId) {
+    if (showIntroPage || !isWorkspaceTab || !currentTargetId) {
       setSpecialNotes([]);
       return;
     }
@@ -2193,7 +2337,7 @@ export default function SynchroSPage() {
     } finally {
       setNotesLoading(false);
     }
-  }, [currentTargetId, mainTab, moveToLogin, roleView, showIntroPage]);
+  }, [currentTargetId, isWorkspaceTab, moveToLogin, roleView, showIntroPage]);
 
   const removeClassFromGroups = useCallback((classId: string) => {
     setTimetableGroups((prev) =>
@@ -2261,10 +2405,11 @@ export default function SynchroSPage() {
       await Promise.all([
         loadOptions(),
         loadSaveHistory(),
+        !showIntroPage && mainTab === "issues" ? loadConflictLogs() : Promise.resolve(),
         loadTimetableGroups(),
-        !showIntroPage && mainTab !== "overview" && mainTab !== "new" ? loadWeek({ silent: true }) : Promise.resolve(),
+        !showIntroPage && isWorkspaceTab ? loadWeek({ silent: true }) : Promise.resolve(),
         !showIntroPage && mainTab === "overview" ? loadOverviewEvents() : Promise.resolve(),
-        !showIntroPage && mainTab !== "overview" && mainTab !== "new" ? loadSpecialNotes() : Promise.resolve()
+        !showIntroPage && isWorkspaceTab ? loadSpecialNotes() : Promise.resolve()
       ]);
       setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
     } catch (refreshError) {
@@ -2274,11 +2419,13 @@ export default function SynchroSPage() {
     }
   }, [
     loadOptions,
+    loadConflictLogs,
     loadOverviewEvents,
     loadSaveHistory,
     loadSpecialNotes,
     loadTimetableGroups,
     loadWeek,
+    isWorkspaceTab,
     mainTab,
     refreshingData,
     router,
@@ -2365,6 +2512,20 @@ export default function SynchroSPage() {
       }
 
       if (immediateOverlap) {
+        void recordConflictLogs([
+          {
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
+            studentName: resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정",
+            instructorName: instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? immediateOverlap.instructorName,
+            weekday: targetWeekday,
+            startTime: normalizedInput.startTime,
+            endTime: normalizedInput.endTime,
+            reason: MIXED_CLASS_TYPE_CONFLICT_MESSAGE,
+            source: "수동 추가"
+          }
+        ]);
         setConflictDialog({
           open: true,
           title: "혼합 배정 불가",
@@ -2400,6 +2561,21 @@ export default function SynchroSPage() {
       const conflict = (await conflictRes.json()) as ConflictResult;
 
       if (conflict.hasConflict) {
+        void recordConflictLogs([
+          {
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
+            studentName: resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정",
+            instructorName: instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? "",
+            weekday: targetWeekday,
+            startTime: normalizedInput.startTime,
+            endTime: normalizedInput.endTime,
+            reason: summarizeConflictReason(conflict),
+            details: getConflictMessage(conflict),
+            source: "수동 추가"
+          }
+        ]);
         if (conflictIncludesMixedTypeRule(conflict)) {
           setConflictDialog({
             open: true,
@@ -2424,6 +2600,21 @@ export default function SynchroSPage() {
 
       if (createRes.status === 409) {
         const payload = (await createRes.json()) as { conflict: ConflictResult };
+        void recordConflictLogs([
+          {
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
+            studentName: resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정",
+            instructorName: instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? "",
+            weekday: targetWeekday,
+            startTime: normalizedInput.startTime,
+            endTime: normalizedInput.endTime,
+            reason: summarizeConflictReason(payload.conflict),
+            details: getConflictMessage(payload.conflict),
+            source: "수동 추가"
+          }
+        ]);
         if (conflictIncludesMixedTypeRule(payload.conflict)) {
           setConflictDialog({
             open: true,
@@ -2455,7 +2646,20 @@ export default function SynchroSPage() {
 
       await loadWeek();
     },
-    [events, getInstructorDaysOff, initialCell?.weekday, loadWeek, moveToLogin, weekStart]
+    [
+      events,
+      getInstructorDaysOff,
+      initialCell?.weekday,
+      instructors,
+      loadWeek,
+      moveToLogin,
+      recordConflictLogs,
+      resolveStudentNames,
+      roleView,
+      selectedInstructorLabel,
+      selectedStudentLabel,
+      weekStart
+    ]
   );
 
   const handleMoveSchedule = useCallback(
@@ -2536,6 +2740,7 @@ export default function SynchroSPage() {
         const targetInstructorKey =
           targetEvent.instructorId || normalizePersonName(targetEvent.instructorName || selectedInstructorLabel);
         const conflictMessages: string[] = [];
+        const detectedConflictLogs: ConflictLogCreateInput[] = [];
         const candidateGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
 
         for (const group of candidateGroups) {
@@ -2551,6 +2756,21 @@ export default function SynchroSPage() {
             const movingIsStrict = isStrictConflictClassType(targetEvent.classTypeCode, targetEvent.classTypeLabel);
             const existingIsStrict = isStrictConflictClassType(other.classTypeCode, other.classTypeLabel);
             if (movingIsStrict !== existingIsStrict) {
+              void recordConflictLogs([
+                {
+                  weekStart,
+                  targetType: roleView === "student" ? "학생" : "강사",
+                  targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
+                  studentName: ownerName,
+                  instructorName: targetEvent.instructorName,
+                  weekday: ctx.weekday,
+                  startTime: ctx.startTime,
+                  endTime: ctx.endTime,
+                  reason: MIXED_CLASS_TYPE_CONFLICT_MESSAGE,
+                  details: other.studentNames.join(", "),
+                  source: "드래그 이동"
+                }
+              ]);
               setConflictDialog({
                 open: true,
                 title: "혼합 배정 불가",
@@ -2564,10 +2784,24 @@ export default function SynchroSPage() {
             conflictMessages.push(
               `${ownerName} 활성 시간표와 충돌: ${dayLabel} ${ctx.startTime}-${ctx.endTime} (기존 ${other.startTime}-${other.endTime})`
             );
+            detectedConflictLogs.push({
+              weekStart,
+              targetType: roleView === "student" ? "학생" : "강사",
+              targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
+              studentName: ownerName,
+              instructorName: targetEvent.instructorName,
+              weekday: ctx.weekday,
+              startTime: ctx.startTime,
+              endTime: ctx.endTime,
+              reason: `드래그 이동 충돌 (기존 ${other.startTime}-${other.endTime})`,
+              details: other.studentNames.join(", "),
+              source: "드래그 이동"
+            });
           }
         }
 
         if (conflictMessages.length > 0) {
+          void recordConflictLogs(detectedConflictLogs);
           const msg = `드래그 이동 충돌:\n- ${conflictMessages.join("\n- ")}`;
           setError(msg);
           setConflictDialog({ open: true, title: "시간표 충돌 경고", message: msg });
@@ -2663,6 +2897,21 @@ export default function SynchroSPage() {
         if (res.status === 409) {
           const payload = (await res.json()) as { conflict: ConflictResult };
           rollbackMove();
+          void recordConflictLogs([
+            {
+              weekStart,
+              targetType: roleView === "student" ? "학생" : "강사",
+              targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
+              studentName: targetEvent.studentNames.join(", ") || selectedStudentLabel,
+              instructorName: targetEvent.instructorName,
+              weekday: ctx.weekday,
+              startTime: ctx.startTime,
+              endTime: ctx.endTime,
+              reason: summarizeConflictReason(payload.conflict),
+              details: getConflictMessage(payload.conflict),
+              source: "드래그 이동"
+            }
+          ]);
           if (conflictIncludesMixedTypeRule(payload.conflict)) {
             setConflictDialog({
               open: true,
@@ -2712,8 +2961,10 @@ export default function SynchroSPage() {
       selectedGroup,
       selectedInstructorLabel,
       selectedStudentId,
+      selectedStudentLabel,
       students,
       timetableGroups,
+      recordConflictLogs,
       roleView,
       weekStart
     ]
@@ -2844,6 +3095,20 @@ export default function SynchroSPage() {
     setNotice(parsed.length > 0 ? `노션 데이터 ${parsed.length}건을 시간표 미리보기에 반영했습니다.` : "붙여넣은 텍스트에서 수업 데이터가 인식되지 않았습니다.");
   }, [buildUndoState, instructors, notionTextValue, selectedInstructorId]);
 
+  const handleResetNotionInput = useCallback(() => {
+    if (!notionTextValue && parsedNotionItems.length === 0) {
+      setNotice("이미 노션 입력이 비어 있습니다.");
+      return;
+    }
+
+    setUndoState(buildUndoState("노션 입력 초기화"));
+    setNotionInput("");
+    setNotionPreview("");
+    setParsedNotionItems([]);
+    setError(null);
+    setNotice("노션 입력과 미리보기를 초기화했습니다.");
+  }, [buildUndoState, notionTextValue, parsedNotionItems.length]);
+
   const handleImportNotionToServer = useCallback(async () => {
     const normalizedNotionText = notionTextValue.trim();
     const parsedItemsForSave =
@@ -2939,6 +3204,7 @@ export default function SynchroSPage() {
     const importedClassIds: string[] = [];
     const memoUpdates: Record<string, string> = {};
     const conflictDetails: string[] = [];
+    const conflictLogEntries: ConflictLogCreateInput[] = [];
     const dayOffDetails: string[] = [];
     const noSubjectDetails: string[] = [];
     const skipReasons: Record<string, number> = {
@@ -2975,23 +3241,65 @@ export default function SynchroSPage() {
         if (!subject) {
           skipped += 1;
           skipReasons.noSubject += 1;
-          const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
-          noSubjectDetails.push(`${weekdayLabel} ${toKoreanHourRange(item.startTime)} (${item.rawText})`);
+          const dayLabel = weekdayLabel(item.weekday);
+          noSubjectDetails.push(`${dayLabel} ${toKoreanHourRange(item.startTime)} (${item.rawText})`);
+          conflictLogEntries.push({
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: currentTargetLabel,
+            studentName: selectedStudentLabel || "학생 미지정",
+            instructorName: item.instructorName || "강사 미지정",
+            weekday: item.weekday,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            reason: "과목 매핑 실패",
+            details: item.rawText,
+            source: "노션 일괄 저장",
+            rawText: item.rawText
+          });
           continue;
         }
         if (!classType) {
           skipped += 1;
           skipReasons.noClassType += 1;
+          conflictLogEntries.push({
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: currentTargetLabel,
+            studentName: selectedStudentLabel || "학생 미지정",
+            instructorName: item.instructorName || "강사 미지정",
+            weekday: item.weekday,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            reason: "수업 유형 매핑 실패",
+            details: item.rawText,
+            source: "노션 일괄 저장",
+            rawText: item.rawText
+          });
           continue;
         }
         if (getInstructorDaysOff(instructorId).includes(item.weekday)) {
           skipped += 1;
           skipReasons.daysOff += 1;
-          const weekdayLabel = DAYS.find((day) => day.key === item.weekday)?.label ?? String(item.weekday);
+          const dayLabel = weekdayLabel(item.weekday);
           const instructorLabel = instructors.find((entry) => entry.id === instructorId)?.name ?? item.instructorName ?? "선택 강사";
           dayOffDetails.push(
-            `[${instructorLabel}] 강사님의 휴무일(${weekdayLabel})에는 수업을 배정할 수 없습니다. 해당 항목은 저장되지 않았습니다. - ${toKoreanHourRange(item.startTime)} (${item.rawText})`
+            `[${instructorLabel}] 강사님의 휴무일(${dayLabel})에는 수업을 배정할 수 없습니다. 해당 항목은 저장되지 않았습니다. - ${toKoreanHourRange(item.startTime)} (${item.rawText})`
           );
+          conflictLogEntries.push({
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: currentTargetLabel,
+            studentName: selectedStudentLabel || "학생 미지정",
+            instructorName: instructorLabel,
+            weekday: item.weekday,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            reason: "강사 휴무일 충돌",
+            details: item.rawText,
+            source: "노션 일괄 저장",
+            rawText: item.rawText
+          });
           continue;
         }
 
@@ -3086,9 +3394,31 @@ export default function SynchroSPage() {
             skipReasons.conflict += 1;
             const weekdayLabel = DAYS.find((day) => day.key === entry.item.weekday)?.label ?? String(entry.item.weekday);
             const slotLabel = `${weekdayLabel} ${toKoreanHourRange(entry.item.startTime)}`;
+            const structuredConflict: ConflictResult = {
+              hasConflict: Boolean(result.conflict?.conflicts?.length),
+              conflicts: (result.conflict?.conflicts ?? []).map((conflict) => ({
+                classId: conflict.classId ?? "",
+                reason: conflict.reason ?? "시간표 충돌"
+              }))
+            };
             const conflictReason =
               result.conflict?.conflicts?.map((conflict) => conflict.reason).filter(Boolean).join(", ") ?? "시간표 충돌";
             conflictDetails.push(`- ${slotLabel} (${entry.item.rawText}): ${conflictReason}`);
+            conflictLogEntries.push({
+              weekStart,
+              targetType: roleView === "student" ? "학생" : "강사",
+              targetName: currentTargetLabel,
+              studentName: selectedStudentLabel,
+              instructorName:
+                instructors.find((item) => item.id === entry.payload.instructorId)?.name ?? entry.item.instructorName ?? "강사 미지정",
+              weekday: entry.item.weekday,
+              startTime: entry.item.startTime,
+              endTime: entry.item.endTime,
+              reason: conflictReason,
+              details: getConflictMessage(structuredConflict),
+              source: "노션 일괄 저장",
+              rawText: entry.item.rawText
+            });
             return;
           }
 
@@ -3108,6 +3438,8 @@ export default function SynchroSPage() {
       if (Object.keys(memoUpdates).length > 0) {
         setMemoByEventId((prev) => ({ ...prev, ...memoUpdates }));
       }
+
+      void recordConflictLogs(conflictLogEntries);
 
       const reasonLine = Object.entries(skipReasons)
         .filter(([, count]) => count > 0)
@@ -3231,8 +3563,10 @@ export default function SynchroSPage() {
     moveToLogin,
     notionTextValue,
     parsedNotionItems,
+    recordConflictLogs,
     selectedInstructorId,
     selectedStudentId,
+    selectedStudentLabel,
     subjects,
     currentTargetId,
     currentTargetLabel,
@@ -3292,6 +3626,22 @@ export default function SynchroSPage() {
 
         if (res.status === 409 || result?.status === "conflict") {
           const conflict = result?.conflict ?? { hasConflict: false, conflicts: [] };
+          void recordConflictLogs([
+            {
+              weekStart,
+              targetType: roleView === "student" ? "학생" : "강사",
+              targetName: currentTargetLabel,
+              studentName: event.studentNames.join(", ") || selectedStudentLabel,
+              instructorName: event.instructorName,
+              weekday: event.weekday,
+              startTime: event.startTime,
+              endTime: event.endTime,
+              reason: summarizeConflictReason(conflict),
+              details: getConflictMessage(conflict),
+              source: "개별 저장",
+              rawText: prepared.rawLabel
+            }
+          ]);
           if (conflictIncludesMixedTypeRule(conflict)) {
             setConflictDialog({
               open: true,
@@ -3345,7 +3695,10 @@ export default function SynchroSPage() {
       loadSaveHistory,
       loadWeek,
       moveToLogin,
-      roleView
+      recordConflictLogs,
+      roleView,
+      selectedStudentLabel,
+      weekStart
     ]
   );
 
@@ -3703,22 +4056,29 @@ export default function SynchroSPage() {
   }, [loadOverviewEvents, mainTab, showIntroPage]);
 
   useEffect(() => {
-    if (showIntroPage || mainTab === "overview" || mainTab === "new") {
+    if (showIntroPage || mainTab !== "issues") {
+      return;
+    }
+    void loadConflictLogs();
+  }, [loadConflictLogs, mainTab, showIntroPage]);
+
+  useEffect(() => {
+    if (showIntroPage || !isWorkspaceTab) {
       setLoading(false);
       setEvents([]);
       return;
     }
     void loadWeek();
-  }, [loadWeek, mainTab, showIntroPage]);
+  }, [isWorkspaceTab, loadWeek, showIntroPage]);
 
   useEffect(() => {
-    if (showIntroPage || mainTab === "overview" || mainTab === "new") {
+    if (showIntroPage || !isWorkspaceTab) {
       setSpecialNotes([]);
       setNotesLoading(false);
       return;
     }
     void loadSpecialNotes();
-  }, [loadSpecialNotes, mainTab, showIntroPage]);
+  }, [isWorkspaceTab, loadSpecialNotes, showIntroPage]);
 
   useEffect(() => {
     if (error === "Bad Request") {
@@ -3795,7 +4155,7 @@ export default function SynchroSPage() {
   }, [activeGroup?.id, selectedGroupId, showActiveOnly, timetableGroups]);
 
   useEffect(() => {
-    if (!keyword) return;
+    if (!keyword || (!isWorkspaceTab && mainTab !== "overview")) return;
 
     if (roleView === "student") {
       const exact = students.find((item) => item.name.toLowerCase() === keyword);
@@ -3821,7 +4181,9 @@ export default function SynchroSPage() {
     roleView,
     selectedInstructorId,
     selectedStudentId,
-    students
+    students,
+    isWorkspaceTab,
+    mainTab
   ]);
 
   useEffect(() => {
@@ -3831,7 +4193,7 @@ export default function SynchroSPage() {
 
     const supabase = createSupabaseBrowserClient();
     const reloadActiveScreen = () => {
-      if (!showIntroPage && mainTab !== "overview" && mainTab !== "new") {
+      if (!showIntroPage && isWorkspaceTab) {
         void loadWeek({ silent: true });
       }
       if (!showIntroPage && mainTab === "overview") {
@@ -3866,7 +4228,7 @@ export default function SynchroSPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadOverviewEvents, loadWeek, mainTab, showIntroPage]);
+  }, [isWorkspaceTab, loadOverviewEvents, loadWeek, mainTab, showIntroPage]);
 
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-[1760px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 2xl:max-w-[1880px] xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
@@ -3983,6 +4345,7 @@ export default function SynchroSPage() {
                   ? ([{ key: "instructor", label: "강사" }] as const)
                   : ([
                       { key: "overview", label: "전체 요약" },
+                      { key: "issues", label: "오류 기록" },
                       { key: "new", label: "신규" },
                       { key: "instructor", label: "강사" },
                       { key: "student", label: "학생" }
@@ -3992,6 +4355,8 @@ export default function SynchroSPage() {
                   const accentClass =
                     tab.key === "overview"
                       ? "shadow-[inset_0_-2px_0_rgba(99,102,241,0.42),0_7px_16px_rgba(99,102,241,0.22)]"
+                      : tab.key === "issues"
+                        ? "shadow-[inset_0_-2px_0_rgba(245,158,11,0.42),0_7px_16px_rgba(251,146,60,0.22)]"
                       : tab.key === "new"
                         ? "shadow-[inset_0_-2px_0_rgba(217,70,239,0.42),0_7px_16px_rgba(217,70,239,0.22)]"
                       : tab.key === "instructor"
@@ -4137,7 +4502,7 @@ export default function SynchroSPage() {
                     </p>
                   </div>
                 </div>
-                {!showIntroPage && mainTab !== "overview" && mainTab !== "new" && roleView === "instructor" && selectedInstructorId ? (
+                {!showIntroPage && isWorkspaceTab && roleView === "instructor" && selectedInstructorId ? (
                   <div className="mt-3 rounded-2xl border border-white/45 bg-white/35 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Days Off</p>
@@ -4222,7 +4587,7 @@ export default function SynchroSPage() {
                 ) : null}
               </div>
 
-              {!showIntroPage && mainTab !== "overview" && mainTab !== "new" ? (
+              {!showIntroPage && isWorkspaceTab ? (
                 roleView === "instructor" ? (
                   <div className="relative z-[120]">
                     <button
@@ -4308,7 +4673,7 @@ export default function SynchroSPage() {
         </div>
       </section>
 
-      {!showIntroPage && mainTab !== "overview" && mainTab !== "new" ? (
+      {!showIntroPage && isWorkspaceTab ? (
         <>
       {error ? (
         <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
@@ -4358,6 +4723,14 @@ export default function SynchroSPage() {
                   className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   되돌리기
+                </button>
+                <button
+                  type="button"
+                  disabled={importingNotion || (!notionTextValue && parsedNotionItems.length === 0)}
+                  onClick={handleResetNotionInput}
+                  className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  초기화
                 </button>
                 {notionPreview ? (
                   <button
@@ -4897,6 +5270,107 @@ export default function SynchroSPage() {
                   </div>
                 </div>
               </aside>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {!showIntroPage && mainTab === "issues" ? (
+        <>
+          {error ? (
+            <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+              {notice}
+            </div>
+          ) : null}
+          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+            <div className="rounded-[26px] border border-white/55 bg-white/45 p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Issue History</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">시간표 입력 오류 / 충돌 기록</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">
+                    새로 기록되는 충돌은 학생명, 요일, 시간, 사유 기준으로 누적됩니다. 과거 데이터가 이미 저장돼 있었다면 함께 표시됩니다.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">전체</p>
+                    <p className="text-xl font-black text-slate-900">{conflictLogs.length}건</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">이번 주</p>
+                    <p className="text-xl font-black text-slate-900">
+                      {conflictLogs.filter((item) => item.weekStart === weekStart).length}건
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">검색 결과</p>
+                    <p className="text-xl font-black text-slate-900">{filteredConflictLogs.length}건</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-3xl border border-white/60 bg-white/50 p-3">
+                {conflictLogsLoading ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-5 text-sm font-semibold text-slate-500">
+                    오류 기록을 불러오는 중입니다...
+                  </div>
+                ) : filteredConflictLogs.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-8 text-center">
+                    <p className="text-sm font-bold text-slate-700">표시할 오류 기록이 없습니다.</p>
+                    <p className="mt-2 text-xs font-semibold text-slate-500">
+                      충돌이 새로 발생하면 이 화면에 누적됩니다. 검색어가 걸려 있으면 상단 검색어도 함께 확인해 주세요.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredConflictLogs.map((item) => (
+                      <article
+                        key={item.id}
+                        className="rounded-2xl border border-white/60 bg-[linear-gradient(135deg,rgba(255,255,255,0.92),rgba(254,243,199,0.38))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-700">
+                                {item.source}
+                              </span>
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                                {weekdayLabel(item.weekday)} {item.startTime}-{item.endTime}
+                              </span>
+                              {item.weekStart ? (
+                                <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-700">
+                                  기준 주차 {item.weekStart}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-base font-black text-slate-900">{item.studentName}</p>
+                            <p className="text-sm font-semibold text-slate-600">
+                              강사: {item.instructorName || "미지정"}{item.targetName ? ` · 대상: ${item.targetName}` : ""}
+                            </p>
+                            <p className="text-sm font-bold text-rose-700">{item.reason}</p>
+                            {item.details ? <p className="whitespace-pre-line text-xs font-semibold text-slate-500">{item.details}</p> : null}
+                            {item.rawText ? (
+                              <p className="rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-500">
+                                원본: {item.rawText}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="text-right text-xs font-semibold text-slate-500">
+                            <p>{formatConflictLogTimestamp(item.createdAt)}</p>
+                            {item.targetType ? <p className="mt-1">{item.targetType} 기준 기록</p> : null}
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         </>
