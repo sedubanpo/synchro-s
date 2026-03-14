@@ -389,6 +389,10 @@ function mergeScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
   });
 }
 
+function isTransientGatewayErrorMessage(message: string): boolean {
+  return /502|bad gateway|cloudflare|supabase/i.test(message);
+}
+
 async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
   if (payload.error?.trim()) {
@@ -3112,25 +3116,46 @@ export default function SynchroSPage() {
       setNotice(`노션 가져오기 완료: 생성 ${created}건 / 기존유지 ${existing}건 / 건너뜀 ${skipped}건${reasonLine ? ` (${reasonLine})` : ""}`);
 
       const dedupedClassIds = Array.from(new Set(importedClassIds));
+      const postSaveWarnings: string[] = [];
       if (dedupedClassIds.length > 0 && currentTargetId) {
-        const created = await createTimetableGroup({
-          name: `${weekStart} ${currentTargetLabel} 시간표`,
-          roleView,
-          targetId: currentTargetId,
-          weekStart,
-          classIds: dedupedClassIds,
-          snapshotEvents: [],
-          isActive: true
-        });
-        if (created?.id) {
-          setSelectedGroupId(created.id);
+        try {
+          const created = await createTimetableGroup({
+            name: `${weekStart} ${currentTargetLabel} 시간표`,
+            roleView,
+            targetId: currentTargetId,
+            weekStart,
+            classIds: dedupedClassIds,
+            snapshotEvents: [],
+            isActive: true
+          });
+          if (created?.id) {
+            setSelectedGroupId(created.id);
+          }
+        } catch (postSaveError) {
+          console.error("[notion-import] group save failed after classes were saved", postSaveError);
+          postSaveWarnings.push("수업 DB 저장은 완료됐지만 저장된 시간표 그룹 갱신 중 일시 오류가 발생했습니다.");
         }
       }
 
       if (created > 0 || existing > 0) {
         setParsedNotionItems([]);
         setNotionInput("");
-        await loadSaveHistory();
+        try {
+          await loadSaveHistory();
+        } catch (postSaveError) {
+          console.error("[notion-import] save history reload failed after classes were saved", postSaveError);
+          postSaveWarnings.push("수업 DB 저장은 완료됐지만 최근 저장 기록 갱신 중 일시 오류가 발생했습니다.");
+        }
+      }
+
+      if (postSaveWarnings.length > 0) {
+        const warningMessage = postSaveWarnings.join("\n");
+        setError(warningMessage);
+        setConflictDialog({
+          open: true,
+          title: "후속 동기화 경고",
+          message: warningMessage
+        });
       }
 
       if (conflictDetails.length > 0 || dayOffDetails.length > 0 || noSubjectDetails.length > 0) {
@@ -3178,12 +3203,15 @@ export default function SynchroSPage() {
     } catch (importError) {
       const message = importError instanceof Error ? importError.message : "노션 시간표 저장에 실패했습니다.";
       console.error("[notion-import] save failed", importError);
-      setError(message);
+      const fallbackMessage = isTransientGatewayErrorMessage(message)
+        ? "Supabase에서 일시적인 502 오류가 발생했습니다. 저장이 이미 반영됐을 수 있으니 새로고침 후 확인해 주세요."
+        : message;
+      setError(fallbackMessage);
       setConflictDialog((prev) => ({
         ...prev,
         open: true,
         title: "DB 저장 실패",
-        message
+        message: fallbackMessage
       }));
     } finally {
       setImportingNotion(false);
