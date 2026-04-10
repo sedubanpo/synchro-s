@@ -61,6 +61,12 @@ type EnrollmentRow = {
   students: { id: string; student_name: string } | null;
 };
 
+type EnrollmentStudentStatusRow = {
+  class_id: string;
+  student_id: string;
+  students: { id: string; is_active: boolean | null } | null;
+};
+
 const CLASS_SELECT =
   "id,schedule_mode,instructor_id,subject_code,class_type_code,weekday,class_date,start_time,end_time,active_from,active_to,progress_status,created_at,instructors(id,instructor_name),subjects(code,display_name,tailwind_bg_class),class_types(code,display_name,badge_text,max_students)";
 
@@ -108,6 +114,28 @@ function buildOverrideKey(classId: string, date: string): string {
   return `${classId}:${date}`;
 }
 
+async function loadActiveEnrollmentClassIds(supabase: SupabaseLike, classIds: string[]): Promise<Set<string>> {
+  const uniqueIds = Array.from(new Set(classIds.filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return new Set();
+  }
+
+  const { data, error } = await supabase
+    .from("class_enrollments")
+    .select("class_id,student_id,students(id,is_active)")
+    .in("class_id", uniqueIds);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Set(
+    ((data ?? []) as EnrollmentStudentStatusRow[])
+      .filter((row) => row.students?.is_active !== false)
+      .map((row) => row.class_id)
+  );
+}
+
 async function findExistingOverlaps(
   supabase: SupabaseLike,
   payload: CreateScheduleRequest,
@@ -133,8 +161,14 @@ async function findExistingOverlaps(
       active_to: string | null;
     }[];
 
+    const activeEnrollmentClassIds = await loadActiveEnrollmentClassIds(
+      supabase,
+      rows.map((row) => row.id)
+    );
+
     return rows
       .filter((row) => (excludeClassId ? row.id !== excludeClassId : true))
+      .filter((row) => activeEnrollmentClassIds.has(row.id))
       .filter((row) => row.active_from <= referenceDate && (!row.active_to || row.active_to >= referenceDate))
       .filter((row) => rangesOverlap(payload.startTime, payload.endTime, fromSqlTime(row.start_time), fromSqlTime(row.end_time)))
       .map((row) => ({ id: row.id, class_type_code: row.class_type_code }));
@@ -168,8 +202,14 @@ async function findExistingOverlaps(
     ...((recurringRes.data ?? []) as { id: string; class_type_code: string; start_time: string; end_time: string }[])
   ];
 
+  const activeEnrollmentClassIds = await loadActiveEnrollmentClassIds(
+    supabase,
+    rows.map((row) => row.id)
+  );
+
   return rows
     .filter((row) => (excludeClassId ? row.id !== excludeClassId : true))
+    .filter((row) => activeEnrollmentClassIds.has(row.id))
     .filter((row) => rangesOverlap(payload.startTime, payload.endTime, fromSqlTime(row.start_time), fromSqlTime(row.end_time)))
     .map((row) => ({ id: row.id, class_type_code: row.class_type_code }));
 }
@@ -615,7 +655,7 @@ export async function fetchWeeklySchedule(
 
   const classIds = classRows.map((row) => row.id);
 
-  const [enrollmentRes, overrideRes] = await Promise.all([
+  const [enrollmentRes, overrideRes, activeEnrollmentClassIds] = await Promise.all([
     supabase
       .from("class_enrollments")
       .select("class_id,student_id,students(id,student_name)")
@@ -627,7 +667,8 @@ export async function fetchWeeklySchedule(
       )
       .in("class_id", classIds)
       .gte("override_date", weekStart)
-      .lte("override_date", weekEnd)
+      .lte("override_date", weekEnd),
+    loadActiveEnrollmentClassIds(supabase, classIds)
   ]);
 
   if (enrollmentRes.error) throw enrollmentRes.error;
@@ -677,6 +718,8 @@ export async function fetchWeeklySchedule(
   const events: ScheduleEvent[] = [];
 
   for (const row of classRows) {
+    if (!activeEnrollmentClassIds.has(row.id)) continue;
+
     if (row.schedule_mode === "recurring") {
       if (!row.weekday) continue;
       const classDate = addDays(weekStart, row.weekday - 1);
@@ -748,7 +791,7 @@ export async function fetchEventsForClassIdsInWeek(
     return [];
   }
 
-  const [enrollmentRes, overrideRes] = await Promise.all([
+  const [enrollmentRes, overrideRes, activeEnrollmentClassIds] = await Promise.all([
     supabase
       .from("class_enrollments")
       .select("class_id,student_id,students(id,student_name)")
@@ -760,7 +803,8 @@ export async function fetchEventsForClassIdsInWeek(
       )
       .in("class_id", classIds)
       .gte("override_date", weekStart)
-      .lte("override_date", weekEnd)
+      .lte("override_date", weekEnd),
+    loadActiveEnrollmentClassIds(supabase, classIds)
   ]);
 
   if (enrollmentRes.error) throw enrollmentRes.error;
@@ -810,6 +854,8 @@ export async function fetchEventsForClassIdsInWeek(
   const events: ScheduleEvent[] = [];
 
   for (const row of rows) {
+    if (!activeEnrollmentClassIds.has(row.id)) continue;
+
     if (row.schedule_mode === "recurring") {
       if (!row.weekday) continue;
       const classDate = addDays(weekStart, row.weekday - 1);
