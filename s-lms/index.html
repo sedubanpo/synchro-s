@@ -22792,6 +22792,31 @@
         };
       }
 
+      function buildStudentInstructorPermissionDocId_(studentId, instructorId) {
+        return [studentId, instructorId].map(function(value) {
+          return String(value || '').trim().replace(/\//g, '_');
+        }).join('__');
+      }
+
+      function buildSingleStudentPermissionFirebasePayload_(studentId, instructorId) {
+        var aggregate = buildStudentPermissionFirebasePayload_(studentId, [instructorId]);
+        return {
+          permissionId: buildStudentInstructorPermissionDocId_(studentId, instructorId),
+          studentId: aggregate.studentId,
+          studentName: aggregate.studentName,
+          school: aggregate.school,
+          grade: aggregate.grade,
+          instructorId: String(instructorId || ''),
+          instructorName: aggregate.instructorNames[0] || '',
+          subject: aggregate.instructorSubjects[0] || '',
+          permission: 'ALLOW',
+          updatedAt: aggregate.updatedAt,
+          updatedAtMs: aggregate.updatedAtMs,
+          updatedById: aggregate.updatedById,
+          updatedByName: aggregate.updatedByName
+        };
+      }
+
       function buildPermissionRowsFromPayload_(payload) {
         var ids = payload.instructorIds || [];
         var names = payload.instructorNames || [];
@@ -22827,17 +22852,30 @@
           if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('permissionWrite')) {
             throw new Error('Firebase 직접 권한 저장 경로가 준비되지 않았습니다.');
           }
-          var payload = buildStudentPermissionFirebasePayload_(studentId, instructorIds);
           var collectionName = (state.collections && state.collections.permissions) || 'studentPermissions';
-          return state.firestore.collection(collectionName).doc(String(studentId || '')).set(payload, { merge: true }).then(function() {
-            replaceStudentPermissionsInState_(studentId, instructorIds);
-            return {
-              ok: true,
-              directFirebase: true,
-              studentId: studentId,
-              permissions: buildPermissionRowsFromPayload_(payload),
-              message: '학생 열람 권한이 저장되었습니다.'
-            };
+          var collection = state.firestore.collection(collectionName);
+          return collection.where('studentId', '==', String(studentId || '')).get().then(function(snapshot) {
+            var batch = state.firestore.batch();
+            snapshot.forEach(function(doc) {
+              batch.delete(doc.ref);
+            });
+            batch.delete(collection.doc(String(studentId || '')));
+            uniqueList_(instructorIds || []).forEach(function(instructorId) {
+              var payload = buildSingleStudentPermissionFirebasePayload_(studentId, instructorId);
+              batch.set(collection.doc(payload.permissionId), payload, { merge: true });
+            });
+            return batch.commit().then(function() {
+              replaceStudentPermissionsInState_(studentId, instructorIds);
+              return {
+                ok: true,
+                directFirebase: true,
+                studentId: studentId,
+                permissions: APP_STATE.permissions.filter(function(item) {
+                  return String(item.studentId || '') === String(studentId || '');
+                }),
+                message: '학생 열람 권한이 저장되었습니다.'
+              };
+            });
           });
         });
       }
@@ -22851,19 +22889,22 @@
           var collectionName = (state.collections && state.collections.permissions) || 'studentPermissions';
           var batch = state.firestore.batch();
           var permissionMap = getPermissionMap();
-          var nextPayloads = [];
           (studentIds || []).forEach(function(studentId) {
             var currentIds = (permissionMap[studentId] || []).slice();
             var nextIds = mode === 'remove'
               ? currentIds.filter(function(id) { return !sameInstructorIdentifier_(id, instructor.userId); })
               : uniqueList_(currentIds.concat([instructor.userId]));
-            var payload = buildStudentPermissionFirebasePayload_(studentId, nextIds);
-            nextPayloads.push(payload);
-            batch.set(state.firestore.collection(collectionName).doc(String(studentId || '')), payload, { merge: true });
+            var docId = buildStudentInstructorPermissionDocId_(studentId, instructor.userId);
+            if (mode === 'remove') {
+              batch.delete(state.firestore.collection(collectionName).doc(docId));
+            } else {
+              batch.set(state.firestore.collection(collectionName).doc(docId), buildSingleStudentPermissionFirebasePayload_(studentId, instructor.userId), { merge: true });
+            }
+            permissionMap[studentId] = nextIds;
           });
           return batch.commit().then(function() {
-            nextPayloads.forEach(function(payload) {
-              replaceStudentPermissionsInState_(payload.studentId, payload.instructorIds);
+            (studentIds || []).forEach(function(studentId) {
+              replaceStudentPermissionsInState_(studentId, permissionMap[studentId] || []);
             });
             return {
               ok: true,
@@ -22900,8 +22941,8 @@
             var currentIds = (permissionMap[request.studentId] || []).slice();
             var nextIds = uniqueList_(currentIds.concat([request.instructorId]));
             permissionMap[request.studentId] = nextIds;
-            var payload = buildStudentPermissionFirebasePayload_(request.studentId, nextIds);
-            batch.set(state.firestore.collection(collectionName).doc(String(request.studentId || '')), payload, { merge: true });
+            var payload = buildSingleStudentPermissionFirebasePayload_(request.studentId, request.instructorId);
+            batch.set(state.firestore.collection(collectionName).doc(payload.permissionId), payload, { merge: true });
             batch.set(state.firestore.collection(requestCollectionName).doc(String(request.requestId || '')), {
               status: 'APPROVED',
               resolvedAt: now.toISOString(),
