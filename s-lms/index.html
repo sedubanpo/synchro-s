@@ -16010,6 +16010,9 @@
 
         return apiRequest('getStudents', { token: APP_STATE.token })
           .then(function(studentData) {
+            return overlayFirebaseStudentLogsOnStudentData_(studentData);
+          })
+          .then(function(studentData) {
             APP_STATE.studentDataLoading = false;
             hydrateStudentDataOnly(studentData);
             if (config.useStagedLoading) {
@@ -16111,6 +16114,96 @@
         APP_STATE.logoUrl = studentData.logoUrl || APP_STATE.logoUrl;
         writeStoredSession();
         syncBranding();
+      }
+
+      function readFirebaseStudentLogsForLegacySession_() {
+        if (!APP_STATE.token || !APP_STATE.user || !APP_STATE.user.userId || isFirebaseSessionToken_(APP_STATE.token)) {
+          return Promise.resolve([]);
+        }
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('logRead')) {
+            return [];
+          }
+          var collectionName = (state.collections && state.collections.studentLogs) || 'studentLogs';
+          return state.firestore.collection(collectionName).get().then(function(snapshot) {
+            return snapshot.docs.map(normalizeFirebaseStudentLogForApp_).filter(function(log) {
+              return log.studentId && log.content;
+            });
+          });
+        }).catch(function(error) {
+          if (window.console && console.warn) {
+            console.warn('Firebase student log overlay skipped:', error);
+          }
+          return [];
+        });
+      }
+
+      function mergeFirebaseLogsIntoStudentList_(students, logsByStudent) {
+        if (!Array.isArray(students) || !students.length) {
+          return students || [];
+        }
+        return students.map(function(student) {
+          var studentId = String(student && student.studentId || '');
+          if (!studentId || student.isRestricted) {
+            return student;
+          }
+          var firebaseLogs = logsByStudent[studentId] || [];
+          if (!firebaseLogs.length) {
+            return student;
+          }
+          var existingLogs = Array.isArray(student.logs) ? student.logs : [];
+          var seen = {};
+          var mergedLogs = [];
+          firebaseLogs.concat(existingLogs).forEach(function(log) {
+            if (!log || !log.content) {
+              return;
+            }
+            var rowKey = String(log.rowNumber || log.logId || log.clientRequestId || '');
+            var dedupeKey = rowKey || [
+              log.studentId || studentId,
+              log.createdAt || '',
+              log.createdById || '',
+              log.content || ''
+            ].join('|');
+            if (seen[dedupeKey]) {
+              return;
+            }
+            seen[dedupeKey] = true;
+            mergedLogs.push(log);
+          });
+          mergedLogs.sort(function(a, b) {
+            return dateValueForSort_(b.createdAt || b.updatedAt || '') - dateValueForSort_(a.createdAt || a.updatedAt || '');
+          });
+          return Object.assign({}, student, {
+            logs: mergedLogs
+          });
+        });
+      }
+
+      function overlayFirebaseStudentLogsOnStudentData_(studentData) {
+        if (!studentData || !studentData.ok || isFirebaseSessionToken_(APP_STATE.token)) {
+          return Promise.resolve(studentData);
+        }
+        return readFirebaseStudentLogsForLegacySession_().then(function(logs) {
+          if (!logs.length) {
+            return studentData;
+          }
+          var logsByStudent = {};
+          logs.forEach(function(log) {
+            var studentId = String(log.studentId || '');
+            if (!logsByStudent[studentId]) {
+              logsByStudent[studentId] = [];
+            }
+            logsByStudent[studentId].push(log);
+          });
+          return Object.assign({}, studentData, {
+            visibleStudents: mergeFirebaseLogsIntoStudentList_(studentData.visibleStudents, logsByStudent),
+            searchableStudents: mergeFirebaseLogsIntoStudentList_(studentData.searchableStudents, logsByStudent),
+            activeStudents: mergeFirebaseLogsIntoStudentList_(studentData.activeStudents, logsByStudent),
+            allStudents: mergeFirebaseLogsIntoStudentList_(studentData.allStudents, logsByStudent)
+          });
+        });
       }
 
       function hydrateFirebaseDirectState_(authData) {
