@@ -15482,9 +15482,17 @@
         var profile = profileDoc || {};
         var access = accessDoc || {};
         var role = String(user.role || 'INSTRUCTOR').toUpperCase();
+        var loginId = user.loginId || user.instructorId || user.teacherId ||
+          profile.loginId || profile.instructorId || profile.teacherId ||
+          profile.phone || profile.phoneNumber || profile.mobile || profile.mobilePhone || '';
+        var identifiers = buildInstructorIdentifierCandidates_(Object.assign({}, profile, user, {
+          uid: uid,
+          userId: uid,
+          loginId: loginId
+        }));
         return {
           userId: uid,
-          loginId: user.loginId || profile.instructorId || '',
+          loginId: loginId,
           name: user.name || profile.displayName || uid,
           subject: profile.department || (profile.subjects || []).join(', ') || '',
           role: role,
@@ -15492,6 +15500,7 @@
           status: user.status || 'ACTIVE',
           appAccess: access.apps || {},
           permissions: access.permissions || {},
+          instructorIdentifiers: identifiers,
           firebaseAuth: true
         };
       }
@@ -15705,13 +15714,21 @@
             var data = doc.data() || {};
             var profile = profileMap[doc.id] || {};
             var profileSubjects = Array.isArray(profile.subjects) ? profile.subjects.join(', ') : '';
+            var loginId = data.loginId || data.instructorId || data.teacherId ||
+              profile.loginId || profile.instructorId || profile.teacherId ||
+              profile.phone || profile.phoneNumber || profile.mobile || profile.mobilePhone || '';
             return {
               userId: doc.id,
-              loginId: data.loginId || '',
+              loginId: loginId,
               name: data.name || profile.displayName || doc.id,
               role: data.role || 'INSTRUCTOR',
               roleLabel: roleLabelForFirebaseUser_(String(data.role || 'INSTRUCTOR').toUpperCase()),
-              subject: data.subject || profile.department || profile.subject || profileSubjects || ''
+              subject: data.subject || profile.department || profile.subject || profileSubjects || '',
+              instructorIdentifiers: buildInstructorIdentifierCandidates_(Object.assign({}, profile, data, {
+                uid: doc.id,
+                userId: doc.id,
+                loginId: loginId
+              }))
             };
           });
           var permissions = flattenFirebasePermissionSnapshot_(permissionSnapshot);
@@ -15720,8 +15737,7 @@
           });
           if (user.role !== 'ADMIN') {
             permissionRequests = permissionRequests.filter(function(item) {
-              return sameInstructorIdentifier_(item.instructorId, user.userId) ||
-                sameInstructorIdentifier_(item.instructorId, user.loginId);
+              return currentUserMatchesInstructorIdentifier_(item.instructorId);
             });
           }
           var homeroomAssignments = [];
@@ -15771,8 +15787,7 @@
           if (user.role !== 'ADMIN') {
             scopedStudents = activeStudents.filter(function(student) {
               return (permissionMap[student.studentId] || []).some(function(instructorId) {
-                return sameInstructorIdentifier_(instructorId, user.userId) ||
-                  sameInstructorIdentifier_(instructorId, user.loginId);
+                return currentUserMatchesInstructorIdentifier_(instructorId);
               });
             });
             var scopedMap = {};
@@ -17215,12 +17230,8 @@
 
       function findInstructorById_(instructorId) {
         var target = String(instructorId || '');
-        var targetPhone = normalizePhoneIdentifier_(target);
         return (APP_STATE.instructors || []).find(function(instructor) {
-          return String(instructor.userId || '') === target ||
-            String(instructor.loginId || '') === target ||
-            (targetPhone && normalizePhoneIdentifier_(instructor.userId) === targetPhone) ||
-            (targetPhone && normalizePhoneIdentifier_(instructor.loginId) === targetPhone);
+          return isInstructorIdentifierInCandidates_(target, instructor);
         }) || null;
       }
 
@@ -17233,6 +17244,69 @@
           return '0' + digits;
         }
         return digits;
+      }
+
+      function buildInstructorIdentifierCandidates_(source) {
+        source = source || {};
+        var raw = [
+          source.userId,
+          source.uid,
+          source.loginId,
+          source.instructorId,
+          source.teacherId,
+          source.phone,
+          source.phoneNumber,
+          source.mobile,
+          source.mobilePhone,
+          source.tel
+        ];
+        var values = [];
+        if (Array.isArray(source.instructorIdentifiers)) {
+          raw = raw.concat(source.instructorIdentifiers);
+        }
+        raw.forEach(function(value) {
+          var text = String(value || '').trim();
+          if (!text) {
+            return;
+          }
+          values.push(text);
+          var phone = normalizePhoneIdentifier_(text);
+          if (phone) {
+            values.push(phone);
+          }
+        });
+        return uniqueList_(values);
+      }
+
+      function isInstructorIdentifierInCandidates_(identifier, source) {
+        var candidates = buildInstructorIdentifierCandidates_(source);
+        return candidates.some(function(candidate) {
+          return sameInstructorIdentifier_(identifier, candidate);
+        });
+      }
+
+      function currentUserMatchesInstructorIdentifier_(identifier) {
+        var user = APP_STATE.user || {};
+        return isInstructorIdentifierInCandidates_(identifier, user);
+      }
+
+      function getInstructorPrimaryPermissionId_(instructor) {
+        instructor = instructor || {};
+        var candidates = buildInstructorIdentifierCandidates_(instructor);
+        var preferred = [instructor.loginId, instructor.instructorId, instructor.teacherId, instructor.phone, instructor.phoneNumber, instructor.mobile, instructor.mobilePhone]
+          .map(function(value) { return String(value || '').trim(); })
+          .filter(Boolean)[0];
+        return preferred || candidates[0] || String(instructor.userId || '');
+      }
+
+      function getCurrentInstructorPrimaryPermissionId_() {
+        var user = APP_STATE.user || {};
+        return getInstructorPrimaryPermissionId_(user);
+      }
+
+      function canonicalizePermissionInstructorId_(instructorId) {
+        var instructor = findInstructorById_(instructorId);
+        return instructor ? getInstructorPrimaryPermissionId_(instructor) : String(instructorId || '').trim();
       }
 
       function sameInstructorIdentifier_(left, right) {
@@ -22081,7 +22155,7 @@
         var visibleInstructors = getVisiblePermissionInstructors_();
         var summary = selected.length
           ? selected.map(function(id) {
-              var matched = APP_STATE.instructors.find(function(item) { return item.userId === id; });
+              var matched = findInstructorById_(id);
               return matched ? matched.name : id;
             })
           : [];
@@ -22105,13 +22179,15 @@
           '<input class="field-input permission-instructor-search" data-role="instructor-search" type="text" placeholder="강사 검색" value="' + escapeAttribute(APP_STATE.permissionInstructorKeyword) + '">',
           '<div class="compact-check-grid">',
           visibleInstructors.map(function(instructor) {
-            var checked = selected.indexOf(instructor.userId) !== -1 ? ' checked' : '';
+            var checked = selected.some(function(id) {
+              return isInstructorIdentifierInCandidates_(id, instructor);
+            }) ? ' checked' : '';
             return [
               '<label class="compact-check permission-check-card' + (checked ? ' selected' : '') + '">',
               '  <input type="checkbox" data-instructor-id="' + escapeAttribute(instructor.userId) + '"' + checked + '>',
               '  <div>',
               '    <strong>' + escapeHtml(instructor.name) + '</strong>',
-              '    <span>' + escapeHtml([instructor.userId, instructor.subject].filter(Boolean).join(' · ')) + '</span>',
+              '    <span>' + escapeHtml([instructor.loginId || instructor.userId, instructor.subject].filter(Boolean).join(' · ')) + '</span>',
               '  </div>',
               '</label>'
             ].join('');
@@ -22151,7 +22227,7 @@
               '  <input type="radio" name="permissionBulkInstructor" data-bulk-instructor-id="' + escapeAttribute(instructor.userId) + '"' + checked + '>',
               '  <div>',
               '    <strong>' + escapeHtml(instructor.name) + '</strong>',
-              '    <span>' + escapeHtml([instructor.userId, instructor.subject].filter(Boolean).join(' · ')) + '</span>',
+              '    <span>' + escapeHtml([instructor.loginId || instructor.userId, instructor.subject].filter(Boolean).join(' · ')) + '</span>',
               '  </div>',
               '</label>'
             ].join('');
@@ -22334,7 +22410,7 @@
           return [];
         }
         return (APP_STATE.instructors || []).filter(function(instructor) {
-          if ((selected || []).indexOf(instructor.userId) !== -1) {
+          if ((selected || []).some(function(id) { return isInstructorIdentifierInCandidates_(id, instructor); })) {
             return false;
           }
           var instructorSubject = normalizeSearchText(instructor.subject);
@@ -22348,7 +22424,7 @@
           if (!instructorKeyword) {
             return true;
           }
-          var searchText = normalizeSearchText([instructor.name, instructor.userId, instructor.subject].join(' '));
+          var searchText = normalizeSearchText([instructor.name, instructor.userId, instructor.loginId, instructor.subject].join(' '));
           return searchText.indexOf(instructorKeyword) !== -1;
         });
       }
@@ -22384,8 +22460,12 @@
 
       function getInstructorPermissionStudentCount_(instructorId) {
         var studentMap = {};
+        var instructor = findInstructorById_(instructorId);
         (APP_STATE.permissions || []).forEach(function(item) {
-          if (sameInstructorIdentifier_(item.instructorId, instructorId) && item.studentId) {
+          var matched = instructor
+            ? isInstructorIdentifierInCandidates_(item.instructorId, instructor)
+            : sameInstructorIdentifier_(item.instructorId, instructorId);
+          if (matched && item.studentId) {
             studentMap[item.studentId] = true;
           }
         });
@@ -22553,12 +22633,18 @@
         }
 
         var instructorId = input.getAttribute('data-instructor-id');
+        var instructor = findInstructorById_(instructorId) || { userId: instructorId };
         var selected = getPermissionDraftSelection_(student.studentId);
-        if (input.checked && selected.indexOf(instructorId) === -1) {
+        var alreadySelected = selected.some(function(id) {
+          return isInstructorIdentifierInCandidates_(id, instructor);
+        });
+        if (input.checked && !alreadySelected) {
           selected.push(instructorId);
         }
         if (!input.checked) {
-          selected = selected.filter(function(id) { return id !== instructorId; });
+          selected = selected.filter(function(id) {
+            return !isInstructorIdentifierInCandidates_(id, instructor);
+          });
         }
         setPermissionDraftSelection_(student.studentId, selected);
         renderPermissionDetailPanel();
@@ -22590,9 +22676,15 @@
         var instructorId = button.getAttribute('data-instructor-id');
 
         if (action === 'permission-add-instructor' && instructorId) {
-          selected.push(instructorId);
+          var instructor = findInstructorById_(instructorId) || { userId: instructorId };
+          if (!selected.some(function(id) { return isInstructorIdentifierInCandidates_(id, instructor); })) {
+            selected.push(instructorId);
+          }
         } else if (action === 'permission-remove-instructor' && instructorId) {
-          selected = selected.filter(function(id) { return id !== instructorId; });
+          var removeInstructor = findInstructorById_(instructorId) || { userId: instructorId };
+          selected = selected.filter(function(id) {
+            return !isInstructorIdentifierInCandidates_(id, removeInstructor);
+          });
         } else if (action === 'permission-add-visible') {
           selected = selected.concat(getVisiblePermissionInstructors_().map(function(instructor) {
             return instructor.userId;
@@ -22762,7 +22854,7 @@
       function buildStudentPermissionFirebasePayload_(studentId, instructorIds) {
         var student = findAnyStudentById_(studentId) || {};
         var ids = uniqueList_((instructorIds || []).map(function(id) {
-          return String(id || '').trim();
+          return canonicalizePermissionInstructorId_(id);
         }).filter(Boolean));
         var names = ids.map(function(id) {
           var instructor = findInstructorById_(id);
@@ -22889,16 +22981,20 @@
           var collectionName = (state.collections && state.collections.permissions) || 'studentPermissions';
           var batch = state.firestore.batch();
           var permissionMap = getPermissionMap();
+          var instructorPermissionId = getInstructorPrimaryPermissionId_(instructor);
+          var deleteIds = uniqueList_(buildInstructorIdentifierCandidates_(instructor).concat([instructor.userId, instructor.loginId, instructorPermissionId]).filter(Boolean));
           (studentIds || []).forEach(function(studentId) {
             var currentIds = (permissionMap[studentId] || []).slice();
             var nextIds = mode === 'remove'
-              ? currentIds.filter(function(id) { return !sameInstructorIdentifier_(id, instructor.userId); })
-              : uniqueList_(currentIds.concat([instructor.userId]));
-            var docId = buildStudentInstructorPermissionDocId_(studentId, instructor.userId);
+              ? currentIds.filter(function(id) { return !isInstructorIdentifierInCandidates_(id, instructor); })
+              : uniqueList_(currentIds.concat([instructorPermissionId]));
             if (mode === 'remove') {
-              batch.delete(state.firestore.collection(collectionName).doc(docId));
+              deleteIds.forEach(function(id) {
+                batch.delete(state.firestore.collection(collectionName).doc(buildStudentInstructorPermissionDocId_(studentId, id)));
+              });
             } else {
-              batch.set(state.firestore.collection(collectionName).doc(docId), buildSingleStudentPermissionFirebasePayload_(studentId, instructor.userId), { merge: true });
+              var payload = buildSingleStudentPermissionFirebasePayload_(studentId, instructorPermissionId);
+              batch.set(state.firestore.collection(collectionName).doc(payload.permissionId), payload, { merge: true });
             }
             permissionMap[studentId] = nextIds;
           });
@@ -22939,9 +23035,10 @@
           var now = new Date();
           requests.forEach(function(request) {
             var currentIds = (permissionMap[request.studentId] || []).slice();
-            var nextIds = uniqueList_(currentIds.concat([request.instructorId]));
+            var instructorId = canonicalizePermissionInstructorId_(request.instructorId);
+            var nextIds = uniqueList_(currentIds.concat([instructorId]));
             permissionMap[request.studentId] = nextIds;
-            var payload = buildSingleStudentPermissionFirebasePayload_(request.studentId, request.instructorId);
+            var payload = buildSingleStudentPermissionFirebasePayload_(request.studentId, instructorId);
             batch.set(state.firestore.collection(collectionName).doc(payload.permissionId), payload, { merge: true });
             batch.set(state.firestore.collection(requestCollectionName).doc(String(request.requestId || '')), {
               status: 'APPROVED',
@@ -23058,7 +23155,7 @@
           }
           var alreadyGranted = (APP_STATE.permissions || []).some(function(item) {
             return String(item.studentId || '') === String(student.studentId || '') &&
-              (sameInstructorIdentifier_(item.instructorId, user.userId) || sameInstructorIdentifier_(item.instructorId, user.loginId)) &&
+              currentUserMatchesInstructorIdentifier_(item.instructorId) &&
               String(item.permission || 'ALLOW').toUpperCase() === 'ALLOW';
           });
           if (alreadyGranted) {
@@ -23073,7 +23170,7 @@
           }
           var existingPendingRequest = (APP_STATE.permissionRequests || []).find(function(item) {
             return String(item.studentId || '') === String(student.studentId || '') &&
-              (sameInstructorIdentifier_(item.instructorId, user.userId) || sameInstructorIdentifier_(item.instructorId, user.loginId)) &&
+              currentUserMatchesInstructorIdentifier_(item.instructorId) &&
               String(item.status || '').toUpperCase() === 'PENDING';
           });
           if (existingPendingRequest) {
@@ -23088,13 +23185,15 @@
           }
           var timestamp = new Date().toISOString();
           var requestId = createFirebasePermissionRequestId_();
+          var instructorId = getCurrentInstructorPrimaryPermissionId_() || userId;
           var permissionRequest = {
             requestId: requestId,
             studentId: student.studentId,
             studentName: student.studentName || '',
             school: student.school || '',
             grade: student.grade || '',
-            instructorId: userId,
+            instructorId: instructorId,
+            instructorUid: userId,
             instructorName: user.name || user.loginId || userId,
             status: 'PENDING',
             requestedAt: timestamp,

@@ -97,9 +97,15 @@ service cloud.firestore {
     }
 
     match /permissionRequests/{requestId} {
-      allow get: if isAdmin() || (signedIn() && resource.data.instructorId == request.auth.uid);
+      allow get: if isAdmin() || (
+        signedIn() &&
+        (resource.data.instructorId == request.auth.uid || resource.data.instructorUid == request.auth.uid)
+      );
       allow list: if signedIn();
-      allow create: if signedIn() && request.resource.data.instructorId == request.auth.uid;
+      allow create: if signedIn() && (
+        request.resource.data.instructorId == request.auth.uid ||
+        request.resource.data.instructorUid == request.auth.uid
+      );
       allow update, delete: if isAdmin();
     }
 
