@@ -1,0 +1,130 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserRole() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? currentUserDoc().data.role
+        : '';
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.role == 'ADMIN' ||
+        request.auth.token.isAdmin == true ||
+        currentUserRole() == 'ADMIN'
+      );
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function hasStudentAccess(studentId) {
+      return isAdmin() || (
+        signedIn() &&
+        request.auth.token.allowedStudentIds is list &&
+        studentId in request.auth.token.allowedStudentIds
+      );
+    }
+
+    match /loginAliases/{aliasHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /users/{uid} {
+      allow get: if isSelf(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /userProfiles/{uid} {
+      allow get: if isSelf(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /userAppAccess/{uid} {
+      allow get: if isSelf(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /students/{studentId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /studentGrades/{gradeId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /studentGradeHistories/{historyId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /studentLogs/{logId} {
+      allow get, list: if signedIn();
+      allow create: if signedIn()
+        && (request.resource.data.createdById == request.auth.uid || isAdmin())
+        && request.resource.data.studentId is string
+        && request.resource.data.content is string;
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactionsJson', 'reactionsUpdatedAt']);
+      allow delete: if signedIn()
+        && (isAdmin() || resource.data.createdById == request.auth.uid);
+    }
+
+    match /dashboardSnapshots/{snapshotId} {
+      allow get: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow list: if false;
+      allow create, update: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.snapshotJson is string;
+      allow delete: if false;
+    }
+
+    match /permissionRequests/{requestId} {
+      allow get: if isAdmin() || (signedIn() && resource.data.instructorId == request.auth.uid);
+      allow list: if signedIn();
+      allow create: if signedIn() && request.resource.data.instructorId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    match /studentPermissions/{documentId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /studentHomerooms/{documentId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /studentCards/{studentId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /userStudentAccess/{documentId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
