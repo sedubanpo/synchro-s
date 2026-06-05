@@ -11868,7 +11868,7 @@
 
       .grades-v3-shell {
         display: grid;
-        grid-template-columns: 250px minmax(0, 1fr) 270px;
+        grid-template-columns: 220px minmax(0, 1fr);
         gap: 18px;
         align-items: start;
       }
@@ -12396,10 +12396,11 @@
       }
 
       .grades-v3-right {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         display: grid;
         gap: 14px;
-        position: sticky;
-        top: 76px;
+        position: static;
       }
 
       .grades-v3-right-card {
@@ -12669,14 +12670,8 @@
       }
 
       @media (max-width: 1500px) {
-        .grades-v3-shell {
-          grid-template-columns: 220px minmax(0, 1fr);
-        }
-
         .grades-v3-right {
-          grid-column: 1 / -1;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          position: static;
         }
       }
 
@@ -15660,6 +15655,48 @@
         });
       }
 
+      function dateValueForSort_(value) {
+        if (typeof value === 'number' && isFinite(value)) {
+          return value;
+        }
+        var text = String(value || '').trim();
+        if (!text) {
+          return 0;
+        }
+        if (/^\d+$/.test(text)) {
+          return Number(text);
+        }
+        var parsed = new Date(text);
+        if (!isNaN(parsed.getTime())) {
+          return parsed.getTime();
+        }
+        var ko = text.match(/(\d{2,4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s*(오전|오후))?\s*(\d{1,2})?시?\s*(\d{1,2})?분?/);
+        if (ko) {
+          var year = Number(ko[1]);
+          if (year < 100) {
+            year += 2000;
+          }
+          var hour = Number(ko[5] || 0);
+          var minute = Number(ko[6] || 0);
+          if (ko[4] === '오후' && hour < 12) {
+            hour += 12;
+          }
+          if (ko[4] === '오전' && hour === 12) {
+            hour = 0;
+          }
+          return new Date(year, Number(ko[2]) - 1, Number(ko[3]), hour, minute).getTime();
+        }
+        var slash = text.match(/(\d{2,4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
+        if (slash) {
+          var slashYear = Number(slash[1]);
+          if (slashYear < 100) {
+            slashYear += 2000;
+          }
+          return new Date(slashYear, Number(slash[2]) - 1, Number(slash[3]), Number(slash[4] || 0), Number(slash[5] || 0)).getTime();
+        }
+        return 0;
+      }
+
       function loadFirebaseLoginContext_(state, uid) {
         var collections = state.collections || {};
         var db = state.firestore;
@@ -16122,7 +16159,7 @@
         }
         return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
           state = state || APP_STATE.firebaseDirect || {};
-          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('logRead')) {
+          if (!state.enabled || !state.firestore) {
             return [];
           }
           var collectionName = (state.collections && state.collections.studentLogs) || 'studentLogs';
