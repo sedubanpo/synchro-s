@@ -20769,7 +20769,7 @@
         }
         var rowKey = String(updatedLog.rowNumber || '');
         var merged = false;
-        ['visibleStudents', 'activeStudents'].forEach(function(stateKey) {
+        ['visibleStudents', 'searchableStudents', 'activeStudents', 'allStudents'].forEach(function(stateKey) {
           (APP_STATE[stateKey] || []).forEach(function(student) {
             (student.logs || []).forEach(function(log) {
               if (String(log.rowNumber || '') !== rowKey) {
