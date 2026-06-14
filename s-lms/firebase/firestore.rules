@@ -24,6 +24,17 @@ service cloud.firestore {
       );
     }
 
+    function isStaffOrAdmin() {
+      return isAdmin() || (
+        signedIn() && (
+          request.auth.token.role == 'STAFF' ||
+          request.auth.token.role == 'DESK' ||
+          currentUserRole() == 'STAFF' ||
+          currentUserRole() == 'DESK'
+        )
+      );
+    }
+
     function isSelf(uid) {
       return signedIn() && request.auth.uid == uid;
     }
@@ -65,6 +76,16 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /accountManagementRequests/{requestId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /accountManagementAuditLogs/{auditId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /studentGrades/{gradeId} {
       allow get, list: if signedIn();
       allow create, update, delete: if isAdmin();
@@ -78,21 +99,61 @@ service cloud.firestore {
     match /studentLogs/{logId} {
       allow get, list: if signedIn();
       allow create: if signedIn()
-        && (request.resource.data.createdById == request.auth.uid || isAdmin())
+        && (
+          request.resource.data.createdById == request.auth.uid ||
+          isAdmin() ||
+          (
+            request.resource.data.restoredFromRowNumber is string &&
+            request.resource.data.reactionsByUser is map
+          )
+        )
         && request.resource.data.studentId is string
         && request.resource.data.content is string;
       allow update: if signedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactionsJson', 'reactionsUpdatedAt']);
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'reactions',
+            'reactionsJson',
+            'reactionsByUser',
+            'reactionsUpdatedAt'
+          ]) ||
+          (
+            (isAdmin() || resource.data.createdById == request.auth.uid)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'content',
+              'tags',
+              'tagsText',
+              'updatedAt',
+              'updatedAtMs',
+              'updatedById',
+              'updatedByName'
+            ])
+            && request.resource.data.content is string
+            && request.resource.data.updatedById == request.auth.uid
+          )
+        );
       allow delete: if signedIn()
         && (isAdmin() || resource.data.createdById == request.auth.uid);
     }
 
     match /dashboardSnapshots/{snapshotId} {
-      allow get: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow get: if (snapshotId == 'GLOBAL_NOTICE' && signedIn()) ||
+        isAdmin() ||
+        (signedIn() && resource.data.userId == request.auth.uid);
       allow list: if false;
       allow create, update: if signedIn()
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.snapshotJson is string;
+        && (
+          (
+            snapshotId == 'GLOBAL_NOTICE' &&
+            isAdmin() &&
+            request.resource.data.type == 'globalNotice' &&
+            request.resource.data.content is string
+          ) ||
+          (
+            request.resource.data.userId == request.auth.uid &&
+            request.resource.data.snapshotJson is string
+          )
+        );
       allow delete: if false;
     }
 
@@ -115,8 +176,49 @@ service cloud.firestore {
     }
 
     match /studentHomerooms/{documentId} {
+      allow get, list: if isStaffOrAdmin();
+      allow create, update, delete: if isStaffOrAdmin();
+    }
+
+    match /events/{eventId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isStaffOrAdmin();
+    }
+
+    match /jikboSubjects/{subjectId} {
+      allow get, list: if isStaffOrAdmin();
+      allow create, update, delete: if isStaffOrAdmin();
+    }
+
+    match /jikboStudentOverrides/{overrideId} {
+      allow get, list: if isStaffOrAdmin();
+      allow create, update, delete: if isStaffOrAdmin();
+    }
+
+    match /jikboStatuses/{statusId} {
+      allow get, list: if isStaffOrAdmin();
+      allow create, update, delete: if isStaffOrAdmin();
+    }
+
+    match /materials/{materialId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /materialOpenLogs/{logId} {
       allow get, list: if isAdmin();
-      allow create, update, delete: if false;
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /materialSettings/{settingId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /gradeSettings/{settingId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     match /studentCards/{studentId} {
