@@ -47,6 +47,58 @@ service cloud.firestore {
       );
     }
 
+    function hasStudentPermissionDoc(studentId) {
+      return signedIn() && (
+        exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + request.auth.uid)) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.loginId is string &&
+          currentUserDoc().data.loginId != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.loginId))
+        ) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.instructorId is string &&
+          currentUserDoc().data.instructorId != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.instructorId))
+        ) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.teacherId is string &&
+          currentUserDoc().data.teacherId != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.teacherId))
+        ) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.phone is string &&
+          currentUserDoc().data.phone != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.phone))
+        ) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.phoneNumber is string &&
+          currentUserDoc().data.phoneNumber != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.phoneNumber))
+        ) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.mobile is string &&
+          currentUserDoc().data.mobile != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.mobile))
+        ) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          currentUserDoc().data.mobilePhone is string &&
+          currentUserDoc().data.mobilePhone != '' &&
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + currentUserDoc().data.mobilePhone))
+        )
+      );
+    }
+
+    function canUseMonthlyReport(studentId) {
+      return isStaffOrAdmin() || hasStudentPermissionDoc(studentId);
+    }
+
     match /loginAliases/{aliasHash} {
       allow get: if true;
       allow list: if false;
@@ -181,12 +233,14 @@ service cloud.firestore {
     }
 
     match /studentMonthlyReports/{reportId} {
-      allow get, list: if signedIn();
+      allow get, list: if canUseMonthlyReport(resource.data.studentId);
       allow create, update: if signedIn()
+        && canUseMonthlyReport(request.resource.data.studentId)
         && request.resource.data.studentId is string
         && request.resource.data.month is string
         && request.resource.data.subject in ['국어', '수학', '영어', '과학', '사회']
-        && request.resource.data.updatedById == request.auth.uid;
+        && request.resource.data.updatedById == request.auth.uid
+        && (!exists(/databases/$(database)/documents/studentMonthlyReports/$(reportId)) || resource.data.studentId == request.resource.data.studentId);
       allow delete: if isAdmin();
     }
 
