@@ -7442,9 +7442,10 @@
       }
 
       .student-name-line {
-        display: inline-flex;
+        display: flex;
         align-items: center;
         gap: 6px;
+        flex-wrap: nowrap;
         max-width: 100%;
       }
 
@@ -7455,7 +7456,9 @@
       }
 
       .student-name-line strong {
+        display: inline;
         min-width: 0;
+        flex: 0 1 auto;
       }
 
       .student-new-badge {
@@ -7481,7 +7484,7 @@
         stroke-width: 2.4;
       }
 
-      .student-name-main span {
+      .student-name-main > span:not(.student-name-line) {
         display: block;
         margin-top: 4px;
         color: #64748b;
@@ -7490,6 +7493,7 @@
 
       .student-name-line .student-new-badge {
         display: inline-flex;
+        flex: 0 0 auto;
         margin-top: 0;
         font-size: 0.58rem;
       }
@@ -7672,6 +7676,17 @@
         border-color: #fecaca;
         background: #fff0f0;
         color: #b91c1c;
+      }
+
+      button.teacher-chip.unassigned {
+        transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+      }
+
+      button.teacher-chip.unassigned:hover {
+        border-color: #f59e0b;
+        background: #fffbeb;
+        color: #92400e;
+        transform: translateY(-1px);
       }
 
       .status-grid {
@@ -7935,6 +7950,130 @@
         margin: 0 0 10px;
         font-size: 0.88rem;
         font-weight: 900;
+      }
+
+      .monthly-report-panel {
+        display: grid;
+        gap: 10px;
+      }
+
+      .monthly-report-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .monthly-report-head h4 {
+        margin: 0;
+      }
+
+      .monthly-report-month {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+        padding: 0 9px;
+        border: 1px solid #bfdbfe;
+        border-radius: 7px;
+        background: #eff6ff;
+        color: #174ea6;
+        font-size: 0.72rem;
+        font-weight: 900;
+        white-space: nowrap;
+      }
+
+      .monthly-report-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .monthly-report-row {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 8px;
+        padding: 9px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #f8fafc;
+      }
+
+      .monthly-report-subject {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 32px;
+        border-radius: 7px;
+        background: #ffffff;
+        border: 1px solid #dbe5f3;
+        color: #0f172a;
+        font-size: 0.78rem;
+        font-weight: 950;
+      }
+
+      .monthly-report-fields {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .monthly-report-field {
+        display: grid;
+        gap: 4px;
+      }
+
+      .monthly-report-field label {
+        color: #64748b;
+        font-size: 0.66rem;
+        font-weight: 900;
+      }
+
+      .monthly-report-field textarea {
+        width: 100%;
+        min-height: 52px;
+        resize: vertical;
+        border: 1px solid #dbe5f3;
+        border-radius: 7px;
+        padding: 7px 8px;
+        color: #334155;
+        background: #ffffff;
+        font: inherit;
+        font-size: 0.76rem;
+        line-height: 1.45;
+      }
+
+      .monthly-report-field textarea:focus {
+        outline: none;
+        border-color: #60a5fa;
+        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.16);
+      }
+
+      .monthly-report-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .monthly-report-updated {
+        margin-right: auto;
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 800;
+      }
+
+      .monthly-report-panel.board .monthly-report-fields {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      @media (max-width: 900px) {
+        .monthly-report-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .monthly-report-fields {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
 
       .permission-map {
@@ -15811,6 +15950,7 @@
         students: 'students',
         permissionRequests: 'permissionRequests',
         homerooms: 'studentHomerooms',
+        monthlyReports: 'studentMonthlyReports',
         events: 'events',
         materials: 'materials',
         materialOpenLogs: 'materialOpenLogs',
@@ -15844,6 +15984,8 @@
         materialSettingWrite: false,
         homeroomRead: false,
         homeroomWrite: false,
+        monthlyReportRead: false,
+        monthlyReportWrite: false,
         jikboRead: false,
         jikboWrite: false,
         gradeSettingRead: false,
@@ -15928,8 +16070,14 @@
         schoolChartHoverSchool: '',
         schoolQuickAssignOpen: false,
         schoolQuickAssignTargetSchool: '',
+        schoolQuickAssignTargetStudentId: '',
         schoolQuickAssignSelections: {},
         schoolQuickAssignSaving: false,
+        monthlyReportsByStudentId: {},
+        monthlyReportsLoadedStudentIds: {},
+        monthlyReportsLoadingStudentIds: {},
+        monthlyReportDrafts: {},
+        monthlyReportSavingKey: '',
         selectedHomeroomInstructorId: '',
         homeroomTeacherSearchKeyword: '',
         isHomeroomTeacherComposing: false,
@@ -16237,7 +16385,12 @@
         document.getElementById('teachingLogDetailModal').addEventListener('click', handleTeachingLogDetailBackdropClick);
         document.getElementById('closeStudentDetailModalButton').addEventListener('click', closeStudentDetailModal_);
         document.getElementById('studentDetailModal').addEventListener('click', handleStudentDetailModalClick_);
-        document.getElementById('studentDetailModal').addEventListener('input', handleStudentLogAuthorInput_);
+        document.getElementById('studentDetailModal').addEventListener('input', function(event) {
+          if (handleMonthlyReportInput_(event)) {
+            return;
+          }
+          handleStudentLogAuthorInput_(event);
+        });
         document.getElementById('studentDetailModal').addEventListener('change', handleStudentLogAuthorInput_);
         document.getElementById('closeJikboStatusModalButton').addEventListener('click', closeJikboStatusModal_);
         document.getElementById('jikboStatusModal').addEventListener('click', handleJikboStatusModalBackdropClick_);
@@ -17044,6 +17197,8 @@
             permissionRequestWrite: true,
             homeroomRead: true,
             homeroomWrite: true,
+            monthlyReportRead: true,
+            monthlyReportWrite: true,
             gradeRead: true,
             gradeWrite: true,
             gradeDelete: true,
@@ -18379,6 +18534,8 @@
             materialSettingWrite: true,
             homeroomRead: true,
             homeroomWrite: true,
+            monthlyReportRead: true,
+            monthlyReportWrite: true,
             jikboRead: true,
             jikboWrite: true,
             gradeSettingRead: true,
@@ -18574,6 +18731,8 @@
             permissionRequestWrite: true,
             homeroomRead: true,
             homeroomWrite: true,
+            monthlyReportRead: true,
+            monthlyReportWrite: true,
             gradeRead: true,
             gradeWrite: true,
             gradeDelete: true,
@@ -20643,6 +20802,30 @@
         }) || null;
       }
 
+      function resolveInstructorByKeyword_(keyword) {
+        var raw = String(keyword || '').trim();
+        var normalized = normalizeSearchText(raw);
+        if (!normalized) {
+          return null;
+        }
+        return (APP_STATE.instructors || []).find(function(instructor) {
+          var labels = [
+            instructor.userId,
+            instructor.loginId,
+            instructor.instructorId,
+            instructor.teacherId,
+            instructor.name,
+            instructor.subject,
+            [instructor.name, instructor.subject].filter(Boolean).join(' '),
+            [instructor.name, instructor.loginId || instructor.userId].filter(Boolean).join(' ')
+          ].concat(buildInstructorIdentifierCandidates_(instructor));
+          return labels.some(function(label) {
+            var text = normalizeSearchText(label);
+            return text && (text === normalized || text.indexOf(normalized) !== -1);
+          });
+        }) || null;
+      }
+
       function normalizePhoneIdentifier_(value) {
         var digits = String(value || '').replace(/\D/g, '');
         if (digits.length === 8) {
@@ -22110,7 +22293,7 @@
         return [
           '<tr class="student-index-row' + selected + '" data-student-id="' + escapeAttribute(student.studentId || '') + '">',
           '  <td class="student-name-cell"><div class="student-name-cell-inner"><div class="student-name-main">' + renderStudentNameWithNewBadge_(student) + '<span>' + renderStudentSchoolGradeHtml_(student, true) + '</span></div>' + renderStudentRecordCountBadge_(logs.length) + '</div></td>',
-          '  <td><div class="permission-cell"><div class="chip-row">' + (restricted ? renderPermissionRequestStatusChip_(student) : renderPermissionChips_(permissions, 2)) + '</div></div></td>',
+          '  <td><div class="permission-cell"><div class="chip-row">' + (restricted ? renderPermissionRequestStatusChip_(student) : renderPermissionChips_(permissions, 2, student)) + '</div></div></td>',
           '  <td><div class="status-grid ' + (restricted ? 'restricted-data' : '') + '">' + [
                renderStatusChip_('상담', logs.length ? 'slate' : 'muted'),
                renderStatusChip_('직보 ' + jikbo.total, jikbo.unconfirmed ? 'warn' : (jikbo.total ? 'teal' : 'muted')),
@@ -22277,7 +22460,7 @@
         })));
       }
 
-      function renderPermissionChips_(permissions, limit) {
+      function renderPermissionChips_(permissions, limit, student) {
         var visible = permissions.slice(0, limit || permissions.length);
         var html = visible.map(function(item, index) {
           var tone = index === 0 ? 'primary' : 'secondary';
@@ -22286,7 +22469,13 @@
         if (permissions.length > visible.length) {
           html += '<span class="teacher-chip extra">+' + escapeHtml(String(permissions.length - visible.length)) + '</span>';
         }
-        return html || '<span class="teacher-chip unassigned">미배정</span>';
+        if (html) {
+          return html;
+        }
+        if (APP_STATE.isAdmin && student && student.studentId) {
+          return '<button type="button" class="teacher-chip unassigned" data-action="quick-assign-permission" data-student-id="' + escapeAttribute(student.studentId || '') + '" title="강사 열람 권한 빠른 부여"><i data-lucide="user-plus"></i>미배정</button>';
+        }
+        return '<span class="teacher-chip unassigned">미배정</span>';
       }
 
       function renderPermissionRequestStatusChip_(student) {
@@ -22328,6 +22517,328 @@
         return '<span class="school-link-badge ' + toneClass + '">' + escapeHtml(label) + '</span>';
       }
 
+      const MONTHLY_REPORT_SUBJECTS = ['국어', '수학', '영어', '과학', '사회'];
+
+      function getCurrentMonthlyReportMonth_() {
+        var now = new Date();
+        return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+      }
+
+      function formatMonthlyReportMonth_(monthKey) {
+        var parts = String(monthKey || '').split('-');
+        if (parts.length !== 2) {
+          return monthKey || '이번 달';
+        }
+        return parts[0] + '년 ' + String(Number(parts[1]) || parts[1]) + '월';
+      }
+
+      function buildMonthlyReportDocId_(studentId, monthKey, subject) {
+        return 'MR-' + firebaseDirectBase64UrlEncode_([studentId, monthKey, subject].join('|')).slice(0, 90);
+      }
+
+      function getMonthlyReportsForStudent_(studentId) {
+        var rows = APP_STATE.monthlyReportsByStudentId[String(studentId || '')] || [];
+        return rows.slice().sort(function(a, b) {
+          return String(b.month || '').localeCompare(String(a.month || '')) ||
+            MONTHLY_REPORT_SUBJECTS.indexOf(a.subject) - MONTHLY_REPORT_SUBJECTS.indexOf(b.subject);
+        });
+      }
+
+      function getMonthlyReportForSubject_(studentId, monthKey, subject) {
+        var targetMonth = String(monthKey || '');
+        var targetSubject = String(subject || '');
+        return getMonthlyReportsForStudent_(studentId).find(function(item) {
+          return String(item.month || '') === targetMonth && String(item.subject || '') === targetSubject;
+        }) || null;
+      }
+
+      function getMonthlyReportDraftKey_(studentId, monthKey, subject) {
+        return [studentId, monthKey, subject].join('|');
+      }
+
+      function getMonthlyReportDraft_(studentId, monthKey, subject) {
+        var key = getMonthlyReportDraftKey_(studentId, monthKey, subject);
+        if (APP_STATE.monthlyReportDrafts[key]) {
+          return APP_STATE.monthlyReportDrafts[key];
+        }
+        var existing = getMonthlyReportForSubject_(studentId, monthKey, subject) || {};
+        return {
+          goal: existing.goal || '',
+          progress: existing.progress || '',
+          plan: existing.plan || ''
+        };
+      }
+
+      function setMonthlyReportDraftValue_(studentId, monthKey, subject, field, value) {
+        var key = getMonthlyReportDraftKey_(studentId, monthKey, subject);
+        var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
+        draft[field] = value || '';
+        APP_STATE.monthlyReportDrafts[key] = draft;
+      }
+
+      function normalizeMonthlyReportDoc_(doc) {
+        var data = doc && typeof doc.data === 'function' ? (doc.data() || {}) : (doc || {});
+        return {
+          reportId: data.reportId || (doc && doc.id) || '',
+          studentId: data.studentId || '',
+          studentName: data.studentName || '',
+          school: data.school || '',
+          grade: data.grade || '',
+          month: data.month || '',
+          subject: data.subject || '',
+          goal: data.goal || '',
+          progress: data.progress || '',
+          plan: data.plan || '',
+          createdAt: data.createdAt || '',
+          createdAtMs: data.createdAtMs || 0,
+          createdById: data.createdById || '',
+          createdByName: data.createdByName || '',
+          updatedAt: data.updatedAt || data.createdAt || '',
+          updatedAtMs: data.updatedAtMs || data.createdAtMs || 0,
+          updatedById: data.updatedById || '',
+          updatedByName: data.updatedByName || ''
+        };
+      }
+
+      function ensureMonthlyReportsLoadedForStudent_(studentId) {
+        var targetId = String(studentId || '');
+        if (!targetId || APP_STATE.monthlyReportsLoadedStudentIds[targetId] || APP_STATE.monthlyReportsLoadingStudentIds[targetId]) {
+          return;
+        }
+        APP_STATE.monthlyReportsLoadingStudentIds[targetId] = true;
+        loadMonthlyReportsForStudentViaFirebaseDirect_(targetId)
+          .then(function(rows) {
+            APP_STATE.monthlyReportsByStudentId[targetId] = rows;
+            APP_STATE.monthlyReportsLoadedStudentIds[targetId] = true;
+          })
+          .catch(function(error) {
+            if (window.console && console.warn) {
+              console.warn('Monthly report load failed:', error);
+            }
+            APP_STATE.monthlyReportsByStudentId[targetId] = APP_STATE.monthlyReportsByStudentId[targetId] || [];
+            APP_STATE.monthlyReportsLoadedStudentIds[targetId] = true;
+          })
+          .finally(function() {
+            delete APP_STATE.monthlyReportsLoadingStudentIds[targetId];
+            if (APP_STATE.selectedStudentId === targetId) {
+              renderStudents();
+            }
+            if (APP_STATE.selectedStudentDetailId === targetId) {
+              renderStudentDetailModal_();
+            }
+          });
+      }
+
+      function loadMonthlyReportsForStudentViaFirebaseDirect_(studentId) {
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('monthlyReportRead')) {
+            return [];
+          }
+          var collectionName = (state.collections && state.collections.monthlyReports) || 'studentMonthlyReports';
+          return state.firestore.collection(collectionName)
+            .where('studentId', '==', String(studentId || ''))
+            .limit(40)
+            .get()
+            .then(function(snapshot) {
+              var rows = [];
+              snapshot.forEach(function(doc) {
+                rows.push(normalizeMonthlyReportDoc_(doc));
+              });
+              return rows;
+            });
+        });
+      }
+
+      function canEditMonthlyReport_(student) {
+        if (!student || student.isRestricted) {
+          return false;
+        }
+        if (APP_STATE.isAdmin) {
+          return true;
+        }
+        var currentId = getCurrentInstructorPrimaryPermissionId_();
+        return getStudentPermissionInstructors_(student.studentId).some(function(instructor) {
+          return isInstructorIdentifierInCandidates_(currentId, instructor);
+        });
+      }
+
+      function renderMonthlyReportPanel_(student, context) {
+        var monthKey = getCurrentMonthlyReportMonth_();
+        var studentId = String(student && student.studentId || '');
+        ensureMonthlyReportsLoadedForStudent_(studentId);
+        var loaded = APP_STATE.monthlyReportsLoadedStudentIds[studentId];
+        var loading = APP_STATE.monthlyReportsLoadingStudentIds[studentId];
+        var editable = canEditMonthlyReport_(student);
+        var saving = APP_STATE.monthlyReportSavingKey === [studentId, monthKey].join('|');
+        var latest = getMonthlyReportsForStudent_(studentId).filter(function(item) {
+          return String(item.month || '') === monthKey;
+        }).sort(function(a, b) {
+          return Number(b.updatedAtMs || 0) - Number(a.updatedAtMs || 0);
+        })[0];
+        var updatedText = latest && latest.updatedAt
+          ? '최근 수정 ' + (formatTeachingLogDateTime(latest.updatedAt) || latest.updatedAt) + (latest.updatedByName ? ' · ' + latest.updatedByName : '')
+          : (loading && !loaded ? '불러오는 중' : '아직 저장된 리포트 없음');
+        return [
+          '<div class="monthly-report-panel ' + escapeAttribute(context || 'board') + '" data-monthly-report-panel data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '">',
+          '  <div class="monthly-report-head"><h4>월간 학습 리포트</h4><span class="monthly-report-month"><i data-lucide="calendar-check"></i>' + escapeHtml(formatMonthlyReportMonth_(monthKey)) + '</span></div>',
+          '  <div class="helper-text">권한 있는 선생님들이 과목별 목표, 진행 상황, 보완 계획을 공유합니다.</div>',
+          loading && !loaded ? '<div class="profile-empty">월간 학습 리포트를 불러오는 중입니다.</div>' : '',
+          '  <div class="monthly-report-grid">',
+          MONTHLY_REPORT_SUBJECTS.map(function(subject) {
+            var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
+            return [
+              '<div class="monthly-report-row" data-monthly-report-row data-subject="' + escapeAttribute(subject) + '">',
+              '  <div class="monthly-report-subject">' + escapeHtml(subject) + '</div>',
+              '  <div class="monthly-report-fields">',
+              renderMonthlyReportField_(studentId, monthKey, subject, 'goal', '목표', draft.goal, editable),
+              renderMonthlyReportField_(studentId, monthKey, subject, 'progress', '진도', draft.progress, editable),
+              renderMonthlyReportField_(studentId, monthKey, subject, 'plan', '계획/보완', draft.plan, editable),
+              '  </div>',
+              '</div>'
+            ].join('');
+          }).join(''),
+          '  </div>',
+          '  <div class="monthly-report-actions"><span class="monthly-report-updated">' + escapeHtml(updatedText) + '</span><button type="button" class="button-primary ' + (saving ? 'is-loading' : '') + '" data-action="save-monthly-report" ' + (!editable || saving ? 'disabled' : '') + '><i data-lucide="save"></i>' + (saving ? '저장 중' : '리포트 저장') + '</button></div>',
+          !editable ? '<div class="helper-text">이 학생에 대한 열람 권한이 있는 선생님 또는 관리자만 수정할 수 있습니다.</div>' : '',
+          '</div>'
+        ].join('');
+      }
+
+      function renderMonthlyReportField_(studentId, monthKey, subject, field, label, value, editable) {
+        return [
+          '<div class="monthly-report-field">',
+          '  <label>' + escapeHtml(label) + '</label>',
+          '  <textarea data-monthly-report-input data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-subject="' + escapeAttribute(subject) + '" data-field="' + escapeAttribute(field) + '" placeholder="' + escapeAttribute(label + ' 입력') + '" ' + (!editable ? 'disabled' : '') + '>' + escapeHtml(value || '') + '</textarea>',
+          '</div>'
+        ].join('');
+      }
+
+      function saveMonthlyReportsForStudentViaFirebaseDirect_(student, monthKey, rows) {
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('monthlyReportWrite')) {
+            throw new Error('Firebase 월간 학습 리포트 저장 경로가 준비되지 않았습니다.');
+          }
+          var now = new Date();
+          var user = APP_STATE.user || {};
+          var collectionName = (state.collections && state.collections.monthlyReports) || 'studentMonthlyReports';
+          var collection = state.firestore.collection(collectionName);
+          var batch = state.firestore.batch();
+          var payloads = rows.map(function(row) {
+            var reportId = buildMonthlyReportDocId_(student.studentId, monthKey, row.subject);
+            var existing = getMonthlyReportForSubject_(student.studentId, monthKey, row.subject) || {};
+            return {
+              reportId: reportId,
+              studentId: student.studentId,
+              studentName: student.studentName || '',
+              school: student.school || '',
+              grade: student.grade || '',
+              month: monthKey,
+              subject: row.subject,
+              goal: row.goal || '',
+              progress: row.progress || '',
+              plan: row.plan || '',
+              createdAt: existing.createdAt || now.toISOString(),
+              createdAtMs: existing.createdAtMs || now.getTime(),
+              createdById: existing.createdById || user.userId || '',
+              createdByName: existing.createdByName || user.name || user.userId || '',
+              updatedAt: now.toISOString(),
+              updatedAtMs: now.getTime(),
+              updatedById: user.userId || '',
+              updatedByName: user.name || user.userId || ''
+            };
+          });
+          payloads.forEach(function(payload) {
+            batch.set(collection.doc(payload.reportId), payload, { merge: true });
+          });
+          return batch.commit().then(function() {
+            return payloads.map(normalizeMonthlyReportDoc_);
+          });
+        });
+      }
+
+      function mergeMonthlyReportsInState_(studentId, rows) {
+        var targetId = String(studentId || '');
+        var current = (APP_STATE.monthlyReportsByStudentId[targetId] || []).slice();
+        var map = {};
+        current.forEach(function(item) {
+          map[String(item.reportId || buildMonthlyReportDocId_(item.studentId, item.month, item.subject))] = item;
+        });
+        (rows || []).forEach(function(item) {
+          var normalized = normalizeMonthlyReportDoc_(item);
+          map[String(normalized.reportId || buildMonthlyReportDocId_(normalized.studentId, normalized.month, normalized.subject))] = normalized;
+          delete APP_STATE.monthlyReportDrafts[getMonthlyReportDraftKey_(normalized.studentId, normalized.month, normalized.subject)];
+        });
+        APP_STATE.monthlyReportsByStudentId[targetId] = Object.keys(map).map(function(key) {
+          return map[key];
+        });
+        APP_STATE.monthlyReportsLoadedStudentIds[targetId] = true;
+      }
+
+      function handleMonthlyReportInput_(event) {
+        var input = event.target.closest && event.target.closest('[data-monthly-report-input]');
+        if (!input) {
+          return false;
+        }
+        setMonthlyReportDraftValue_(
+          input.getAttribute('data-student-id') || '',
+          input.getAttribute('data-month') || '',
+          input.getAttribute('data-subject') || '',
+          input.getAttribute('data-field') || '',
+          input.value || ''
+        );
+        return true;
+      }
+
+      function handleMonthlyReportSave_(button) {
+        var panel = button && button.closest('[data-monthly-report-panel]');
+        if (!panel) {
+          return;
+        }
+        var studentId = panel.getAttribute('data-student-id') || '';
+        var monthKey = panel.getAttribute('data-month') || getCurrentMonthlyReportMonth_();
+        var student = findStudentById_(studentId);
+        if (!student) {
+          setNotice('월간 학습 리포트를 저장할 학생을 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        if (!canEditMonthlyReport_(student)) {
+          setNotice('이 학생의 월간 학습 리포트를 수정할 권한이 없습니다.', 'warning');
+          return;
+        }
+        var rows = MONTHLY_REPORT_SUBJECTS.map(function(subject) {
+          var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
+          return {
+            subject: subject,
+            goal: draft.goal || '',
+            progress: draft.progress || '',
+            plan: draft.plan || ''
+          };
+        });
+        var savingKey = [studentId, monthKey].join('|');
+        APP_STATE.monthlyReportSavingKey = savingKey;
+        setLoading('월간 학습 리포트를 저장하는 중입니다.', true);
+        renderStudents();
+        if (APP_STATE.selectedStudentDetailId) {
+          renderStudentDetailModal_();
+        }
+        saveMonthlyReportsForStudentViaFirebaseDirect_(student, monthKey, rows)
+          .then(function(savedRows) {
+            mergeMonthlyReportsInState_(studentId, savedRows);
+            setNotice('월간 학습 리포트가 저장되었습니다.', 'success');
+          })
+          .catch(handleApiError_)
+          .finally(function() {
+            APP_STATE.monthlyReportSavingKey = '';
+            clearLoading();
+            renderStudents();
+            if (APP_STATE.selectedStudentDetailId) {
+              renderStudentDetailModal_();
+            }
+          });
+      }
+
       function renderStudentProfileBoard_(student) {
         if (!student) {
           return '<div class="profile-board-body"><div class="empty-state">선택된 학생이 없습니다.</div></div>';
@@ -22363,6 +22874,7 @@
                renderStudentLearningSummary_(student),
           '  </section>',
           '  <section class="profile-block"><h4>강사 권한 맵</h4>' + renderPermissionRelationMap_(student, permissions) + '</section>',
+          '  <section class="profile-block">' + renderMonthlyReportPanel_(student, 'board') + '</section>',
           '  <section class="profile-block"><div class="profile-block-title-row"><h4>상담 기록 preview</h4><span class="ops-chip slate">' + escapeHtml(String((student.logs || []).length)) + '건</span></div>' + renderStudentLogPreviewPanel_(student, { context: 'board', pageSize: 5, showMore: true, showComposer: true }) + '</section>',
           '  <section class="profile-block"><h4>시험 대비/직보 상태</h4>' + renderStudentExamJikboPanel_(examItems, jikbo) + '</section>',
           '  <section class="profile-block"><h4>문제 자료 연결</h4>' + renderStudentMaterialConnectionPanel_(student, materialInfo) + '</section>',
@@ -22971,6 +23483,12 @@
           return;
         }
 
+        var saveMonthlyReportButton = event.target.closest('[data-action="save-monthly-report"]');
+        if (saveMonthlyReportButton) {
+          handleMonthlyReportSave_(saveMonthlyReportButton);
+          return;
+        }
+
         var cancelEditButton = event.target.closest('[data-action="cancel-student-log-edit"]');
         if (cancelEditButton) {
           cancelStudentLogEdit_();
@@ -23075,6 +23593,7 @@
         return [
           '<div class="student-detail-tabs">',
           '  <button type="button" class="student-detail-tab ' + (active === 'logs' ? 'active' : '') + '" data-student-detail-tab="logs"><i data-lucide="messages-square"></i><span>상담 기록</span><strong>' + escapeHtml(String((logs || []).length)) + '건</strong></button>',
+          '  <button type="button" class="student-detail-tab ' + (active === 'monthly' ? 'active' : '') + '" data-student-detail-tab="monthly"><i data-lucide="calendar-check"></i><span>월간 리포트</span><strong>5과목</strong></button>',
           '  <button type="button" class="student-detail-tab ' + (active === 'grades' ? 'active' : '') + '" data-student-detail-tab="grades"><i data-lucide="chart-line"></i><span>성적 데이터</span><strong>' + escapeHtml(String(gradeCount)) + '건</strong></button>',
           '</div>'
         ].join('');
@@ -23083,6 +23602,9 @@
       function renderStudentDetailTabContent_(student, logs) {
         if ((APP_STATE.studentDetailTab || 'logs') === 'grades') {
           return renderStudentGradeProfilePanel_(student);
+        }
+        if ((APP_STATE.studentDetailTab || 'logs') === 'monthly') {
+          return '<div class="student-detail-tab-panel">' + renderMonthlyReportPanel_(student, 'detail') + '</div>';
         }
         return '<div class="student-detail-tab-panel"><div class="student-detail-section-head"><h4>상담 기록</h4><span class="ops-chip slate">' + escapeHtml(String((logs || []).length)) + '건</span></div>' + renderStudentLogPreviewPanel_(student, { context: 'detail', pageSize: 5, showComposer: true }) + '</div>';
       }
@@ -24395,6 +24917,12 @@
           return;
         }
 
+        var quickPermissionButton = event.target.closest('[data-action="quick-assign-permission"]');
+        if (quickPermissionButton) {
+          handleQuickPermissionAssign_(quickPermissionButton.getAttribute('data-student-id') || '');
+          return;
+        }
+
         var viewProfileButton = event.target.closest('[data-action="show-student-profile"]');
         if (viewProfileButton) {
           var profileRow = event.target.closest('[data-student-id]');
@@ -24463,6 +24991,12 @@
         if (clearInstructorFilter) {
           APP_STATE.studentPermissionInstructorFilter = '';
           renderStudents();
+          return;
+        }
+
+        var saveMonthlyReportButton = event.target.closest('[data-action="save-monthly-report"]');
+        if (saveMonthlyReportButton) {
+          handleMonthlyReportSave_(saveMonthlyReportButton);
           return;
         }
 
@@ -24616,6 +25150,9 @@
       }
 
       function handleStudentListInput_(event) {
+        if (handleMonthlyReportInput_(event)) {
+          return;
+        }
         if (handleStudentLogAuthorInput_(event)) {
           return;
         }
@@ -24813,6 +25350,53 @@
             handleApiError_(error);
             renderStudents();
           })
+          .finally(clearLoading);
+      }
+
+      function handleQuickPermissionAssign_(studentId) {
+        if (!APP_STATE.isAdmin) {
+          setNotice('학생 열람 권한 부여는 관리자만 사용할 수 있습니다.', 'warning');
+          return;
+        }
+        var student = findStudentById_(studentId);
+        if (!student) {
+          setNotice('권한을 부여할 학생을 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        var keyword = window.prompt((student.studentName || '학생') + '에게 열람 권한을 부여할 강사명을 입력하세요.');
+        if (keyword === null) {
+          return;
+        }
+        var instructor = resolveInstructorByKeyword_(keyword);
+        if (!instructor) {
+          setNotice('입력한 강사를 찾지 못했습니다. 권한 관리 화면에서 검색해 주세요.', 'warning');
+          return;
+        }
+        var existingIds = getStudentPermissionInstructors_(student.studentId).map(function(item) {
+          return item.userId || item.instructorId;
+        }).filter(Boolean);
+        var instructorId = getInstructorPrimaryPermissionId_(instructor);
+        var nextIds = uniqueList_(existingIds.concat([instructorId]));
+        setLoading('학생 열람 권한을 빠르게 부여하는 중입니다.', true);
+        saveStudentPermissionsViaFirebaseDirect_(student.studentId, nextIds)
+          .catch(function(error) {
+            if (window.console && console.warn) {
+              console.warn('Firebase direct quick permission save failed; falling back to Apps Script:', error);
+            }
+            return apiRequest('savePermissions', {
+              token: APP_STATE.token,
+              studentId: student.studentId,
+              instructorIds: JSON.stringify(nextIds)
+            });
+          })
+          .then(function(result) {
+            applyPermissionSaveResult_(result, student.studentId);
+            APP_STATE.selectedStudentId = student.studentId;
+            renderAll();
+            switchView('students');
+            setNotice((instructor.name || instructor.userId || '강사') + '에게 ' + (student.studentName || '학생') + ' 열람 권한을 부여했습니다.', 'success');
+          })
+          .catch(handleApiError_)
           .finally(clearLoading);
       }
 
@@ -35246,6 +35830,11 @@
         APP_STATE.studentLogEditing = null;
         APP_STATE.studentLogSavingRows = {};
         APP_STATE.studentLogReactionSaving = {};
+        APP_STATE.monthlyReportsByStudentId = {};
+        APP_STATE.monthlyReportsLoadedStudentIds = {};
+        APP_STATE.monthlyReportsLoadingStudentIds = {};
+        APP_STATE.monthlyReportDrafts = {};
+        APP_STATE.monthlyReportSavingKey = '';
         APP_STATE.selectedHomeroomInstructorId = '';
         APP_STATE.selectedStudentId = '';
         APP_STATE.selectedStudentDetailId = '';

@@ -180,6 +180,16 @@ service cloud.firestore {
       allow create, update, delete: if isStaffOrAdmin();
     }
 
+    match /studentMonthlyReports/{reportId} {
+      allow get, list: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.studentId is string
+        && request.resource.data.month is string
+        && request.resource.data.subject in ['국어', '수학', '영어', '과학', '사회']
+        && request.resource.data.updatedById == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
     match /events/{eventId} {
       allow get, list: if signedIn();
       allow create, update, delete: if isStaffOrAdmin();
