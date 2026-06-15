@@ -7997,6 +7997,11 @@
         box-shadow: 0 7px 18px rgba(37, 99, 235, 0.22);
       }
 
+      .profile-folder-tab.monthly-tab.active {
+        background: #059669;
+        box-shadow: 0 7px 18px rgba(5, 150, 105, 0.22);
+      }
+
       .profile-tab-panel {
         min-width: 0;
       }
@@ -8004,6 +8009,8 @@
       .monthly-report-panel {
         display: grid;
         gap: 10px;
+        padding: 1px;
+        --monthly-green: #059669;
       }
 
       .monthly-report-head {
@@ -8031,13 +8038,111 @@
         gap: 6px;
         min-height: 28px;
         padding: 0 9px;
-        border: 1px solid #bfdbfe;
+        border: 1px solid #bbf7d0;
         border-radius: 7px;
-        background: #eff6ff;
-        color: #174ea6;
+        background: #ecfdf5;
+        color: #047857;
         font-size: 0.72rem;
         font-weight: 900;
         white-space: nowrap;
+      }
+
+      .monthly-subject-tabs {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        border-color: #bbf7d0;
+        background: #f0fdf4;
+      }
+
+      .monthly-subject-tab {
+        color: var(--subject-color, #475569);
+        background: var(--subject-bg, transparent);
+        border: 1px solid var(--subject-border, transparent);
+      }
+
+      .monthly-subject-tab.active {
+        background: var(--subject-color, #059669);
+        color: #fff;
+        border-color: var(--subject-color, #059669);
+        box-shadow: 0 7px 18px rgba(5, 150, 105, 0.18);
+      }
+
+      .monthly-report-summary {
+        display: grid;
+        gap: 6px;
+        padding: 10px 11px;
+        border: 1px solid var(--subject-border, #bbf7d0);
+        border-radius: 8px;
+        background: linear-gradient(180deg, var(--subject-bg, #ecfdf5), #fff);
+      }
+
+      .monthly-report-summary.empty {
+        border-style: dashed;
+        background: #f8fafc;
+        color: #64748b;
+        font-size: 0.74rem;
+        font-weight: 850;
+      }
+
+      .monthly-report-summary-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: var(--subject-color, #047857);
+        font: inherit;
+        font-size: 0.82rem;
+        font-weight: 950;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .monthly-report-summary-title span,
+      .monthly-report-summary-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .monthly-report-summary-title svg {
+        width: 15px;
+        height: 15px;
+        stroke-width: 2.35;
+      }
+
+      .monthly-report-summary-meta {
+        color: #64748b;
+        font-size: 0.7rem;
+        font-weight: 850;
+      }
+
+      .monthly-report-summary-detail {
+        display: grid;
+        gap: 7px;
+        padding-top: 6px;
+        border-top: 1px dashed var(--subject-border, #bbf7d0);
+      }
+
+      .monthly-report-summary-detail div {
+        display: grid;
+        gap: 3px;
+      }
+
+      .monthly-report-summary-detail strong {
+        color: #334155;
+        font-size: 0.68rem;
+        font-weight: 950;
+      }
+
+      .monthly-report-summary-detail p {
+        margin: 0;
+        white-space: pre-wrap;
+        color: #334155;
+        font-size: 0.74rem;
+        line-height: 1.5;
       }
 
       .monthly-report-grid {
@@ -8050,22 +8155,29 @@
         grid-template-columns: 72px minmax(0, 1fr);
         gap: 8px;
         padding: 9px;
-        border: 1px solid #e2e8f0;
+        border: 1px solid var(--subject-border, #e2e8f0);
         border-radius: 8px;
-        background: #f8fafc;
+        background: var(--subject-bg, #f8fafc);
       }
 
       .monthly-report-subject {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 5px;
         min-height: 32px;
         border-radius: 7px;
         background: #ffffff;
-        border: 1px solid #dbe5f3;
-        color: #0f172a;
+        border: 1px solid var(--subject-border, #dbe5f3);
+        color: var(--subject-color, #0f172a);
         font-size: 0.78rem;
         font-weight: 950;
+      }
+
+      .monthly-report-subject svg {
+        width: 14px;
+        height: 14px;
+        stroke-width: 2.35;
       }
 
       .monthly-report-fields {
@@ -8124,6 +8236,10 @@
       }
 
       @media (max-width: 900px) {
+        .monthly-subject-tabs {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
         .monthly-report-row {
           grid-template-columns: minmax(0, 1fr);
         }
@@ -10346,6 +10462,39 @@
         color: #1d4ed8;
         font-size: 0.78rem;
         font-weight: 900;
+      }
+
+      .quick-permission-search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 40px;
+        padding: 0 12px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #f8fbff;
+        color: #64748b;
+      }
+
+      .quick-permission-search svg {
+        width: 16px;
+        height: 16px;
+        stroke-width: 2.4;
+      }
+
+      .quick-permission-search input {
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: #0f172a;
+        font: inherit;
+        font-size: 0.82rem;
+        font-weight: 850;
+      }
+
+      .quick-permission-search input::placeholder {
+        color: #94a3b8;
       }
 
       .quick-permission-groups {
@@ -16235,11 +16384,14 @@
         quickPermissionModalOpen: false,
         quickPermissionTargetStudentId: '',
         quickPermissionSelections: {},
+        quickPermissionSearchKeyword: '',
         quickPermissionSaving: false,
         monthlyReportsByStudentId: {},
         monthlyReportsLoadedStudentIds: {},
         monthlyReportsLoadingStudentIds: {},
         monthlyReportDrafts: {},
+        monthlyReportSubjectTabs: {},
+        monthlyReportExpandedRows: {},
         monthlyReportSavingKey: '',
         selectedHomeroomInstructorId: '',
         homeroomTeacherSearchKeyword: '',
@@ -22638,7 +22790,7 @@
         var visible = permissions.slice(0, limit || permissions.length);
         var html = visible.map(function(item, index) {
           var tone = index === 0 ? 'primary' : 'secondary';
-          return renderInstructorPermissionChip_(item, tone, 'button');
+          return renderInstructorPermissionChip_(item, tone, 'button', student);
         }).join('');
         if (permissions.length > visible.length) {
           html += '<span class="teacher-chip extra">+' + escapeHtml(String(permissions.length - visible.length)) + '</span>';
@@ -22666,13 +22818,16 @@
         return '<button class="mini-button student-permission-request-button" type="button" data-action="request-student-permission"><i data-lucide="shield-plus"></i> 권한 요청</button>';
       }
 
-      function renderInstructorPermissionChip_(item, tone, tagName) {
+      function renderInstructorPermissionChip_(item, tone, tagName, student) {
         var visual = getSubjectVisual_(item && item.subject || '');
         var label = item && (item.name || item.instructorName || item.userId || item.instructorId) || '-';
         var id = item && (item.userId || item.instructorId) || '';
         var style = buildTeacherVisualStyle_(visual);
         if (tagName === 'span') {
           return '<span class="teacher-chip ' + escapeAttribute(tone || '') + '" style="' + escapeAttribute(style) + '"><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(label) + '</span>';
+        }
+        if (APP_STATE.isAdmin && student && student.studentId) {
+          return '<button type="button" class="teacher-chip ' + escapeAttribute(tone || '') + '" style="' + escapeAttribute(style) + '" data-action="quick-assign-permission" data-student-id="' + escapeAttribute(student.studentId || '') + '" title="강사 열람 권한 수정"><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(label) + '</button>';
         }
         return '<button type="button" class="teacher-chip ' + escapeAttribute(tone || '') + '" style="' + escapeAttribute(style) + '" data-action="filter-instructor" data-instructor-id="' + escapeAttribute(id) + '"><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(label) + '</button>';
       }
@@ -22730,6 +22885,14 @@
         return [studentId, monthKey, subject].join('|');
       }
 
+      function getMonthlyReportPanelKey_(studentId, monthKey) {
+        return [studentId || '', monthKey || getCurrentMonthlyReportMonth_()].join('|');
+      }
+
+      function getMonthlyReportDetailKey_(studentId, monthKey, subject) {
+        return [studentId || '', monthKey || '', subject || ''].join('|');
+      }
+
       function getMonthlyReportLoadKey_(studentId, monthKey) {
         return [studentId || '', monthKey || getCurrentMonthlyReportMonth_()].join('|');
       }
@@ -22752,6 +22915,54 @@
         var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
         draft[field] = value || '';
         APP_STATE.monthlyReportDrafts[key] = draft;
+      }
+
+      function getMonthlyReportActiveSubject_(studentId, monthKey) {
+        var key = getMonthlyReportPanelKey_(studentId, monthKey);
+        var subject = APP_STATE.monthlyReportSubjectTabs[key];
+        return MONTHLY_REPORT_SUBJECTS.indexOf(subject) !== -1 ? subject : MONTHLY_REPORT_SUBJECTS[0];
+      }
+
+      function renderMonthlyReportSubjectTabs_(studentId, monthKey, activeSubject) {
+        return [
+          '<div class="profile-folder-tabs monthly-subject-tabs" role="tablist" aria-label="월간 리포트 과목 탭">',
+          MONTHLY_REPORT_SUBJECTS.map(function(subject) {
+            var visual = getSubjectVisual_(subject);
+            var active = subject === activeSubject;
+            return '<button type="button" class="profile-folder-tab monthly-subject-tab ' + (active ? 'active' : '') + '" style="' + escapeAttribute(buildSubjectVisualStyle_(visual, 'subject')) + '" role="tab" aria-selected="' + (active ? 'true' : 'false') + '" data-action="set-monthly-report-subject" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '"><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(subject) + '</button>';
+          }).join(''),
+          '</div>'
+        ].join('');
+      }
+
+      function hasMonthlyReportContent_(report) {
+        return Boolean(report && (String(report.goal || '').trim() || String(report.progress || '').trim() || String(report.plan || '').trim()));
+      }
+
+      function renderMonthlyReportSummary_(studentId, monthKey, subject) {
+        var report = getMonthlyReportForSubject_(studentId, monthKey, subject);
+        if (!hasMonthlyReportContent_(report)) {
+          return '<div class="monthly-report-summary empty">아직 저장된 ' + escapeHtml(subject) + ' 리포트가 없습니다.</div>';
+        }
+        var visual = getSubjectVisual_(subject);
+        var detailKey = getMonthlyReportDetailKey_(studentId, monthKey, subject);
+        var expanded = Boolean(APP_STATE.monthlyReportExpandedRows[detailKey]);
+        var author = report.updatedByName || report.createdByName || '입력자 미상';
+        var time = report.updatedAt || report.createdAt || '';
+        var timeText = time ? (formatTeachingLogDateTime(time) || time) : '일시 미상';
+        return [
+          '<article class="monthly-report-summary" style="' + escapeAttribute(buildSubjectVisualStyle_(visual, 'subject')) + '">',
+          '  <button type="button" class="monthly-report-summary-title" data-action="toggle-monthly-report-detail" data-monthly-detail-key="' + escapeAttribute(detailKey) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '"><span><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(subject) + ' 월간 리포트</span><i data-lucide="' + (expanded ? 'chevron-up' : 'chevron-down') + '"></i></button>',
+          '  <div class="monthly-report-summary-meta">' + escapeHtml(author) + ' · ' + escapeHtml(timeText) + '</div>',
+          expanded ? [
+            '  <div class="monthly-report-summary-detail">',
+            '    <div><strong>목표</strong><p>' + escapeHtml(report.goal || '-') + '</p></div>',
+            '    <div><strong>진도</strong><p>' + escapeHtml(report.progress || '-') + '</p></div>',
+            '    <div><strong>계획/보완</strong><p>' + escapeHtml(report.plan || '-') + '</p></div>',
+            '  </div>'
+          ].join('') : '',
+          '</article>'
+        ].join('');
       }
 
       function normalizeMonthlyReportDoc_(doc) {
@@ -22862,6 +23073,9 @@
         var loading = APP_STATE.monthlyReportsLoadingStudentIds[loadKey];
         var editable = canEditMonthlyReport_(student);
         var saving = APP_STATE.monthlyReportSavingKey === [studentId, monthKey].join('|');
+        var activeSubject = getMonthlyReportActiveSubject_(studentId, monthKey);
+        var activeDraft = getMonthlyReportDraft_(studentId, monthKey, activeSubject);
+        var activeVisual = getSubjectVisual_(activeSubject);
         var latest = getMonthlyReportsForStudent_(studentId).filter(function(item) {
           return String(item.month || '') === monthKey;
         }).sort(function(a, b) {
@@ -22875,20 +23089,17 @@
           '  <div class="monthly-report-head"><h4>월간 학습 리포트</h4><div class="monthly-report-head-actions"><button type="button" class="profile-link-button" data-action="refresh-monthly-report"><i data-lucide="refresh-cw"></i>새로고침</button><span class="monthly-report-month"><i data-lucide="calendar-check"></i>' + escapeHtml(formatMonthlyReportMonth_(monthKey)) + '</span></div></div>',
           '  <div class="helper-text">권한 있는 선생님들이 과목별 목표, 진행 상황, 보완 계획을 공유합니다.</div>',
           loading && !loaded ? '<div class="profile-empty">월간 학습 리포트를 불러오는 중입니다.</div>' : '',
+          renderMonthlyReportSubjectTabs_(studentId, monthKey, activeSubject),
+          renderMonthlyReportSummary_(studentId, monthKey, activeSubject),
           '  <div class="monthly-report-grid">',
-          MONTHLY_REPORT_SUBJECTS.map(function(subject) {
-            var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
-            return [
-              '<div class="monthly-report-row" data-monthly-report-row data-subject="' + escapeAttribute(subject) + '">',
-              '  <div class="monthly-report-subject">' + escapeHtml(subject) + '</div>',
-              '  <div class="monthly-report-fields">',
-              renderMonthlyReportField_(studentId, monthKey, subject, 'goal', '목표', draft.goal, editable),
-              renderMonthlyReportField_(studentId, monthKey, subject, 'progress', '진도', draft.progress, editable),
-              renderMonthlyReportField_(studentId, monthKey, subject, 'plan', '계획/보완', draft.plan, editable),
-              '  </div>',
-              '</div>'
-            ].join('');
-          }).join(''),
+          '<div class="monthly-report-row" style="' + escapeAttribute(buildSubjectVisualStyle_(activeVisual, 'subject')) + '" data-monthly-report-row data-subject="' + escapeAttribute(activeSubject) + '">',
+          '  <div class="monthly-report-subject"><i data-lucide="' + escapeAttribute(activeVisual.icon) + '"></i>' + escapeHtml(activeSubject) + '</div>',
+          '  <div class="monthly-report-fields">',
+          renderMonthlyReportField_(studentId, monthKey, activeSubject, 'goal', '목표', activeDraft.goal, editable),
+          renderMonthlyReportField_(studentId, monthKey, activeSubject, 'progress', '진도', activeDraft.progress, editable),
+          renderMonthlyReportField_(studentId, monthKey, activeSubject, 'plan', '계획/보완', activeDraft.plan, editable),
+          '  </div>',
+          '</div>',
           '  </div>',
           '  <div class="monthly-report-actions"><span class="monthly-report-updated">' + escapeHtml(updatedText) + '</span><button type="button" class="button-primary ' + (saving ? 'is-loading' : '') + '" data-action="save-monthly-report" ' + (!editable || saving ? 'disabled' : '') + '><i data-lucide="save"></i>' + (saving ? '저장 중' : '리포트 저장') + '</button></div>',
           !editable ? '<div class="helper-text">이 학생에 대한 열람 권한이 있는 선생님 또는 관리자만 수정할 수 있습니다.</div>' : '',
@@ -23070,7 +23281,7 @@
           '  <div class="profile-folder-tabs" role="tablist" aria-label="프로필 보드 기록 탭">',
                tabs.map(function(tab) {
                  var active = tab.key === current;
-                 return '<button type="button" class="profile-folder-tab ' + (active ? 'active' : '') + '" role="tab" aria-selected="' + (active ? 'true' : 'false') + '" data-action="set-profile-board-tab" data-profile-tab="' + escapeAttribute(tab.key) + '" data-student-id="' + escapeAttribute(studentId) + '"><i data-lucide="' + escapeAttribute(tab.icon) + '"></i>' + escapeHtml(tab.label) + '</button>';
+                 return '<button type="button" class="profile-folder-tab ' + (tab.key === 'monthly' ? 'monthly-tab ' : '') + (active ? 'active' : '') + '" role="tab" aria-selected="' + (active ? 'true' : 'false') + '" data-action="set-profile-board-tab" data-profile-tab="' + escapeAttribute(tab.key) + '" data-student-id="' + escapeAttribute(studentId) + '"><i data-lucide="' + escapeAttribute(tab.icon) + '"></i>' + escapeHtml(tab.label) + '</button>';
                }).join(''),
           '  </div>',
           '  <div class="profile-tab-panel">' + body + '</div>',
@@ -24520,6 +24731,9 @@
 
       function getQuickPermissionInstructorSubject_(instructor) {
         var subject = String(instructor && (instructor.subject || instructor.subjectCategory || instructor.primarySubject) || '').trim();
+        if (/생명|화학|물리|지구과학|통합과학/.test(subject)) {
+          return '과학';
+        }
         return subject || '과목 미지정';
       }
 
@@ -24527,9 +24741,22 @@
         var subjectOrder = ['국어', '수학', '영어', '과학', '사회', '한국사', '과목 미지정'];
         var groups = {};
         var seen = {};
+        var keyword = normalizeSearchText(APP_STATE.quickPermissionSearchKeyword || '');
         (APP_STATE.instructors || []).filter(function(instructor) {
           var id = getInstructorPrimaryPermissionId_(instructor);
           if (!id || seen[id] || !(instructor.name || instructor.userId || instructor.loginId)) {
+            return false;
+          }
+          var subject = getQuickPermissionInstructorSubject_(instructor);
+          var haystack = normalizeSearchText([
+            instructor.name,
+            instructor.userId,
+            instructor.loginId,
+            instructor.phone,
+            instructor.subject,
+            subject
+          ].filter(Boolean).join(' '));
+          if (keyword && haystack.indexOf(keyword) === -1) {
             return false;
           }
           seen[id] = true;
@@ -24559,13 +24786,15 @@
         }
         var selectedIds = getQuickPermissionSelectedIds_();
         var groups = getQuickPermissionInstructorGroups_();
+        var keyword = APP_STATE.quickPermissionSearchKeyword || '';
         return [
           '<div class="quick-permission-backdrop" data-quick-permission-close="true">',
           '  <section class="quick-permission-modal" role="dialog" aria-modal="true" aria-label="학생 열람 권한 빠른 설정">',
           '    <div class="school-modal-head"><div><h3>' + escapeHtml(student.studentName || '학생') + ' 열람 권한 설정</h3><p>' + renderStudentSchoolGradeHtml_(student, true) + ' · 실제 등록된 강사 계정만 선택할 수 있습니다.</p></div><button type="button" class="icon-only-button" data-quick-permission-close="true" aria-label="닫기"><i data-lucide="x"></i></button></div>',
+          '    <label class="quick-permission-search"><i data-lucide="search"></i><input type="search" data-quick-permission-search placeholder="강사명, 과목, 연락처 검색" value="' + escapeAttribute(keyword) + '"></label>',
           '    <div class="quick-permission-summary"><span>선택된 강사 ' + escapeHtml(String(selectedIds.length)) + '명</span><span>선택 해제 후 저장하면 해당 강사의 열람 권한이 제거됩니다.</span></div>',
           '    <div class="quick-permission-groups">',
-               groups.length ? groups.map(renderQuickPermissionGroup_).join('') : '<div class="school-empty-mini">선택 가능한 강사 계정이 없습니다.</div>',
+               groups.length ? groups.map(renderQuickPermissionGroup_).join('') : '<div class="school-empty-mini">검색 조건에 맞는 강사 계정이 없습니다.</div>',
           '    </div>',
           '    <div class="school-modal-actions"><button type="button" class="secondary-button" data-quick-permission-close="true">취소</button><button type="button" class="primary-button ' + (APP_STATE.quickPermissionSaving ? 'is-loading' : '') + '" data-quick-permission-save="true" ' + (APP_STATE.quickPermissionSaving ? 'disabled' : '') + '><i data-lucide="save"></i>' + (APP_STATE.quickPermissionSaving ? '저장 중' : '권한 저장') + '</button></div>',
           '  </section>',
@@ -24588,8 +24817,10 @@
       function renderQuickPermissionInstructorCard_(instructor) {
         var id = getInstructorPrimaryPermissionId_(instructor);
         var selected = Boolean(APP_STATE.quickPermissionSelections[id]);
-        var visual = getSubjectVisual_(getQuickPermissionInstructorSubject_(instructor));
-        var meta = [instructor.loginId || instructor.userId, getQuickPermissionInstructorSubject_(instructor)].filter(Boolean).join(' · ');
+        var subject = getQuickPermissionInstructorSubject_(instructor);
+        var rawSubject = String(instructor && (instructor.subject || instructor.subjectCategory || instructor.primarySubject) || '').trim();
+        var visual = getSubjectVisual_(subject);
+        var meta = [instructor.loginId || instructor.userId, rawSubject || subject].filter(Boolean).join(' · ');
         return [
           '<button type="button" class="quick-permission-card ' + (selected ? 'selected' : '') + '" data-quick-permission-instructor="' + escapeAttribute(id) + '" aria-pressed="' + (selected ? 'true' : 'false') + '">',
           '  <strong><i data-lucide="' + escapeAttribute(selected ? 'check-circle-2' : visual.icon) + '"></i>' + escapeHtml(instructor.name || instructor.userId || id) + '</strong>',
@@ -25281,6 +25512,34 @@
           return;
         }
 
+        var monthlySubjectButton = event.target.closest('[data-action="set-monthly-report-subject"]');
+        if (monthlySubjectButton) {
+          var monthlyStudentId = monthlySubjectButton.getAttribute('data-student-id') || APP_STATE.selectedStudentId || '';
+          var monthlyMonth = monthlySubjectButton.getAttribute('data-month') || getCurrentMonthlyReportMonth_();
+          var monthlySubject = monthlySubjectButton.getAttribute('data-monthly-subject') || MONTHLY_REPORT_SUBJECTS[0];
+          if (MONTHLY_REPORT_SUBJECTS.indexOf(monthlySubject) !== -1) {
+            APP_STATE.monthlyReportSubjectTabs[getMonthlyReportPanelKey_(monthlyStudentId, monthlyMonth)] = monthlySubject;
+          }
+          renderStudents();
+          if (APP_STATE.selectedStudentDetailId) {
+            renderStudentDetailModal_();
+          }
+          return;
+        }
+
+        var monthlyDetailButton = event.target.closest('[data-action="toggle-monthly-report-detail"]');
+        if (monthlyDetailButton) {
+          var detailKey = monthlyDetailButton.getAttribute('data-monthly-detail-key') || '';
+          if (detailKey) {
+            APP_STATE.monthlyReportExpandedRows[detailKey] = !APP_STATE.monthlyReportExpandedRows[detailKey];
+          }
+          renderStudents();
+          if (APP_STATE.selectedStudentDetailId) {
+            renderStudentDetailModal_();
+          }
+          return;
+        }
+
         var viewProfileButton = event.target.closest('[data-action="show-student-profile"]');
         if (viewProfileButton) {
           var profileRow = event.target.closest('[data-student-id]');
@@ -25522,6 +25781,24 @@
           return;
         }
 
+        var quickPermissionSearch = event.target.closest('[data-quick-permission-search]');
+        if (quickPermissionSearch) {
+          APP_STATE.quickPermissionSearchKeyword = quickPermissionSearch.value || '';
+          var selectionStart = quickPermissionSearch.selectionStart;
+          var selectionEnd = quickPermissionSearch.selectionEnd;
+          renderStudents();
+          requestAnimationFrame(function() {
+            var restored = document.querySelector('[data-quick-permission-search]');
+            if (restored) {
+              restored.focus();
+              try {
+                restored.setSelectionRange(selectionStart, selectionEnd);
+              } catch (error) {}
+            }
+          });
+          return;
+        }
+
         var schoolSearch = event.target.closest('[data-school-mode-search]');
         if (schoolSearch) {
           APP_STATE.schoolModeSearch = schoolSearch.value || '';
@@ -25739,6 +26016,7 @@
         APP_STATE.quickPermissionModalOpen = true;
         APP_STATE.quickPermissionTargetStudentId = student.studentId;
         APP_STATE.quickPermissionSelections = selections;
+        APP_STATE.quickPermissionSearchKeyword = '';
         APP_STATE.quickPermissionSaving = false;
         APP_STATE.selectedStudentId = student.studentId;
         renderStudents();
@@ -25748,6 +26026,7 @@
         APP_STATE.quickPermissionModalOpen = false;
         APP_STATE.quickPermissionTargetStudentId = '';
         APP_STATE.quickPermissionSelections = {};
+        APP_STATE.quickPermissionSearchKeyword = '';
         APP_STATE.quickPermissionSaving = false;
         renderStudents();
       }
@@ -36242,11 +36521,14 @@
         APP_STATE.quickPermissionModalOpen = false;
         APP_STATE.quickPermissionTargetStudentId = '';
         APP_STATE.quickPermissionSelections = {};
+        APP_STATE.quickPermissionSearchKeyword = '';
         APP_STATE.quickPermissionSaving = false;
         APP_STATE.monthlyReportsByStudentId = {};
         APP_STATE.monthlyReportsLoadedStudentIds = {};
         APP_STATE.monthlyReportsLoadingStudentIds = {};
         APP_STATE.monthlyReportDrafts = {};
+        APP_STATE.monthlyReportSubjectTabs = {};
+        APP_STATE.monthlyReportExpandedRows = {};
         APP_STATE.monthlyReportSavingKey = '';
         APP_STATE.selectedHomeroomInstructorId = '';
         APP_STATE.selectedStudentId = '';
