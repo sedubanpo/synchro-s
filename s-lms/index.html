@@ -7442,11 +7442,12 @@
       }
 
       .student-name-line {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 6px;
         flex-wrap: nowrap;
         max-width: 100%;
+        vertical-align: middle;
       }
 
       .student-name-main strong {
@@ -7459,6 +7460,7 @@
         display: inline;
         min-width: 0;
         flex: 0 1 auto;
+        white-space: nowrap;
       }
 
       .student-new-badge {
@@ -7950,6 +7952,53 @@
         margin: 0 0 10px;
         font-size: 0.88rem;
         font-weight: 900;
+      }
+
+      .profile-tabbed-block {
+        display: grid;
+        gap: 12px;
+      }
+
+      .profile-folder-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid #e2e8f0;
+        border-radius: 999px;
+        background: #f8fafc;
+      }
+
+      .profile-folder-tab {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 32px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #64748b;
+        font-size: 0.78rem;
+        font-weight: 950;
+        cursor: pointer;
+        transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+      }
+
+      .profile-folder-tab svg {
+        width: 14px;
+        height: 14px;
+        stroke-width: 2.35;
+      }
+
+      .profile-folder-tab.active {
+        background: #2563eb;
+        color: #fff;
+        box-shadow: 0 7px 18px rgba(37, 99, 235, 0.22);
+      }
+
+      .profile-tab-panel {
+        min-width: 0;
       }
 
       .monthly-report-panel {
@@ -10259,6 +10308,107 @@
         border-radius: 8px;
         background: #fff;
         box-shadow: 0 22px 70px rgba(15, 23, 42, 0.24);
+      }
+
+      .quick-permission-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9000;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(15, 23, 42, 0.34);
+        backdrop-filter: blur(5px);
+      }
+
+      .quick-permission-modal {
+        display: grid;
+        gap: 16px;
+        width: min(780px, 100%);
+        max-height: min(760px, 88vh);
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid #dbe6f5;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 22px 70px rgba(15, 23, 42, 0.24);
+      }
+
+      .quick-permission-summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 11px 12px;
+        border: 1px solid #dbeafe;
+        border-radius: 8px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 0.78rem;
+        font-weight: 900;
+      }
+
+      .quick-permission-groups {
+        display: grid;
+        gap: 12px;
+      }
+
+      .quick-permission-group {
+        display: grid;
+        gap: 8px;
+      }
+
+      .quick-permission-group-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: #334155;
+        font-size: 0.78rem;
+        font-weight: 950;
+      }
+
+      .quick-permission-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+        gap: 8px;
+      }
+
+      .quick-permission-card {
+        display: grid;
+        gap: 5px;
+        min-height: 58px;
+        padding: 10px 11px;
+        border: 1px solid #dbe5f3;
+        border-radius: 8px;
+        background: #f8fafc;
+        color: #334155;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .quick-permission-card strong {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #0f172a;
+        font-size: 0.82rem;
+        font-weight: 950;
+      }
+
+      .quick-permission-card span {
+        color: #64748b;
+        font-size: 0.7rem;
+        font-weight: 800;
+      }
+
+      .quick-permission-card.selected {
+        border-color: #93c5fd;
+        background: #eff6ff;
+        box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+      }
+
+      .quick-permission-card.selected strong {
+        color: #1d4ed8;
       }
 
       .school-assign-list {
@@ -16065,6 +16215,7 @@
         studentLogReactionSaving: {},
         studentLogEditing: null,
         studentLogSavingRows: {},
+        studentProfileBoardTabs: {},
         studentDataLoading: false,
         lastDashboardSyncAt: 0,
         autoSyncInFlight: false,
@@ -16081,6 +16232,10 @@
         schoolQuickAssignTargetStudentId: '',
         schoolQuickAssignSelections: {},
         schoolQuickAssignSaving: false,
+        quickPermissionModalOpen: false,
+        quickPermissionTargetStudentId: '',
+        quickPermissionSelections: {},
+        quickPermissionSaving: false,
         monthlyReportsByStudentId: {},
         monthlyReportsLoadedStudentIds: {},
         monthlyReportsLoadingStudentIds: {},
@@ -21753,7 +21908,8 @@
           return [
             renderGlobalNoticeSlotHtml_(),
             renderScopeBanner_(allScopedStudents),
-            renderSchoolMode_(students)
+            renderSchoolMode_(students),
+            renderStudentConsoleOverlays_()
           ].join('');
         }
         if (mode === 'list') {
@@ -21761,7 +21917,8 @@
             renderGlobalNoticeSlotHtml_(),
             renderScopeBanner_(allScopedStudents),
             renderInsightBand_(allScopedStudents),
-            renderStudentLogListMode_(students, emptyHtml)
+            renderStudentLogListMode_(students, emptyHtml),
+            renderStudentConsoleOverlays_()
           ].join('');
         }
         return [
@@ -21779,7 +21936,8 @@
             '  </aside>',
             '</div>'
           ].join('') : '',
-          mode === 'summary' ? renderStudentWidgets_(allScopedStudents) : ''
+          mode === 'summary' ? renderStudentWidgets_(allScopedStudents) : '',
+          renderStudentConsoleOverlays_()
         ].join('');
       }
 
@@ -21787,7 +21945,8 @@
         if (mode === 'list') {
           return [
             renderStudentMobileScope_(allScopedStudents),
-            renderStudentMobileLogListMode_(students, emptyHtml)
+            renderStudentMobileLogListMode_(students, emptyHtml),
+            renderStudentConsoleOverlays_()
           ].join('');
         }
         if (mode === 'school') {
@@ -21795,7 +21954,8 @@
             renderStudentMobileScope_(allScopedStudents),
             '<section class="mobile-card-surface mobile-school-mode">',
             renderSchoolMode_(students),
-            '</section>'
+            '</section>',
+            renderStudentConsoleOverlays_()
           ].join('');
         }
         if (mode === 'permission') {
@@ -21803,7 +21963,8 @@
             renderStudentMobileScope_(allScopedStudents),
             '<section class="mobile-card-surface mobile-permission-mode">',
             renderPermissionMode_(students),
-            '</section>'
+            '</section>',
+            renderStudentConsoleOverlays_()
           ].join('');
         }
         return [
@@ -21813,8 +21974,13 @@
           renderStudentActivePermissionFilter_(),
           '</section>',
           emptyHtml ? '<div class="mobile-empty-card">' + emptyHtml + '</div>' : renderStudentMobileCardList_(students),
-          selected ? '<aside class="mobile-profile-sheet ops-surface" data-student-id="' + escapeAttribute(selected.studentId || '') + '">' + renderStudentProfileBoard_(selected) + '</aside>' : ''
+          selected ? '<aside class="mobile-profile-sheet ops-surface" data-student-id="' + escapeAttribute(selected.studentId || '') + '">' + renderStudentProfileBoard_(selected) + '</aside>' : '',
+          renderStudentConsoleOverlays_()
         ].join('');
+      }
+
+      function renderStudentConsoleOverlays_() {
+        return APP_STATE.quickPermissionModalOpen ? renderQuickPermissionModal_() : '';
       }
 
       function renderStudentMobileScope_(students) {
@@ -22885,6 +23051,33 @@
           });
       }
 
+      function getStudentProfileBoardTab_(studentId) {
+        return APP_STATE.studentProfileBoardTabs[String(studentId || '')] || 'logs';
+      }
+
+      function renderStudentProfileBoardTabs_(student) {
+        var studentId = String(student && student.studentId || '');
+        var current = getStudentProfileBoardTab_(studentId);
+        var tabs = [
+          { key: 'logs', label: '상담 기록', icon: 'messages-square' },
+          { key: 'monthly', label: '월간 리포트', icon: 'calendar-check' }
+        ];
+        var body = current === 'monthly'
+          ? renderMonthlyReportPanel_(student, 'board')
+          : '<div class="profile-block-title-row"><h4>상담 기록 preview</h4><span class="ops-chip slate">' + escapeHtml(String((student.logs || []).length)) + '건</span></div>' + renderStudentLogPreviewPanel_(student, { context: 'board', pageSize: 5, showMore: true, showComposer: true });
+        return [
+          '<section class="profile-block profile-tabbed-block">',
+          '  <div class="profile-folder-tabs" role="tablist" aria-label="프로필 보드 기록 탭">',
+               tabs.map(function(tab) {
+                 var active = tab.key === current;
+                 return '<button type="button" class="profile-folder-tab ' + (active ? 'active' : '') + '" role="tab" aria-selected="' + (active ? 'true' : 'false') + '" data-action="set-profile-board-tab" data-profile-tab="' + escapeAttribute(tab.key) + '" data-student-id="' + escapeAttribute(studentId) + '"><i data-lucide="' + escapeAttribute(tab.icon) + '"></i>' + escapeHtml(tab.label) + '</button>';
+               }).join(''),
+          '  </div>',
+          '  <div class="profile-tab-panel">' + body + '</div>',
+          '</section>'
+        ].join('');
+      }
+
       function renderStudentProfileBoard_(student) {
         if (!student) {
           return '<div class="profile-board-body"><div class="empty-state">선택된 학생이 없습니다.</div></div>';
@@ -22920,8 +23113,7 @@
                renderStudentLearningSummary_(student),
           '  </section>',
           '  <section class="profile-block"><h4>강사 권한 맵</h4>' + renderPermissionRelationMap_(student, permissions) + '</section>',
-          '  <section class="profile-block">' + renderMonthlyReportPanel_(student, 'board') + '</section>',
-          '  <section class="profile-block"><div class="profile-block-title-row"><h4>상담 기록 preview</h4><span class="ops-chip slate">' + escapeHtml(String((student.logs || []).length)) + '건</span></div>' + renderStudentLogPreviewPanel_(student, { context: 'board', pageSize: 5, showMore: true, showComposer: true }) + '</section>',
+          renderStudentProfileBoardTabs_(student),
           '  <section class="profile-block"><h4>시험 대비/직보 상태</h4>' + renderStudentExamJikboPanel_(examItems, jikbo) + '</section>',
           '  <section class="profile-block"><h4>문제 자료 연결</h4>' + renderStudentMaterialConnectionPanel_(student, materialInfo) + '</section>',
           '</div>'
@@ -24320,6 +24512,92 @@
         ].join('');
       }
 
+      function getQuickPermissionSelectedIds_() {
+        return Object.keys(APP_STATE.quickPermissionSelections || {}).filter(function(id) {
+          return APP_STATE.quickPermissionSelections[id];
+        });
+      }
+
+      function getQuickPermissionInstructorSubject_(instructor) {
+        var subject = String(instructor && (instructor.subject || instructor.subjectCategory || instructor.primarySubject) || '').trim();
+        return subject || '과목 미지정';
+      }
+
+      function getQuickPermissionInstructorGroups_() {
+        var subjectOrder = ['국어', '수학', '영어', '과학', '사회', '한국사', '과목 미지정'];
+        var groups = {};
+        var seen = {};
+        (APP_STATE.instructors || []).filter(function(instructor) {
+          var id = getInstructorPrimaryPermissionId_(instructor);
+          if (!id || seen[id] || !(instructor.name || instructor.userId || instructor.loginId)) {
+            return false;
+          }
+          seen[id] = true;
+          return true;
+        }).sort(compareInstructorsByName_).forEach(function(instructor) {
+          var subject = getQuickPermissionInstructorSubject_(instructor);
+          if (!groups[subject]) {
+            groups[subject] = [];
+          }
+          groups[subject].push(instructor);
+        });
+        return Object.keys(groups).sort(function(a, b) {
+          var ai = subjectOrder.indexOf(a);
+          var bi = subjectOrder.indexOf(b);
+          ai = ai === -1 ? 999 : ai;
+          bi = bi === -1 ? 999 : bi;
+          return ai - bi || a.localeCompare(b, 'ko');
+        }).map(function(subject) {
+          return { subject: subject, instructors: groups[subject] };
+        });
+      }
+
+      function renderQuickPermissionModal_() {
+        var student = findStudentById_(APP_STATE.quickPermissionTargetStudentId);
+        if (!student) {
+          return '';
+        }
+        var selectedIds = getQuickPermissionSelectedIds_();
+        var groups = getQuickPermissionInstructorGroups_();
+        return [
+          '<div class="quick-permission-backdrop" data-quick-permission-close="true">',
+          '  <section class="quick-permission-modal" role="dialog" aria-modal="true" aria-label="학생 열람 권한 빠른 설정">',
+          '    <div class="school-modal-head"><div><h3>' + escapeHtml(student.studentName || '학생') + ' 열람 권한 설정</h3><p>' + renderStudentSchoolGradeHtml_(student, true) + ' · 실제 등록된 강사 계정만 선택할 수 있습니다.</p></div><button type="button" class="icon-only-button" data-quick-permission-close="true" aria-label="닫기"><i data-lucide="x"></i></button></div>',
+          '    <div class="quick-permission-summary"><span>선택된 강사 ' + escapeHtml(String(selectedIds.length)) + '명</span><span>선택 해제 후 저장하면 해당 강사의 열람 권한이 제거됩니다.</span></div>',
+          '    <div class="quick-permission-groups">',
+               groups.length ? groups.map(renderQuickPermissionGroup_).join('') : '<div class="school-empty-mini">선택 가능한 강사 계정이 없습니다.</div>',
+          '    </div>',
+          '    <div class="school-modal-actions"><button type="button" class="secondary-button" data-quick-permission-close="true">취소</button><button type="button" class="primary-button ' + (APP_STATE.quickPermissionSaving ? 'is-loading' : '') + '" data-quick-permission-save="true" ' + (APP_STATE.quickPermissionSaving ? 'disabled' : '') + '><i data-lucide="save"></i>' + (APP_STATE.quickPermissionSaving ? '저장 중' : '권한 저장') + '</button></div>',
+          '  </section>',
+          '</div>'
+        ].join('');
+      }
+
+      function renderQuickPermissionGroup_(group) {
+        var visual = getSubjectVisual_(group.subject || '');
+        return [
+          '<div class="quick-permission-group">',
+          '  <div class="quick-permission-group-head"><span><i data-lucide="' + escapeAttribute(visual.icon) + '"></i> ' + escapeHtml(group.subject || '과목 미지정') + '</span><span>' + escapeHtml(String((group.instructors || []).length)) + '명</span></div>',
+          '  <div class="quick-permission-list">',
+               (group.instructors || []).map(renderQuickPermissionInstructorCard_).join(''),
+          '  </div>',
+          '</div>'
+        ].join('');
+      }
+
+      function renderQuickPermissionInstructorCard_(instructor) {
+        var id = getInstructorPrimaryPermissionId_(instructor);
+        var selected = Boolean(APP_STATE.quickPermissionSelections[id]);
+        var visual = getSubjectVisual_(getQuickPermissionInstructorSubject_(instructor));
+        var meta = [instructor.loginId || instructor.userId, getQuickPermissionInstructorSubject_(instructor)].filter(Boolean).join(' · ');
+        return [
+          '<button type="button" class="quick-permission-card ' + (selected ? 'selected' : '') + '" data-quick-permission-instructor="' + escapeAttribute(id) + '" aria-pressed="' + (selected ? 'true' : 'false') + '">',
+          '  <strong><i data-lucide="' + escapeAttribute(selected ? 'check-circle-2' : visual.icon) + '"></i>' + escapeHtml(instructor.name || instructor.userId || id) + '</strong>',
+          '  <span>' + escapeHtml(meta || id) + '</span>',
+          '</button>'
+        ].join('');
+      }
+
       function buildSchoolDistributionForChart_(students) {
         var map = {};
         (students || []).forEach(function(student) {
@@ -24913,6 +25191,24 @@
       }
 
       function handleStudentListClick(event) {
+        var quickPermissionClose = event.target.closest('button[data-quick-permission-close]');
+        if (quickPermissionClose || event.target.classList.contains('quick-permission-backdrop')) {
+          closeQuickPermissionModal_();
+          return;
+        }
+
+        var quickPermissionSave = event.target.closest('[data-quick-permission-save]');
+        if (quickPermissionSave) {
+          handleQuickPermissionSave_();
+          return;
+        }
+
+        var quickPermissionInstructor = event.target.closest('[data-quick-permission-instructor]');
+        if (quickPermissionInstructor) {
+          toggleQuickPermissionInstructor_(quickPermissionInstructor.getAttribute('data-quick-permission-instructor') || '');
+          return;
+        }
+
         var schoolClose = event.target.closest('button[data-school-quick-assign-close]');
         if (schoolClose || event.target.classList.contains('school-quick-assign-backdrop')) {
           APP_STATE.schoolQuickAssignOpen = false;
@@ -24972,7 +25268,16 @@
 
         var quickPermissionButton = event.target.closest('[data-action="quick-assign-permission"]');
         if (quickPermissionButton) {
-          handleQuickPermissionAssign_(quickPermissionButton.getAttribute('data-student-id') || '');
+          openQuickPermissionModal_(quickPermissionButton.getAttribute('data-student-id') || '');
+          return;
+        }
+
+        var profileTabButton = event.target.closest('[data-action="set-profile-board-tab"]');
+        if (profileTabButton) {
+          var profileTabStudentId = profileTabButton.getAttribute('data-student-id') || APP_STATE.selectedStudentId || '';
+          var profileTab = profileTabButton.getAttribute('data-profile-tab') || 'logs';
+          APP_STATE.studentProfileBoardTabs[profileTabStudentId] = profileTab === 'monthly' ? 'monthly' : 'logs';
+          renderStudents();
           return;
         }
 
@@ -25413,7 +25718,7 @@
           .finally(clearLoading);
       }
 
-      function handleQuickPermissionAssign_(studentId) {
+      function openQuickPermissionModal_(studentId) {
         if (!APP_STATE.isAdmin) {
           setNotice('학생 열람 권한 부여는 관리자만 사용할 수 있습니다.', 'warning');
           return;
@@ -25423,21 +25728,56 @@
           setNotice('권한을 부여할 학생을 찾을 수 없습니다.', 'warning');
           return;
         }
-        var keyword = window.prompt((student.studentName || '학생') + '에게 열람 권한을 부여할 강사명을 입력하세요.');
-        if (keyword === null) {
+        var selections = {};
+        getStudentPermissionInstructors_(student.studentId).forEach(function(item) {
+          var matched = findInstructorById_(item.userId || item.instructorId || item.instructorName || item.name);
+          var id = matched ? getInstructorPrimaryPermissionId_(matched) : (item.userId || item.instructorId || '');
+          if (id) {
+            selections[id] = true;
+          }
+        });
+        APP_STATE.quickPermissionModalOpen = true;
+        APP_STATE.quickPermissionTargetStudentId = student.studentId;
+        APP_STATE.quickPermissionSelections = selections;
+        APP_STATE.quickPermissionSaving = false;
+        APP_STATE.selectedStudentId = student.studentId;
+        renderStudents();
+      }
+
+      function closeQuickPermissionModal_() {
+        APP_STATE.quickPermissionModalOpen = false;
+        APP_STATE.quickPermissionTargetStudentId = '';
+        APP_STATE.quickPermissionSelections = {};
+        APP_STATE.quickPermissionSaving = false;
+        renderStudents();
+      }
+
+      function toggleQuickPermissionInstructor_(instructorId) {
+        var id = String(instructorId || '');
+        if (!id || APP_STATE.quickPermissionSaving) {
           return;
         }
-        var instructor = resolveInstructorByKeyword_(keyword);
-        if (!instructor) {
-          setNotice('입력한 강사를 찾지 못했습니다. 권한 관리 화면에서 검색해 주세요.', 'warning');
+        APP_STATE.quickPermissionSelections[id] = !APP_STATE.quickPermissionSelections[id];
+        renderStudents();
+      }
+
+      function handleQuickPermissionSave_() {
+        if (APP_STATE.quickPermissionSaving) {
           return;
         }
-        var existingIds = getStudentPermissionInstructors_(student.studentId).map(function(item) {
-          return item.userId || item.instructorId;
-        }).filter(Boolean);
-        var instructorId = getInstructorPrimaryPermissionId_(instructor);
-        var nextIds = uniqueList_(existingIds.concat([instructorId]));
-        setLoading('학생 열람 권한을 빠르게 부여하는 중입니다.', true);
+        if (!APP_STATE.isAdmin) {
+          setNotice('학생 열람 권한 부여는 관리자만 사용할 수 있습니다.', 'warning');
+          return;
+        }
+        var student = findStudentById_(APP_STATE.quickPermissionTargetStudentId);
+        if (!student) {
+          setNotice('권한을 저장할 학생을 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        var nextIds = uniqueList_(getQuickPermissionSelectedIds_());
+        APP_STATE.quickPermissionSaving = true;
+        setLoading('학생 열람 권한을 저장하는 중입니다.', true);
+        renderStudents();
         saveStudentPermissionsViaFirebaseDirect_(student.studentId, nextIds)
           .catch(function(error) {
             if (window.console && console.warn) {
@@ -25452,11 +25792,19 @@
           .then(function(result) {
             applyPermissionSaveResult_(result, student.studentId);
             APP_STATE.selectedStudentId = student.studentId;
+            APP_STATE.quickPermissionModalOpen = false;
+            APP_STATE.quickPermissionTargetStudentId = '';
+            APP_STATE.quickPermissionSelections = {};
+            APP_STATE.quickPermissionSaving = false;
             renderAll();
             switchView('students');
-            setNotice((instructor.name || instructor.userId || '강사') + '에게 ' + (student.studentName || '학생') + ' 열람 권한을 부여했습니다.', 'success');
+            setNotice((student.studentName || '학생') + ' 열람 권한을 저장했습니다.', 'success');
           })
-          .catch(handleApiError_)
+          .catch(function(error) {
+            APP_STATE.quickPermissionSaving = false;
+            handleApiError_(error);
+            renderStudents();
+          })
           .finally(clearLoading);
       }
 
@@ -35887,9 +36235,14 @@
         APP_STATE.totalActiveStudentCount = 0;
         APP_STATE.homeroomAssignments = [];
         APP_STATE.studentLogTabs = {};
+        APP_STATE.studentProfileBoardTabs = {};
         APP_STATE.studentLogEditing = null;
         APP_STATE.studentLogSavingRows = {};
         APP_STATE.studentLogReactionSaving = {};
+        APP_STATE.quickPermissionModalOpen = false;
+        APP_STATE.quickPermissionTargetStudentId = '';
+        APP_STATE.quickPermissionSelections = {};
+        APP_STATE.quickPermissionSaving = false;
         APP_STATE.monthlyReportsByStudentId = {};
         APP_STATE.monthlyReportsLoadedStudentIds = {};
         APP_STATE.monthlyReportsLoadingStudentIds = {};
