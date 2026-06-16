@@ -7380,13 +7380,13 @@
       }
 
       .student-index-table th:nth-child(1),
-      .student-index-table td:nth-child(1) { width: 252px; }
+      .student-index-table td:nth-child(1) { width: 264px; }
 
       .student-index-table th:nth-child(2),
       .student-index-table td:nth-child(2) { width: 196px; }
 
       .student-index-table th:nth-child(3),
-      .student-index-table td:nth-child(3) { width: 216px; }
+      .student-index-table td:nth-child(3) { width: 220px; }
 
       .student-index-table th:nth-child(4),
       .student-index-table td:nth-child(4) { width: 160px; }
@@ -7395,7 +7395,7 @@
       .student-index-table td:nth-child(5) { width: 112px; }
 
       .student-index-table th:nth-child(6),
-      .student-index-table td:nth-child(6) { width: 84px; }
+      .student-index-table td:nth-child(6) { width: 36px; }
 
       .student-index-table th {
         position: sticky;
@@ -7767,10 +7767,16 @@
       }
 
       .action-detail-button {
-        min-width: 76px;
+        width: 30px;
+        min-width: 30px;
         height: 30px;
-        padding: 0 9px;
+        padding: 0;
+        justify-content: center;
         white-space: nowrap;
+      }
+
+      .action-detail-button svg {
+        margin: 0;
       }
 
       .action-cluster .student-permission-request-button {
@@ -8118,10 +8124,30 @@
         min-width: 30px;
         height: 30px;
         padding: 0;
+        display: inline-flex;
+        align-items: center;
         justify-content: center;
+        gap: 0;
       }
 
       .monthly-report-refresh-button svg {
+        margin: 0;
+      }
+
+      .monthly-report-icon-button {
+        width: 34px;
+        min-width: 34px;
+        height: 34px;
+        min-height: 34px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        border-radius: 9px;
+      }
+
+      .monthly-report-icon-button svg {
         margin: 0;
       }
 
@@ -22881,7 +22907,7 @@
              ].join('') + '</div></td>',
           '  <td><div class="status-grid ' + (restricted ? 'restricted-data' : '') + '">' + renderSchoolConnectionChip_('학교 일정', eventInfo.count ? 'blue' : 'muted') + renderSchoolConnectionChip_('문제 자료', materialInfo.available ? 'green' : 'muted') + '</div></td>',
           '  <td>' + escapeHtml(restricted ? '-' : recent) + '</td>',
-          '  <td><div class="action-cluster">' + (restricted ? renderPermissionRequestButton_(student) : '<button class="mini-button action-detail-button" type="button" data-action="show-student-profile" title="상세보기"><i data-lucide="panel-right-open"></i>상세보기</button>') + '</div></td>',
+          '  <td><div class="action-cluster">' + (restricted ? renderPermissionRequestButton_(student) : '<button class="mini-button action-detail-button" type="button" data-action="show-student-profile" title="상세보기" aria-label="' + escapeAttribute((student.studentName || '학생') + ' 상세보기') + '"><i data-lucide="panel-right-open"></i></button>') + '</div></td>',
           '</tr>'
         ].join('');
       }
@@ -23480,7 +23506,7 @@
               '    <div><strong>목표</strong><p>' + escapeHtml(report.goal || '-') + '</p></div>',
               '    <div><strong>진도</strong><p>' + escapeHtml(report.progress || '-') + '</p></div>',
               '    <div><strong>계획/보완</strong><p>' + escapeHtml(report.plan || '-') + '</p></div>',
-              canEditReport ? '    <div class="monthly-report-summary-actions"><button type="button" class="profile-link-button" data-action="edit-monthly-report" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '"><i data-lucide="pencil"></i>내용 수정</button></div>' : '',
+              canEditReport ? '    <div class="monthly-report-summary-actions"><button type="button" class="profile-link-button monthly-report-icon-button" data-action="edit-monthly-report" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '" title="내용 수정" aria-label="' + escapeAttribute(subject + ' 월간 리포트 내용 수정') + '"><i data-lucide="pencil"></i></button></div>' : '',
               '  </div>'
             ].join('') : '',
             '</article>'
@@ -23681,7 +23707,7 @@
           '  </div>',
           '</div>',
           '  </div>',
-          '  <div class="monthly-report-actions"><span class="monthly-report-updated">' + escapeHtml(updatedText) + '</span><button type="button" class="button-primary ' + (saving ? 'is-loading' : '') + '" data-action="save-monthly-report" ' + (!editable || saving ? 'disabled' : '') + '><i data-lucide="save"></i>' + (saving ? '저장 중' : '리포트 저장') + '</button></div>',
+          '  <div class="monthly-report-actions"><span class="monthly-report-updated">' + escapeHtml(updatedText) + '</span><button type="button" class="button-primary monthly-report-icon-button ' + (saving ? 'is-loading' : '') + '" data-action="save-monthly-report" title="' + escapeAttribute(saving ? '저장 중' : '리포트 저장') + '" aria-label="' + escapeAttribute(saving ? '월간 리포트 저장 중' : '월간 리포트 저장') + '" ' + (!editable || saving ? 'disabled' : '') + '><i data-lucide="save"></i></button></div>',
           !editable ? '<div class="helper-text">이 학생에 대한 열람 권한이 있는 선생님 또는 관리자만 수정할 수 있습니다.</div>' : '',
           '</div>'
         ].join('');
