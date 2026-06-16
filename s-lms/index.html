@@ -7380,13 +7380,13 @@
       }
 
       .student-index-table th:nth-child(1),
-      .student-index-table td:nth-child(1) { width: 190px; }
+      .student-index-table td:nth-child(1) { width: 252px; }
 
       .student-index-table th:nth-child(2),
-      .student-index-table td:nth-child(2) { width: 210px; }
+      .student-index-table td:nth-child(2) { width: 196px; }
 
       .student-index-table th:nth-child(3),
-      .student-index-table td:nth-child(3) { width: 230px; }
+      .student-index-table td:nth-child(3) { width: 216px; }
 
       .student-index-table th:nth-child(4),
       .student-index-table td:nth-child(4) { width: 160px; }
@@ -7395,7 +7395,7 @@
       .student-index-table td:nth-child(5) { width: 112px; }
 
       .student-index-table th:nth-child(6),
-      .student-index-table td:nth-child(6) { width: 128px; }
+      .student-index-table td:nth-child(6) { width: 84px; }
 
       .student-index-table th {
         position: sticky;
@@ -7444,7 +7444,7 @@
       .student-name-line {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         flex-wrap: nowrap;
         max-width: 100%;
         vertical-align: middle;
@@ -7762,8 +7762,15 @@
 
       .action-cluster {
         display: grid;
-        grid-template-columns: repeat(3, 30px);
+        grid-template-columns: minmax(0, max-content);
         gap: 6px;
+      }
+
+      .action-detail-button {
+        min-width: 76px;
+        height: 30px;
+        padding: 0 9px;
+        white-space: nowrap;
       }
 
       .action-cluster .student-permission-request-button {
@@ -8106,6 +8113,18 @@
         font-weight: 900;
       }
 
+      .monthly-report-refresh-button {
+        width: 30px;
+        min-width: 30px;
+        height: 30px;
+        padding: 0;
+        justify-content: center;
+      }
+
+      .monthly-report-refresh-button svg {
+        margin: 0;
+      }
+
       .monthly-report-trend {
         display: grid;
         gap: 9px;
@@ -8201,6 +8220,20 @@
         height: auto;
       }
 
+      .monthly-report-trend-point {
+        cursor: pointer;
+      }
+
+      .monthly-report-trend-point-label {
+        pointer-events: none;
+        paint-order: stroke;
+        stroke: #fff;
+        stroke-width: 3px;
+        stroke-linejoin: round;
+        font-size: 10px;
+        font-weight: 950;
+      }
+
       .monthly-report-trend-empty {
         padding: 16px;
         border: 1px dashed #bbf7d0;
@@ -8218,6 +8251,7 @@
 
       .monthly-report-trend-note {
         display: inline-grid;
+        text-align: left;
         gap: 2px;
         min-width: 150px;
         max-width: 240px;
@@ -8228,6 +8262,7 @@
         color: #334155;
         font-size: 0.68rem;
         font-weight: 800;
+        cursor: pointer;
       }
 
       .monthly-report-trend-note strong {
@@ -8313,6 +8348,12 @@
         gap: 7px;
         padding-top: 6px;
         border-top: 1px dashed var(--subject-border, #bbf7d0);
+      }
+
+      .monthly-report-summary-actions {
+        display: flex;
+        justify-content: flex-end;
+        padding-top: 2px;
       }
 
       .monthly-report-summary-detail div {
@@ -22840,7 +22881,7 @@
              ].join('') + '</div></td>',
           '  <td><div class="status-grid ' + (restricted ? 'restricted-data' : '') + '">' + renderSchoolConnectionChip_('학교 일정', eventInfo.count ? 'blue' : 'muted') + renderSchoolConnectionChip_('문제 자료', materialInfo.available ? 'green' : 'muted') + '</div></td>',
           '  <td>' + escapeHtml(restricted ? '-' : recent) + '</td>',
-          '  <td><div class="action-cluster">' + (restricted ? renderPermissionRequestButton_(student) : '<button class="icon-mini" type="button" data-action="show-student-profile" title="상세 보기"><i data-lucide="panel-right-open"></i></button><button class="icon-mini" type="button" data-action="manage-student-permission" title="권한 관리"><i data-lucide="shield"></i></button><button class="icon-mini" type="button" data-action="show-log-detail-latest" title="메모"><i data-lucide="sticky-note"></i></button>') + '</div></td>',
+          '  <td><div class="action-cluster">' + (restricted ? renderPermissionRequestButton_(student) : '<button class="mini-button action-detail-button" type="button" data-action="show-student-profile" title="상세보기"><i data-lucide="panel-right-open"></i>상세보기</button>') + '</div></td>',
           '</tr>'
         ].join('');
       }
@@ -23214,6 +23255,24 @@
         return [studentId || '', monthKey || '', subject || '', reportKey || ''].join('|');
       }
 
+      function getMonthlyReportStableKey_(report) {
+        return report && (report.reportId || report.authorId || report.updatedAtMs || report.createdAtMs) || '';
+      }
+
+      function getMonthlyReportAuthorLabel_(report) {
+        return report && (report.authorName || report.updatedByName || report.createdByName) || '공유 리포트';
+      }
+
+      function getMonthlyReportAuthorShortLabel_(report) {
+        var label = getMonthlyReportAuthorLabel_(report);
+        return label.length > 3 ? label.slice(0, 3) : label;
+      }
+
+      function getMonthlyReportSnippet_(report) {
+        var raw = String(report && (report.plan || report.goal || report.progress) || '-').trim() || '-';
+        return raw.length > 42 ? raw.slice(0, 42) + '...' : raw;
+      }
+
       function getMonthlyReportLoadKey_(studentId, monthKey) {
         return [studentId || '', monthKey || getCurrentMonthlyReportMonth_()].join('|');
       }
@@ -23341,21 +23400,29 @@
           var path = pathPoints.map(function(point, index) {
             return (index ? 'L' : 'M') + point[0].toFixed(1) + ' ' + point[1].toFixed(1);
           }).join(' ');
-          var circles = pathPoints.map(function(point) {
+          var circles = pathPoints.map(function(point, pointIndex) {
             var reports = point[2].reports || [];
             var authorText = reports.map(function(report) {
-              return report.authorName || report.updatedByName || report.createdByName || '공유 리포트';
+              return getMonthlyReportAuthorLabel_(report);
             }).join(', ') || '-';
             var planText = reports.map(function(report) {
               return report.plan || report.goal || report.progress || '';
             }).filter(Boolean).join(' / ') || '-';
+            var firstReport = reports[0] || {};
+            var reportKey = getMonthlyReportStableKey_(firstReport);
+            var detailKey = getMonthlyReportDetailKey_(studentId, point[2].month, item.subject, reportKey);
+            var label = firstReport.reportId || firstReport.authorId ? getMonthlyReportAuthorShortLabel_(firstReport) + (reports.length > 1 ? '+' + (reports.length - 1) : '') : '';
+            var labelOffset = pointIndex % 2 ? 13 : -9;
             var title = [
               formatMonthlyReportMonth_(point[2].month) + ' ' + item.subject,
               '작성자: ' + authorText,
               '평균 점수: ' + point[2].value + '/10',
               '계획: ' + planText
             ].join('\\n');
-            return '<circle cx="' + point[0].toFixed(1) + '" cy="' + point[1].toFixed(1) + '" r="4" fill="#fff" stroke="' + item.visual.color + '" stroke-width="2"><title>' + escapeHtml(title) + '</title></circle>';
+            return [
+              '<circle class="monthly-report-trend-point" cx="' + point[0].toFixed(1) + '" cy="' + point[1].toFixed(1) + '" r="5" fill="#fff" stroke="' + item.visual.color + '" stroke-width="2.4" data-action="toggle-monthly-report-detail" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(point[2].month) + '" data-monthly-subject="' + escapeAttribute(item.subject) + '" data-monthly-detail-key="' + escapeAttribute(detailKey) + '"><title>' + escapeHtml(title) + '</title></circle>',
+              label ? '<text class="monthly-report-trend-point-label" x="' + point[0].toFixed(1) + '" y="' + (point[1] + labelOffset).toFixed(1) + '" text-anchor="middle" fill="' + item.visual.color + '">' + escapeHtml(label) + '</text>' : ''
+            ].join('');
           }).join('');
           return '<path d="' + path + '" fill="none" stroke="' + item.visual.color + '" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' + circles;
         }).join('');
@@ -23369,8 +23436,9 @@
           });
           return list;
         }, []).slice(-6).reverse().map(function(item) {
-          var plan = item.report.plan || item.report.goal || item.report.progress || '-';
-          return '<div class="monthly-report-trend-note" style="' + escapeAttribute(buildSubjectVisualStyle_(item.visual, 'subject')) + '"><strong>' + escapeHtml(formatMonthlyReportMonthShort_(item.month) + ' · ' + item.subject + ' · ' + (item.report.authorName || item.report.updatedByName || item.report.createdByName || '공유 리포트')) + '</strong><span>' + escapeHtml(plan) + '</span></div>';
+          var reportKey = getMonthlyReportStableKey_(item.report);
+          var detailKey = getMonthlyReportDetailKey_(studentId, item.month, item.subject, reportKey);
+          return '<button type="button" class="monthly-report-trend-note" style="' + escapeAttribute(buildSubjectVisualStyle_(item.visual, 'subject')) + '" data-action="toggle-monthly-report-detail" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(item.month) + '" data-monthly-subject="' + escapeAttribute(item.subject) + '" data-monthly-detail-key="' + escapeAttribute(detailKey) + '"><strong>' + escapeHtml(formatMonthlyReportMonthShort_(item.month) + ' · ' + item.subject + ' · ' + getMonthlyReportAuthorLabel_(item.report)) + '</strong><span>' + escapeHtml(getMonthlyReportSnippet_(item.report)) + '</span></button>';
         }).join('');
         return [
           '<section class="monthly-report-trend" aria-label="과목별 월간 학습 추이">',
@@ -23395,22 +23463,24 @@
         }
         var visual = getSubjectVisual_(subject);
         return reports.map(function(report) {
-          var reportKey = report.reportId || report.authorId || report.updatedAtMs || report.createdAtMs || '';
+          var reportKey = getMonthlyReportStableKey_(report);
           var detailKey = getMonthlyReportDetailKey_(studentId, monthKey, subject, reportKey);
           var expanded = Boolean(APP_STATE.monthlyReportExpandedRows[detailKey]);
-          var author = report.authorName || report.updatedByName || report.createdByName || '공유 리포트';
+          var author = getMonthlyReportAuthorLabel_(report);
           var time = report.updatedAt || report.createdAt || '';
           var timeText = time ? (formatTeachingLogDateTime(time) || time) : '일시 미상';
           var scoreText = report.score === 0 || report.score ? ' · 추이 ' + report.score + '/10' : '';
+          var canEditReport = String(report.authorId || '') === String(getMonthlyReportAuthorId_() || '');
           return [
             '<article class="monthly-report-summary" style="' + escapeAttribute(buildSubjectVisualStyle_(visual, 'subject')) + '">',
-            '  <button type="button" class="monthly-report-summary-title" data-action="toggle-monthly-report-detail" data-monthly-detail-key="' + escapeAttribute(detailKey) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '"><span><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(formatMonthlyReportMonth_(monthKey) + ' ' + subject + ' 월간 리포트 · ' + author) + '</span><i data-lucide="' + (expanded ? 'chevron-up' : 'chevron-down') + '"></i></button>',
+            '  <button type="button" class="monthly-report-summary-title" data-action="toggle-monthly-report-detail" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '" data-monthly-detail-key="' + escapeAttribute(detailKey) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '"><span><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(formatMonthlyReportMonth_(monthKey) + ' ' + subject + ' 월간 리포트 · ' + author) + '</span><i data-lucide="' + (expanded ? 'chevron-up' : 'chevron-down') + '"></i></button>',
             '  <div class="monthly-report-summary-meta">' + escapeHtml(author) + ' · ' + escapeHtml(timeText + scoreText) + '</div>',
             expanded ? [
               '  <div class="monthly-report-summary-detail">',
               '    <div><strong>목표</strong><p>' + escapeHtml(report.goal || '-') + '</p></div>',
               '    <div><strong>진도</strong><p>' + escapeHtml(report.progress || '-') + '</p></div>',
               '    <div><strong>계획/보완</strong><p>' + escapeHtml(report.plan || '-') + '</p></div>',
+              canEditReport ? '    <div class="monthly-report-summary-actions"><button type="button" class="profile-link-button" data-action="edit-monthly-report" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '"><i data-lucide="pencil"></i>내용 수정</button></div>' : '',
               '  </div>'
             ].join('') : '',
             '</article>'
@@ -23594,7 +23664,7 @@
           : (loading && !loaded ? '불러오는 중' : '아직 저장된 리포트 없음');
         return [
           '<div class="monthly-report-panel ' + escapeAttribute(context || 'board') + '" data-monthly-report-panel data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '">',
-          '  <div class="monthly-report-head"><h4>월간 학습 리포트</h4><div class="monthly-report-head-actions"><button type="button" class="profile-link-button" data-action="refresh-monthly-report"><i data-lucide="refresh-cw"></i>새로고침</button><label class="monthly-report-month-picker"><i data-lucide="calendar-check"></i><span>작성 월</span><input type="month" data-monthly-report-month data-student-id="' + escapeAttribute(studentId) + '" value="' + escapeAttribute(monthKey) + '"></label></div></div>',
+          '  <div class="monthly-report-head"><h4>월간 학습 리포트</h4><div class="monthly-report-head-actions"><button type="button" class="profile-link-button monthly-report-refresh-button" data-action="refresh-monthly-report" title="새로고침" aria-label="월간 리포트 새로고침"><i data-lucide="refresh-cw"></i></button><label class="monthly-report-month-picker"><i data-lucide="calendar-check"></i><span>작성 월</span><input type="month" data-monthly-report-month data-student-id="' + escapeAttribute(studentId) + '" value="' + escapeAttribute(monthKey) + '"></label></div></div>',
           '  <div class="helper-text">권한 있는 선생님들이 과목별 목표, 진행 상황, 보완 계획을 공유합니다.</div>',
           loading && !loaded ? '<div class="profile-empty">월간 학습 리포트를 불러오는 중입니다.</div>' : '',
           renderMonthlyReportTrendChart_(studentId),
@@ -23723,6 +23793,18 @@
         if (APP_STATE.selectedStudentDetailId === targetId) {
           renderStudentDetailModal_();
         }
+      }
+
+      function activateMonthlyReportContext_(studentId, monthKey, subject) {
+        var targetId = String(studentId || APP_STATE.selectedStudentId || APP_STATE.selectedStudentDetailId || '');
+        if (!targetId) {
+          return '';
+        }
+        var targetMonth = setSelectedMonthlyReportMonth_(targetId, monthKey || getSelectedMonthlyReportMonth_(targetId));
+        var targetSubject = MONTHLY_REPORT_SUBJECTS.indexOf(subject) !== -1 ? subject : getMonthlyReportActiveSubject_(targetId, targetMonth);
+        APP_STATE.monthlyReportSubjectTabs[getMonthlyReportPanelKey_(targetId, targetMonth)] = targetSubject;
+        ensureMonthlyReportsLoadedForStudent_(targetId, targetMonth);
+        return targetId;
       }
 
       function handleMonthlyReportInput_(event) {
@@ -24488,6 +24570,18 @@
         var saveMonthlyReportButton = event.target.closest('[data-action="save-monthly-report"]');
         if (saveMonthlyReportButton) {
           handleMonthlyReportSave_(saveMonthlyReportButton);
+          return;
+        }
+
+        var editMonthlyReportButton = event.target.closest('[data-action="edit-monthly-report"]');
+        if (editMonthlyReportButton) {
+          activateMonthlyReportContext_(
+            editMonthlyReportButton.getAttribute('data-student-id') || APP_STATE.selectedStudentDetailId || '',
+            editMonthlyReportButton.getAttribute('data-month') || '',
+            editMonthlyReportButton.getAttribute('data-monthly-subject') || ''
+          );
+          renderStudentDetailModal_();
+          renderStudents();
           return;
         }
 
@@ -26101,9 +26195,28 @@
           return;
         }
 
+        var editMonthlyReportButton = event.target.closest('[data-action="edit-monthly-report"]');
+        if (editMonthlyReportButton) {
+          activateMonthlyReportContext_(
+            editMonthlyReportButton.getAttribute('data-student-id') || APP_STATE.selectedStudentId || '',
+            editMonthlyReportButton.getAttribute('data-month') || '',
+            editMonthlyReportButton.getAttribute('data-monthly-subject') || ''
+          );
+          renderStudents();
+          if (APP_STATE.selectedStudentDetailId) {
+            renderStudentDetailModal_();
+          }
+          return;
+        }
+
         var monthlyDetailButton = event.target.closest('[data-action="toggle-monthly-report-detail"]');
         if (monthlyDetailButton) {
           var detailKey = monthlyDetailButton.getAttribute('data-monthly-detail-key') || '';
+          activateMonthlyReportContext_(
+            monthlyDetailButton.getAttribute('data-student-id') || APP_STATE.selectedStudentId || '',
+            monthlyDetailButton.getAttribute('data-month') || '',
+            monthlyDetailButton.getAttribute('data-monthly-subject') || ''
+          );
           if (detailKey) {
             APP_STATE.monthlyReportExpandedRows[detailKey] = !APP_STATE.monthlyReportExpandedRows[detailKey];
           }
