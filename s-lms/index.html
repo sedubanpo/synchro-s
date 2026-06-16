@@ -37996,7 +37996,8 @@
         if (String(record.changeType || '').toLowerCase() === 'delete') {
           return '<span class="grade-history-subject-item"><span class="grade-history-subject-chip">' + renderGradeSubjectBadgeV2_(record.subjectCategory, record.subjectName) + '<strong>' + escapeHtml(score) + '</strong><span>삭제됨</span></span></span>';
         }
-        var editButton = '<button type="button" class="grade-history-subject-chip" data-grade-action="open-score-editor" data-student-id="' + escapeAttribute(record.studentId || '') + '" data-subject-id="' + escapeAttribute(record.subjectId || '') + '" data-grade-id="' + escapeAttribute(record.gradeId || '') + '">' + renderGradeSubjectBadgeV2_(record.subjectCategory, record.subjectName) + '<strong>' + escapeHtml(score) + '</strong>' + (record.gradeLevel ? '<span>' + escapeHtml(record.gradeLevel) + '등급</span>' : '') + (expected ? '<span>' + escapeHtml(expected) + '</span>' : '') + '</button>';
+        var changeBadge = String(record.changeType || '').toLowerCase() === 'update' ? '<span>수정됨</span>' : '';
+        var editButton = '<button type="button" class="grade-history-subject-chip" data-grade-action="open-score-editor" data-student-id="' + escapeAttribute(record.studentId || '') + '" data-subject-id="' + escapeAttribute(record.subjectId || '') + '" data-grade-id="' + escapeAttribute(record.gradeId || '') + '">' + renderGradeSubjectBadgeV2_(record.subjectCategory, record.subjectName) + '<strong>' + escapeHtml(score) + '</strong>' + changeBadge + (record.gradeLevel ? '<span>' + escapeHtml(record.gradeLevel) + '등급</span>' : '') + (expected ? '<span>' + escapeHtml(expected) + '</span>' : '') + '</button>';
         var deleteButton = APP_STATE.isAdmin && record.gradeId ? '<button type="button" class="icon-button grade-history-delete" title="성적 삭제" data-grade-action="delete-grade" data-grade-id="' + escapeAttribute(record.gradeId || '') + '"><i data-lucide="trash-2"></i></button>' : '';
         return '<span class="grade-history-subject-item">' + editButton + deleteButton + '</span>';
       }
@@ -40939,6 +40940,30 @@
         }).join('|');
       }
 
+      function buildGradeRecordCurrentDisplayKey_(record) {
+        var subjectName = normalizeGradeSubjectNameAliasClient_(record.subjectCategory || record.subjectArea, record.subjectName || record.detailSubject || '');
+        var subjectCategory = normalizeGradeSubjectCategoryClient_(record.subjectCategory || record.subjectArea, subjectName);
+        var family = getGradeSubjectFamily_(subjectCategory, subjectName);
+        var singleSlotFamily = ['국어', '영어', '수학', '한국사'].indexOf(family) !== -1;
+        var displaySubjectName = singleSlotFamily ? family : subjectName;
+        var displaySubjectCategory = singleSlotFamily ? family : subjectCategory;
+        return [
+          record.studentId || record.studentName || '',
+          record.examYear || record.schoolYear || '',
+          getGradeExamTypeGroup_(record),
+          record.term || '',
+          record.examName || '',
+          record.examRound || '',
+          record.examMonth || '',
+          record.examDate || '',
+          buildGradeSubjectIdClient_(displaySubjectCategory, displaySubjectName),
+          displaySubjectCategory,
+          displaySubjectName
+        ].map(function(value) {
+          return String(value || '').replace(/\s+/g, '');
+        }).join('|');
+      }
+
       function groupGradeOverviewByStudent_(students, records) {
         var map = {};
         (students || []).forEach(function(student) {
@@ -42006,9 +42031,23 @@
       }
 
       function mergeCurrentAndHistoryGradeRecordsForDisplay_(currentRows, historyRows) {
+        var latestByGradeId = {};
+        (currentRows || []).concat(historyRows || []).forEach(function(record) {
+          var gradeId = String(record && record.gradeId || '');
+          if (!gradeId) {
+            return;
+          }
+          if (!latestByGradeId[gradeId] || sortGradesByUpdatedDesc_(record, latestByGradeId[gradeId]) < 0) {
+            latestByGradeId[gradeId] = record;
+          }
+        });
         var map = {};
         (currentRows || []).concat(historyRows || []).forEach(function(record) {
-          var key = buildGradeRecordDisplayKey_(record);
+          var gradeId = String(record && record.gradeId || '');
+          if (gradeId && latestByGradeId[gradeId] !== record) {
+            return;
+          }
+          var key = buildGradeRecordCurrentDisplayKey_(record);
           if (!map[key] || sortGradesByUpdatedDesc_(record, map[key]) < 0) {
             map[key] = record;
           }
