@@ -289,7 +289,12 @@ service cloud.firestore {
             request.resource.data.authorId == resource.data.authorId
           )
         );
-      allow delete: if isAdmin();
+      allow delete: if signedIn()
+        && canUseMonthlyReport(resource.data.studentId)
+        && (
+          isAdmin() ||
+          ownsMonthlyReportData(resource.data)
+        );
     }
 
     match /events/{eventId} {

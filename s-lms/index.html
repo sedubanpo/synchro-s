@@ -6564,9 +6564,19 @@
         align-items: center;
         gap: 12px;
         min-width: 172px;
+        border: 0;
+        padding: 0;
+        background: transparent;
         color: #fff;
         font-size: 1.12rem;
         font-weight: 900;
+        cursor: pointer;
+      }
+
+      .console-brand:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.82);
+        outline-offset: 4px;
+        border-radius: 10px;
       }
 
       .console-brand img {
@@ -8149,6 +8159,19 @@
 
       .monthly-report-icon-button svg {
         margin: 0;
+      }
+
+      .monthly-report-icon-button.danger,
+      .mini-button.danger {
+        border-color: #fecaca;
+        background: #fff5f5;
+        color: #b91c1c;
+      }
+
+      .monthly-report-icon-button.danger:hover,
+      .mini-button.danger:hover {
+        border-color: #fca5a5;
+        background: #fee2e2;
       }
 
       .monthly-report-trend {
@@ -16187,10 +16210,10 @@
 
     <div id="appShell" class="dashboard-root hidden">
       <header class="console-topbar">
-        <div class="console-brand">
+        <button type="button" class="console-brand" data-action="go-student-main" aria-label="학생 데이터 리스트로 이동">
           <img id="topbarLogo" src="https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png" alt="S-LMS 로고">
           <span id="sidebarTitle">S-LMS</span>
-        </div>
+        </button>
         <nav class="console-nav">
           <button type="button" class="side-nav-button active" data-view="students">
             <span class="nav-indicator"></span>
@@ -17637,6 +17660,20 @@
               setNotice('직보 매니저는 관리자만 사용할 수 있습니다.', 'warning');
             }
             switchView(viewName);
+          });
+        });
+        document.querySelectorAll('[data-action="go-student-main"]').forEach(function(button) {
+          button.addEventListener('click', function() {
+            switchView('students');
+            var studentSearch = document.getElementById('studentSearchInput');
+            var globalSearch = document.getElementById('globalSearchInput');
+            if (studentSearch) {
+              studentSearch.value = '';
+            }
+            if (globalSearch) {
+              globalSearch.value = '';
+            }
+            renderStudents();
           });
         });
       }
@@ -23785,6 +23822,10 @@
         return monthlyReportMatchesCurrentUser_(report);
       }
 
+      function canDeleteMonthlyReportDoc_(report, student) {
+        return canEditMonthlyReportDoc_(report, student);
+      }
+
       function getMonthlyReportEditTarget_(studentId, panelMonth) {
         var key = getMonthlyReportEditTargetKey_(studentId, panelMonth);
         var target = APP_STATE.monthlyReportEditTargets[key];
@@ -23933,11 +23974,36 @@
         if (!report) {
           return '';
         }
+        var student = findStudentById_(report.studentId);
+        var editable = canEditMonthlyReportDoc_(report, student);
+        var deletable = canDeleteMonthlyReportDoc_(report, student);
+        var visual = getSubjectVisual_(report.subject);
+        var reportKey = getMonthlyReportStableKey_(report);
+        var draft = getMonthlyReportDraft_(report.studentId, report.month, report.subject, report.authorId);
+        var saving = APP_STATE.monthlyReportSavingKey === [report.studentId, report.month, report.subject, report.authorId, report.reportId || ''].join('|');
         return [
           '<div class="monthly-report-detail-modal-backdrop" data-action="close-monthly-report-detail-modal">',
-          '  <section class="monthly-report-detail-modal" role="dialog" aria-modal="true" aria-label="월간 학습 리포트 상세" data-modal-stop>',
+          '  <section class="monthly-report-detail-modal" role="dialog" aria-modal="true" aria-label="월간 학습 리포트 상세" data-modal-stop data-monthly-report-detail-modal data-student-id="' + escapeAttribute(report.studentId) + '" data-month="' + escapeAttribute(report.month) + '" data-monthly-subject="' + escapeAttribute(report.subject) + '" data-author-id="' + escapeAttribute(report.authorId || '') + '" data-monthly-report-key="' + escapeAttribute(reportKey) + '" data-report-id="' + escapeAttribute(report.reportId || '') + '">',
           '    <div class="monthly-report-detail-modal-head"><h4>월간 학습 리포트 상세</h4><button type="button" class="monthly-report-icon-button" data-action="close-monthly-report-detail-modal" data-monthly-modal-close-button aria-label="상세 팝업 닫기"><i data-lucide="x"></i></button></div>',
           renderMonthlyReportDetailContent_(report),
+          editable ? [
+            '    <div class="monthly-report-grid monthly-report-modal-fields">',
+            '      <div class="monthly-report-row" style="' + escapeAttribute(buildSubjectVisualStyle_(visual, 'subject')) + '">',
+            '        <div class="monthly-report-subject"><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(report.subject) + '</div>',
+            '        <div class="monthly-report-fields">',
+            renderMonthlyReportEditMonthField_(report.studentId, report.month, report.subject, report.authorId, draft.month || report.month, editable),
+            renderMonthlyReportField_(report.studentId, report.month, report.subject, report.authorId, 'goal', '목표', draft.goal, editable),
+            renderMonthlyReportField_(report.studentId, report.month, report.subject, report.authorId, 'progress', '진도', draft.progress, editable),
+            renderMonthlyReportField_(report.studentId, report.month, report.subject, report.authorId, 'plan', '계획/보완', draft.plan, editable),
+            renderMonthlyReportScoreField_(report.studentId, report.month, report.subject, report.authorId, draft.score, editable && APP_STATE.isAdmin),
+            '        </div>',
+            '      </div>',
+            '    </div>',
+            '    <div class="monthly-report-actions monthly-report-modal-actions">',
+            deletable ? '      <button type="button" class="mini-button danger" data-action="delete-monthly-report" data-student-id="' + escapeAttribute(report.studentId) + '" data-month="' + escapeAttribute(report.month) + '" data-monthly-subject="' + escapeAttribute(report.subject) + '" data-monthly-report-key="' + escapeAttribute(reportKey) + '"><i data-lucide="trash-2"></i>삭제</button>' : '<span></span>',
+            '      <button type="button" class="button-primary monthly-report-icon-button ' + (saving ? 'is-loading' : '') + '" data-action="save-monthly-report-modal" title="' + escapeAttribute(saving ? '저장 중' : '상세 리포트 저장') + '" aria-label="' + escapeAttribute(saving ? '상세 리포트 저장 중' : '상세 리포트 저장') + '" ' + (saving ? 'disabled' : '') + '><i data-lucide="save"></i></button>',
+            '    </div>'
+          ].join('') : '<div class="helper-text">강사는 자신이 입력한 리포트만 수정/삭제할 수 있고, 관리자는 모든 리포트를 수정/삭제할 수 있습니다.</div>',
           '  </section>',
           '</div>'
         ].join('');
@@ -24086,7 +24152,7 @@
               '    <div><strong>목표</strong><p>' + escapeHtml(report.goal || '-') + '</p></div>',
               '    <div><strong>진도</strong><p>' + escapeHtml(report.progress || '-') + '</p></div>',
               '    <div><strong>계획/보완</strong><p>' + escapeHtml(report.plan || '-') + '</p></div>',
-              canEditReport ? '    <div class="monthly-report-summary-actions"><button type="button" class="profile-link-button monthly-report-icon-button" data-action="edit-monthly-report" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '" data-monthly-report-key="' + escapeAttribute(reportKey) + '" title="내용 수정" aria-label="' + escapeAttribute(subject + ' 월간 리포트 내용 수정') + '"><i data-lucide="pencil"></i></button></div>' : '',
+              canEditReport ? '    <div class="monthly-report-summary-actions"><button type="button" class="profile-link-button monthly-report-icon-button" data-action="edit-monthly-report" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '" data-monthly-report-key="' + escapeAttribute(reportKey) + '" title="내용 수정" aria-label="' + escapeAttribute(subject + ' 월간 리포트 내용 수정') + '"><i data-lucide="pencil"></i></button><button type="button" class="profile-link-button monthly-report-icon-button danger" data-action="delete-monthly-report" data-student-id="' + escapeAttribute(studentId) + '" data-month="' + escapeAttribute(monthKey) + '" data-monthly-subject="' + escapeAttribute(subject) + '" data-monthly-report-key="' + escapeAttribute(reportKey) + '" title="리포트 삭제" aria-label="' + escapeAttribute(subject + ' 월간 리포트 삭제') + '"><i data-lucide="trash-2"></i></button></div>' : '',
               '  </div>'
             ].join('') : '',
             '</article>'
@@ -24386,6 +24452,23 @@
         });
       }
 
+      function deleteMonthlyReportViaFirebaseDirect_(report) {
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('monthlyReportWrite')) {
+            throw new Error('Firebase 월간 학습 리포트 삭제 경로가 준비되지 않았습니다.');
+          }
+          var reportId = String(report && report.reportId || '').trim();
+          if (!reportId) {
+            throw new Error('삭제할 월간 학습 리포트 문서 ID가 없습니다.');
+          }
+          var collectionName = (state.collections && state.collections.monthlyReports) || 'studentMonthlyReports';
+          return state.firestore.collection(collectionName).doc(reportId).delete().then(function() {
+            return normalizeMonthlyReportDoc_(report);
+          });
+        });
+      }
+
       function mergeMonthlyReportsInState_(studentId, rows) {
         var targetId = String(studentId || '');
         var current = (APP_STATE.monthlyReportsByStudentId[targetId] || []).slice();
@@ -24412,6 +24495,28 @@
             APP_STATE.monthlyReportsLoadedStudentIds[getMonthlyReportLoadKey_(targetId, normalized.month)] = true;
           }
         });
+      }
+
+      function removeMonthlyReportFromState_(report) {
+        var normalized = normalizeMonthlyReportDoc_(report);
+        var targetId = String(normalized.studentId || '');
+        var reportId = String(normalized.reportId || '');
+        var stableKey = String(getMonthlyReportStableKey_(normalized) || '');
+        var detailKey = getMonthlyReportDetailKey_(targetId, normalized.month, normalized.subject, stableKey);
+        APP_STATE.monthlyReportsByStudentId[targetId] = (APP_STATE.monthlyReportsByStudentId[targetId] || []).filter(function(item) {
+          var itemReportId = String(item.reportId || '');
+          var itemStableKey = String(getMonthlyReportStableKey_(item) || '');
+          return reportId ? itemReportId !== reportId : itemStableKey !== stableKey;
+        });
+        delete APP_STATE.monthlyReportDrafts[getMonthlyReportDraftKey_(targetId, normalized.month, normalized.subject, normalized.authorId)];
+        delete APP_STATE.monthlyReportExpandedRows[detailKey];
+        delete APP_STATE.monthlyReportEditTargets[getMonthlyReportEditTargetKey_(targetId, normalized.month)];
+        if (APP_STATE.monthlyReportChartPopovers[targetId] === detailKey) {
+          delete APP_STATE.monthlyReportChartPopovers[targetId];
+        }
+        if (APP_STATE.monthlyReportDetailModal && APP_STATE.monthlyReportDetailModal.detailKey === detailKey) {
+          APP_STATE.monthlyReportDetailModal = null;
+        }
       }
 
       function refreshMonthlyReportsForStudent_(studentId, monthKey) {
@@ -24560,6 +24665,114 @@
           });
       }
 
+      function handleMonthlyReportModalSave_(button) {
+        var modal = button && button.closest('[data-monthly-report-detail-modal]');
+        if (!modal) {
+          return;
+        }
+        var studentId = modal.getAttribute('data-student-id') || '';
+        var monthKey = modal.getAttribute('data-month') || getCurrentMonthlyReportMonth_();
+        var subject = modal.getAttribute('data-monthly-subject') || '';
+        var reportKey = modal.getAttribute('data-monthly-report-key') || '';
+        var student = findStudentById_(studentId);
+        var report = getMonthlyReportByStableKey_(studentId, monthKey, subject, reportKey);
+        if (!student || !report) {
+          setNotice('저장할 월간 학습 리포트를 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        if (!canEditMonthlyReportDoc_(report, student)) {
+          setNotice('강사는 자신이 입력한 리포트만 수정할 수 있습니다.', 'warning');
+          return;
+        }
+        var authorId = report.authorId || getMonthlyReportAuthorId_();
+        var draft = getMonthlyReportDraft_(studentId, monthKey, subject, authorId);
+        var targetMonth = normalizeMonthlyReportMonthKey_(draft.month || monthKey);
+        var rows = [{
+          subject: subject,
+          reportId: report.reportId || '',
+          authorId: authorId,
+          authorName: report.authorName || getMonthlyReportAuthorName_(),
+          month: targetMonth,
+          goal: draft.goal || '',
+          progress: draft.progress || '',
+          plan: draft.plan || '',
+          score: draft.score === undefined ? '' : draft.score
+        }];
+        var savingKey = [studentId, monthKey, subject, authorId, report.reportId || ''].join('|');
+        APP_STATE.monthlyReportSavingKey = savingKey;
+        setLoading('월간 학습 리포트를 저장하는 중입니다.', true);
+        renderStudents();
+        if (APP_STATE.selectedStudentDetailId) {
+          renderStudentDetailModal_();
+        }
+        saveMonthlyReportsForStudentViaFirebaseDirect_(student, monthKey, rows)
+          .then(function(savedRows) {
+            mergeMonthlyReportsInState_(studentId, savedRows);
+            if (targetMonth !== monthKey) {
+              setSelectedMonthlyReportMonth_(studentId, targetMonth);
+            }
+            if (savedRows && savedRows[0]) {
+              var saved = savedRows[0];
+              var savedKey = getMonthlyReportDetailKey_(studentId, saved.month, saved.subject, getMonthlyReportStableKey_(saved));
+              APP_STATE.monthlyReportDetailModal = { detailKey: savedKey };
+              APP_STATE.monthlyReportChartPopovers[studentId] = savedKey;
+              setMonthlyReportEditTarget_(studentId, targetMonth, saved);
+            }
+            setNotice('월간 학습 리포트가 저장되었습니다.', 'success');
+          })
+          .catch(handleApiError_)
+          .finally(function() {
+            APP_STATE.monthlyReportSavingKey = '';
+            clearLoading();
+            renderStudents();
+            if (APP_STATE.selectedStudentDetailId) {
+              renderStudentDetailModal_();
+            }
+          });
+      }
+
+      function handleMonthlyReportDelete_(button) {
+        var studentId = button.getAttribute('data-student-id') || APP_STATE.selectedStudentId || APP_STATE.selectedStudentDetailId || '';
+        var monthKey = button.getAttribute('data-month') || getSelectedMonthlyReportMonth_(studentId);
+        var subject = button.getAttribute('data-monthly-subject') || '';
+        var reportKey = button.getAttribute('data-monthly-report-key') || '';
+        var student = findStudentById_(studentId);
+        var report = getMonthlyReportByStableKey_(studentId, monthKey, subject, reportKey);
+        if (!student || !report) {
+          setNotice('삭제할 월간 학습 리포트를 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        if (!canDeleteMonthlyReportDoc_(report, student)) {
+          setNotice('강사는 자신이 입력한 리포트만 삭제할 수 있습니다.', 'warning');
+          return;
+        }
+        var confirmMessage = formatMonthlyReportMonth_(report.month) + ' ' + report.subject + ' 리포트를 삭제할까요? 삭제하면 다른 사용자에게도 더 이상 표시되지 않습니다.';
+        if (!window.confirm(confirmMessage)) {
+          return;
+        }
+        var deletingKey = [studentId, monthKey, subject, report.authorId || '', report.reportId || ''].join('|');
+        APP_STATE.monthlyReportSavingKey = deletingKey;
+        setLoading('월간 학습 리포트를 삭제하는 중입니다.', true);
+        renderStudents();
+        if (APP_STATE.selectedStudentDetailId) {
+          renderStudentDetailModal_();
+        }
+        deleteMonthlyReportViaFirebaseDirect_(report)
+          .then(function(deletedReport) {
+            removeMonthlyReportFromState_(deletedReport);
+            setNotice('월간 학습 리포트를 삭제했습니다.', 'success');
+          })
+          .catch(handleApiError_)
+          .finally(function() {
+            APP_STATE.monthlyReportSavingKey = '';
+            clearLoading();
+            renderStudents();
+            if (APP_STATE.selectedStudentDetailId) {
+              renderStudentDetailModal_();
+            }
+          });
+      }
+
       function getStudentProfileBoardTab_(studentId) {
         return APP_STATE.studentProfileBoardTabs[String(studentId || '')] || 'logs';
       }
@@ -24608,7 +24821,6 @@
             '<div class="profile-board-head"><div><h3>' + escapeHtml(student.studentName || '-') + ' 프로필 보드</h3><div class="helper-text">학교명과 학년은 확인 가능하며, 상세 데이터는 권한 승인 후 표시됩니다.</div></div>' + renderPermissionRequestButton_(student) + '</div>',
             '<div class="profile-board-body">',
             '  <section class="profile-summary">',
-            '    <div class="profile-avatar">' + escapeHtml(getInitial(student.studentName)) + '</div>',
             '    <div><h4>' + escapeHtml(student.studentName || '-') + '</h4><p>' + renderStudentSchoolGradeHtml_(student, true) + '</p></div>',
             '  </section>',
             '  <section class="permission-request-card">',
@@ -24629,7 +24841,6 @@
           '<div class="profile-board-head"><div><h3>' + escapeHtml(student.studentName || '-') + ' 프로필 보드</h3><div class="helper-text">권한, 상담, 시험, 자료 연결 상태</div></div><button type="button" class="mini-button" data-action="show-student-profile">상세 보기</button></div>',
           '<div class="profile-board-body">',
           '  <section class="profile-summary">',
-          '    <div class="profile-avatar">' + escapeHtml(getInitial(student.studentName)) + '</div>',
           '    <div><h4>' + escapeHtml(student.studentName || '-') + '</h4><p>' + renderStudentSchoolGradeHtml_(student, true) + '</p></div>',
                renderStudentLearningSummary_(student),
           '  </section>',
@@ -25245,6 +25456,18 @@
         var saveMonthlyReportButton = event.target.closest('[data-action="save-monthly-report"]');
         if (saveMonthlyReportButton) {
           handleMonthlyReportSave_(saveMonthlyReportButton);
+          return;
+        }
+
+        var saveMonthlyReportModalButton = event.target.closest('[data-action="save-monthly-report-modal"]');
+        if (saveMonthlyReportModalButton) {
+          handleMonthlyReportModalSave_(saveMonthlyReportModalButton);
+          return;
+        }
+
+        var deleteMonthlyReportButton = event.target.closest('[data-action="delete-monthly-report"]');
+        if (deleteMonthlyReportButton) {
+          handleMonthlyReportDelete_(deleteMonthlyReportButton);
           return;
         }
 
@@ -27091,6 +27314,18 @@
         var saveMonthlyReportButton = event.target.closest('[data-action="save-monthly-report"]');
         if (saveMonthlyReportButton) {
           handleMonthlyReportSave_(saveMonthlyReportButton);
+          return;
+        }
+
+        var saveMonthlyReportModalButton = event.target.closest('[data-action="save-monthly-report-modal"]');
+        if (saveMonthlyReportModalButton) {
+          handleMonthlyReportModalSave_(saveMonthlyReportModalButton);
+          return;
+        }
+
+        var deleteMonthlyReportButton = event.target.closest('[data-action="delete-monthly-report"]');
+        if (deleteMonthlyReportButton) {
+          handleMonthlyReportDelete_(deleteMonthlyReportButton);
           return;
         }
 
