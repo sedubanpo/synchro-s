@@ -17025,6 +17025,7 @@
           examCategory: '내신',
           term: '1학기',
           examName: '1학기 중간고사',
+          mockExamSource: '',
           school: '',
           grade: '',
           subject: ''
@@ -20909,6 +20910,9 @@
         var subjectName = normalizeGradeSubjectNameAliasClient_(payload.subjectCategory || payload.subjectArea, payload.subjectName || payload.detailSubject || payload.subjectArea || '');
         var subjectCategory = normalizeGradeSubjectCategoryClient_(payload.subjectCategory || payload.subjectArea, subjectName);
         var subjectId = buildGradeSubjectIdClient_(subjectCategory, subjectName) || payload.subjectId || '';
+        var mockExamSource = getGradeExamTypeGroup_(payload || {}) === '모의고사'
+          ? (normalizeGradeMockExamSource_(payload.mockExamSource || payload.examSource || payload.mockSource || payload.providerType || payload.provider) || '교육청')
+          : '';
         return Object.assign({}, payload, {
           gradeId: gradeId,
           subjectId: subjectId,
@@ -20916,6 +20920,8 @@
           detailSubject: subjectName,
           subjectCategory: subjectCategory,
           subjectName: subjectName,
+          mockExamSource: mockExamSource,
+          examSource: mockExamSource,
           rawScore: payload.rawScore || payload.finalScore || payload.provisionalScore || '',
           finalScore: payload.finalScore || payload.rawScore || '',
           createdAt: createdAt,
@@ -20940,6 +20946,7 @@
           payload.examCategory,
           payload.term,
           payload.examName,
+          getGradeExamTypeGroup_(payload || {}) === '모의고사' ? getGradeRecordMockExamSource_(payload) : '',
           payload.examRound,
           payload.examMonth,
           payload.examDate,
@@ -21060,6 +21067,7 @@
           payload.examCategory,
           payload.term,
           payload.examName,
+          getGradeExamTypeGroup_(payload || {}) === '모의고사' ? getGradeRecordMockExamSource_(payload) : '',
           payload.examRound,
           payload.examMonth,
           payload.examDate,
@@ -21078,6 +21086,7 @@
             record.examCategory,
             record.term,
             record.examName,
+            getGradeExamTypeGroup_(record || {}) === '모의고사' ? getGradeRecordMockExamSource_(record) : '',
             record.examRound,
             record.examMonth,
             record.examDate,
@@ -37249,7 +37258,8 @@
 
       function getGradeCurrentExamLabel_() {
         var filters = APP_STATE.gradeFilters;
-        return [filters.schoolYear, filters.examCategory, filters.term, filters.examName].filter(Boolean).join(' · ');
+        var mockSource = filters.examCategory === '모의고사' ? normalizeGradeMockExamSource_(filters.mockExamSource) : '';
+        return [filters.schoolYear, filters.examCategory, mockSource, filters.term, filters.examName].filter(Boolean).join(' · ');
       }
 
       function getGradeExamMonth_(examName) {
@@ -37258,6 +37268,35 @@
           return match[1] + '월';
         }
         return String(examName || '') === '수능' ? '11월' : '';
+      }
+
+      function normalizeGradeMockExamSource_(value) {
+        var text = normalizeSearchText(value);
+        if (!text) {
+          return '';
+        }
+        if (/사설|대성|종로|이투스|메가|강대|러셀|비상|사교육|private/.test(text)) {
+          return '사설';
+        }
+        if (/교육청|학평|전국연합|전국연합학력평가|official|public/.test(text)) {
+          return '교육청';
+        }
+        return '';
+      }
+
+      function getGradeRecordMockExamSource_(record) {
+        if (getGradeExamTypeGroup_(record || {}) !== '모의고사') {
+          return '';
+        }
+        return normalizeGradeMockExamSource_(record && (record.mockExamSource || record.examSource || record.mockSource || record.providerType || record.provider)) || '교육청';
+      }
+
+      function formatGradeMockExamSourcePrefix_(record) {
+        var source = getGradeRecordMockExamSource_(record);
+        if (!source) {
+          return '';
+        }
+        return source === '사설' ? '사설' : '교육청';
       }
 
       function getStudentInitial_(student) {
@@ -37589,6 +37628,7 @@
           examCategory: '내신',
           term: '1학기',
           examName: '1학기 중간고사',
+          mockExamSource: '',
           school: '',
           grade: '',
           subject: ''
@@ -37783,6 +37823,9 @@
         if (!APP_STATE.gradeFilters.examRound) {
           APP_STATE.gradeFilters.examRound = '';
         }
+        if (!APP_STATE.gradeFilters.mockExamSource) {
+          APP_STATE.gradeFilters.mockExamSource = '';
+        }
         if (!APP_STATE.gradeFilters.subjectCategory) {
           APP_STATE.gradeFilters.subjectCategory = '';
         }
@@ -37952,9 +37995,16 @@
           var mockExams = (optionSet.mockExams || GRADE_MOCK_EXAMS || []).filter(function(name) {
             return name && name !== '수능';
           });
-          return renderGradeFilterButtonGroupV2_('모의고사 월', mockExams.map(function(examName) {
+          return [
+            renderGradeFilterButtonGroupV2_('모의고사 월', mockExams.map(function(examName) {
             return renderGradeQuickFilterButtonV2_('examName', examName, examName.replace(' 모의고사', ''), String(filters.examName || '') === String(examName), '');
-          }).join(''));
+            }).join('')),
+            renderGradeFilterButtonGroupV2_('모의고사 구분', [
+              renderGradeQuickFilterButtonV2_('mockExamSource', '', '전체', !filters.mockExamSource, ''),
+              renderGradeQuickFilterButtonV2_('mockExamSource', '교육청', '교육청', normalizeGradeMockExamSource_(filters.mockExamSource) === '교육청', ''),
+              renderGradeQuickFilterButtonV2_('mockExamSource', '사설', '사설', normalizeGradeMockExamSource_(filters.mockExamSource) === '사설', '')
+            ].join(''))
+          ].join('');
         }
         if (category === '수능') {
           return renderGradeFilterButtonGroupV2_('시험', renderGradeQuickFilterButtonV2_('examName', '수능', '수능', String(filters.examName || '') === '수능', ''));
@@ -37990,6 +38040,7 @@
         if (key === 'examCategory') {
           APP_STATE.gradeFilters.examName = getDefaultGradeExamName_(value);
           APP_STATE.gradeFilters.term = value === '내신' ? '1학기' : '';
+          APP_STATE.gradeFilters.mockExamSource = value === '모의고사' ? (APP_STATE.gradeFilters.mockExamSource || '') : '';
         }
         if (key === 'term') {
           var internalExams = (getGradeExamOptionSet_().internalExams || GRADE_INTERNAL_EXAMS || []).filter(Boolean);
@@ -38353,7 +38404,8 @@
       }
 
       function renderGradeExamBadgeV2_(record) {
-        var label = [record.examCategory, record.term, record.examName, record.examRound].filter(Boolean).join(' · ') || '-';
+        var mockSource = getGradeExamTypeGroup_(record) === '모의고사' ? getGradeRecordMockExamSource_(record) : '';
+        var label = [record.examCategory, mockSource, record.term, record.examName, record.examRound].filter(Boolean).join(' · ') || '-';
         return '<span class="grade-exam-badge ' + (isMajorGradeExamV2_(record) ? 'major' : '') + '">' + escapeHtml(label) + '</span>';
       }
 
@@ -39291,6 +39343,7 @@
           if (key === 'examCategory') {
             APP_STATE.gradeFilters.examName = getDefaultGradeExamName_(target.value);
             APP_STATE.gradeFilters.term = target.value === '내신' ? '1학기' : '';
+            APP_STATE.gradeFilters.mockExamSource = target.value === '모의고사' ? (APP_STATE.gradeFilters.mockExamSource || '') : '';
           }
           if (key === 'examName' && APP_STATE.gradeFilters.examCategory === '내신') {
             APP_STATE.gradeFilters.term = String(target.value || '').indexOf('2학기') !== -1 ? '2학기' : '1학기';
@@ -39357,7 +39410,7 @@
         Object.keys(APP_STATE.gradeDrafts || {}).forEach(function(key) {
           var parts = key.split('|');
           var studentId = parts[0] || '';
-          var subjectId = parts[6] || '';
+          var subjectId = parts[7] || parts[6] || '';
           if (selectedIds.length && selectedIds.indexOf(studentId) === -1) {
             return;
           }
@@ -39404,6 +39457,9 @@
         var examName = record ? (record.examName || '') : (APP_STATE.gradeFilters.examName || getDefaultGradeExamName_(examCategory));
         var examYear = record ? (record.examYear || record.schoolYear || getGradeYear_()) : getGradeYear_();
         var examRound = record ? (record.examRound || '') : (APP_STATE.gradeFilters.examRound || '');
+        var mockExamSource = examCategory === '모의고사'
+          ? (normalizeGradeMockExamSource_(getDraftOrRecordValue_(draft, record, 'mockExamSource')) || normalizeGradeMockExamSource_(record && (record.mockExamSource || record.examSource || record.mockSource || record.providerType || record.provider)) || normalizeGradeMockExamSource_(APP_STATE.gradeFilters.mockExamSource) || '교육청')
+          : '';
         var createdByName = getDraftOrRecordValue_(draft, record, 'createdByName');
         var createdById = getDraftOrRecordValue_(draft, record, 'createdById');
         if (APP_STATE.isAdmin && draft.createdByName !== undefined) {
@@ -39427,6 +39483,8 @@
           examCategory: examCategory,
           term: examCategory === '내신' ? (term || '1학기') : '',
           examName: examName || getDefaultGradeExamName_(examCategory),
+          mockExamSource: mockExamSource,
+          examSource: mockExamSource,
           examRound: examRound,
           examMonth: record ? (record.examMonth || getGradeExamMonth_(examName || '')) : getGradeExamMonth_(examName || ''),
           examDate: record ? (record.examDate || '') : '',
@@ -39463,7 +39521,7 @@
 
       function getGradeDraftKey_(studentId, subjectId) {
         var filters = APP_STATE.gradeFilters;
-        return [studentId, getGradeYear_(), filters.examCategory || '', filters.term || '', filters.examName || '', filters.examRound || '', subjectId || ''].join('|');
+        return [studentId, getGradeYear_(), filters.examCategory || '', filters.term || '', filters.examName || '', filters.examCategory === '모의고사' ? (normalizeGradeMockExamSource_(filters.mockExamSource) || '') : '', filters.examRound || '', subjectId || ''].join('|');
       }
 
       function getGradeRecordForStudent_(studentId, subjectId) {
@@ -39474,6 +39532,7 @@
             String(record.examCategory || '') === String(filters.examCategory || '') &&
             String(record.term || '') === String(filters.examCategory === '내신' ? (filters.term || '') : '') &&
             String(record.examName || '') === String(filters.examName || '') &&
+            (!filters.mockExamSource || filters.examCategory !== '모의고사' || String(getGradeRecordMockExamSource_(record)) === String(normalizeGradeMockExamSource_(filters.mockExamSource))) &&
             String(record.examRound || '') === String(filters.examRound || '') &&
             String(record.subjectId || buildGradeSubjectIdClient_(record.subjectCategory, record.subjectName)) === String(subjectId || '');
         }) || null;
@@ -39498,7 +39557,7 @@
 
       function getGradeRecordForKey_(key) {
         var parts = String(key || '').split('|');
-        return getGradeRecordForStudent_(parts[0] || '', parts[6] || '');
+        return getGradeRecordForStudent_(parts[0] || '', parts[7] || parts[6] || '');
       }
 
       function getGradeFilteredStudents_() {
@@ -39556,7 +39615,8 @@
 
       function getGradeCurrentExamLabel_() {
         var filters = APP_STATE.gradeFilters;
-        return [getGradeYear_() + '년', filters.examCategory, filters.term, filters.examName, filters.examRound].filter(Boolean).join(' · ');
+        var mockSource = filters.examCategory === '모의고사' ? normalizeGradeMockExamSource_(filters.mockExamSource) : '';
+        return [getGradeYear_() + '년', filters.examCategory, mockSource, filters.term, filters.examName, filters.examRound].filter(Boolean).join(' · ');
       }
 
       function getGradeVisibleSubjects_() {
@@ -39658,6 +39718,10 @@
           cloned.grade = cloned.grade || matchedStudent.grade || '';
         }
         cloned.examYear = cloned.examYear || cloned.year || cloned.schoolYear || '';
+        cloned.mockExamSource = getGradeExamTypeGroup_(cloned) === '모의고사'
+          ? (normalizeGradeMockExamSource_(cloned.mockExamSource || cloned.examSource || cloned.mockSource || cloned.providerType || cloned.provider) || '교육청')
+          : '';
+        cloned.examSource = cloned.mockExamSource;
         cloned.subjectName = normalizeGradeSubjectNameAliasClient_(cloned.subjectCategory || cloned.subjectArea, cloned.subjectName || cloned.detailSubject || cloned.subjectArea || '');
         cloned.subjectCategory = normalizeGradeSubjectCategoryClient_(cloned.subjectCategory || cloned.subjectArea, cloned.subjectName);
         cloned.subjectId = buildGradeSubjectIdClient_(cloned.subjectCategory, cloned.subjectName) || cloned.subjectId;
@@ -39789,6 +39853,7 @@
             (!filters.examCategory || record.examCategory === filters.examCategory) &&
             (!filters.term || filters.examCategory !== '내신' || record.term === filters.term) &&
             (!filters.examName || record.examName === filters.examName) &&
+            (!filters.mockExamSource || filters.examCategory !== '모의고사' || getGradeRecordMockExamSource_(record) === normalizeGradeMockExamSource_(filters.mockExamSource)) &&
             (!filters.examRound || record.examRound === filters.examRound) &&
             (!filters.school || record.school === filters.school) &&
             (!filters.grade || record.grade === filters.grade) &&
@@ -39884,7 +39949,10 @@
         if (type === '내신') {
           return ['내신', record.school || '학교 미정', record.grade || '학년 미정', subjectKey].join('|');
         }
-        if (type === '모의고사' || type === '수능') {
+        if (type === '모의고사') {
+          return [type, getGradeRecordMockExamSource_(record), record.grade || '학년 미정', subjectKey].join('|');
+        }
+        if (type === '수능') {
           return [type, record.grade || '학년 미정', subjectKey].join('|');
         }
         return [type, subjectKey].join('|');
@@ -40245,6 +40313,11 @@
         }
         var editorSubjectName = getDraftOrRecordValue_(draft, record, 'subjectName') || subject.subjectName || '';
         var editorSubjectCategory = normalizeGradeSubjectCategoryClient_(getDraftOrRecordValue_(draft, record, 'subjectCategory') || subject.subjectCategory, editorSubjectName);
+        var editorExamCategory = record ? (record.examCategory || '') : (APP_STATE.gradeFilters.examCategory || '');
+        var editorMockExamSource = normalizeGradeMockExamSource_(getDraftOrRecordValue_(draft, record, 'mockExamSource') || getGradeRecordMockExamSource_(record) || APP_STATE.gradeFilters.mockExamSource || '교육청') || '교육청';
+        var mockSourceField = editorExamCategory === '모의고사'
+          ? renderGradeEditorSelectV2_('mockExamSource', '모의고사 구분', ['교육청', '사설'], editorMockExamSource)
+          : '';
         var authorValue = getDraftOrRecordValue_(draft, record, 'createdByName') || '';
         var authorField = APP_STATE.isAdmin ? renderGradeEditorAuthorField_(authorValue) : '';
         var deleteAction = APP_STATE.isAdmin && record && record.gradeId ? '<button type="button" class="mini-button" style="color:#b91c1c;border-color:#fecaca;background:#fff7f7;" data-grade-action="delete-grade" data-grade-id="' + escapeAttribute(record.gradeId || '') + '"><i data-lucide="trash-2"></i> 삭제</button>' : '';
@@ -40255,6 +40328,7 @@
           '<div class="modal-backdrop"><div class="modal-card grade-modal-panel">',
           '<div class="modal-top"><div><h3>' + escapeHtml(student.studentName || '-') + ' · ' + escapeHtml(editorSubjectCategory || subject.subjectName || '-') + '</h3><p>' + escapeHtml(getGradeCurrentExamLabel_()) + '</p></div><button type="button" class="icon-button" data-grade-action="close-grade-modal" aria-label="닫기">×</button></div>',
           '<div class="modal-body"><div class="grade-modal-grid">',
+          mockSourceField,
           renderGradeEditorSelectV2_('subjectCategory', '대과목', getGradeCategoryOptionsForEditor_(editorSubjectCategory), editorSubjectCategory),
           renderGradeEditorFieldV2_('subjectName', '세부 과목', escapeAttribute(editorSubjectName)),
           renderGradeEditorFieldV2_('provisionalScore', '가채점', value('provisionalScore')),
@@ -40491,19 +40565,20 @@
         var currentTerm = APP_STATE.gradeFilters.term || '';
         var currentExamName = APP_STATE.gradeFilters.examName || '';
         var rows = [
-          ['입력강사명', getGradeCurrentUserNameV2_(), '', '', '', '', '', '', '', '', '', '', '', '', ''],
-          ['작성법', '한 행=학생 1명', '학교명', '학년 숫자', '연도', '시험분류', '학기', '시험명', '시험회차', '과목분류', '과목명', '가채점', '최종점수', '등급', '학생ID 선택'],
-          ['내신', '학생명', '학교', '2', currentYear, '내신', '1학기/2학기', '1학기 중간고사', '보통 비움', '과학', '생명과학', '90', '92', '2', ''],
-          ['모의고사', '학생명', '학교', '3', currentYear, '모의고사', '비워도 됨', '3월 모의고사', '보통 비움', '국어', '국어', '', '87', '2', ''],
-          ['테스트', '학생명', '학교', '3', currentYear, '테스트', '비워도 됨', '단어 테스트', '1회', '영어', '영어', '18', '20', '', ''],
-          ['수능', '학생명', '학교', '3', currentYear, '수능', '비움', '수능', '비움', '수학', '확통', '', '84', '2', ''],
-          ['중요', '아래 제목줄 삭제 금지', '입력은 제목줄 아래 빈 줄부터', '동명이인은 학교/학년 필수', '시험분류는 내신/테스트/모의고사/수능 중 하나', '', '', '', '', '', '', '', '', '', ''],
-          ['학생명', '학교', '학년', '연도', '시험분류', '학기', '시험명', '시험회차', '과목분류', '과목명', '가채점', '최종점수', '등급', '메모', '학생ID(선택)'],
-          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+          ['입력강사명', getGradeCurrentUserNameV2_(), '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+          ['작성법', '한 행=학생 1명', '학교명', '학년 숫자', '연도', '시험분류', '학기', '시험명', '시험회차', '과목분류', '과목명', '가채점', '최종점수', '등급', '학생ID 선택', '모의고사는 교육청/사설 입력'],
+          ['내신', '학생명', '학교', '2', currentYear, '내신', '1학기/2학기', '1학기 중간고사', '보통 비움', '과학', '생명과학', '90', '92', '2', '', ''],
+          ['모의고사', '학생명', '학교', '3', currentYear, '모의고사', '비워도 됨', '3월 모의고사', '보통 비움', '국어', '국어', '', '87', '2', '', '교육청'],
+          ['사설 모의고사', '학생명', '학교', '3', currentYear, '모의고사', '비워도 됨', '6월 모의고사', '보통 비움', '수학', '미적분', '', '76', '3', '', '사설'],
+          ['테스트', '학생명', '학교', '3', currentYear, '테스트', '비워도 됨', '단어 테스트', '1회', '영어', '영어', '18', '20', '', '', ''],
+          ['수능', '학생명', '학교', '3', currentYear, '수능', '비움', '수능', '비움', '수학', '확통', '', '84', '2', '', ''],
+          ['중요', '아래 제목줄 삭제 금지', '입력은 제목줄 아래 빈 줄부터', '동명이인은 학교/학년 필수', '시험분류는 내신/테스트/모의고사/수능 중 하나', '', '', '', '', '', '', '', '', '', '', ''],
+          ['학생명', '학교', '학년', '연도', '시험분류', '학기', '시험명', '시험회차', '과목분류', '과목명', '가채점', '최종점수', '등급', '메모', '학생ID(선택)', '모의고사구분'],
+          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+          ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
         ];
         downloadTextFileV2_('s-lms-grade-template-' + currentYear + '.csv', rows.map(function(row) {
           return row.map(csvEscapeV2_).join(',');
@@ -40604,7 +40679,7 @@
         if (!dataRows.length) {
           throw new Error('업로드 양식의 제목줄을 찾지 못했습니다. 제목줄(학생명, 학교, 학년...)은 삭제하지 말고, 실제 성적은 제목줄 아래 빈 줄부터 입력해주세요.');
         }
-        var headers = ['학생명', '학교', '학년', '연도', '시험분류', '학기', '시험명', '시험회차', '과목분류', '과목명', '가채점', '최종점수', '등급', '메모', '학생ID'];
+        var headers = ['학생명', '학교', '학년', '연도', '시험분류', '학기', '시험명', '시험회차', '과목분류', '과목명', '가채점', '최종점수', '등급', '메모', '학생ID', '모의고사구분'];
         return dataRows.map(function(cells) {
           var row = {};
           headers.forEach(function(header, cellIndex) {
@@ -40656,6 +40731,9 @@
         if (/^학생ID/.test(text)) {
           return '학생ID';
         }
+        if (/^(모의고사\s*구분|모의고사구분|시험출처|출처|사설여부)$/.test(text)) {
+          return '모의고사구분';
+        }
         return text;
       }
 
@@ -40692,6 +40770,9 @@
         var term = cleanGradeUploadCellV2_(row['학기']) || APP_STATE.gradeFilters.term || '';
         var examName = cleanGradeUploadCellV2_(row['시험명']) || APP_STATE.gradeFilters.examName || '';
         var examRound = cleanGradeUploadCellV2_(row['시험회차']) || APP_STATE.gradeFilters.examRound || '';
+        var mockExamSource = examCategory === '모의고사'
+          ? (normalizeGradeMockExamSource_(cleanGradeUploadCellV2_(row['모의고사구분'])) || normalizeGradeMockExamSource_(APP_STATE.gradeFilters.mockExamSource) || '교육청')
+          : '';
         var studentMatch = findGradeStudentForImportV2_(studentIdLabel, studentNameLabel, schoolLabel, gradeLabel);
         var student = studentMatch.student || null;
         var subject = findGradeSubjectForImportV2_(subjectName, subjectCategoryLabel);
@@ -40721,6 +40802,8 @@
           examCategory: examCategory,
           term: term,
           examName: examName,
+          mockExamSource: mockExamSource,
+          examSource: mockExamSource,
           examRound: examRound,
           examMonth: getGradeExamMonth_(examName),
           subjectId: subject.subjectId,
@@ -41348,6 +41431,7 @@
           getGradeExamTypeGroup_(record),
           record.term || '',
           record.examName || '',
+          getGradeExamTypeGroup_(record) === '모의고사' ? getGradeRecordMockExamSource_(record) : '',
           record.examRound || ''
         ].join('|');
       }
@@ -41384,6 +41468,7 @@
           getGradeExamTypeGroup_(record),
           record.term || '',
           record.examName || '',
+          getGradeExamTypeGroup_(record) === '모의고사' ? getGradeRecordMockExamSource_(record) : '',
           record.examRound || '',
           record.examMonth || '',
           record.examDate || '',
@@ -41408,6 +41493,7 @@
           getGradeExamTypeGroup_(record),
           record.term || '',
           record.examName || '',
+          getGradeExamTypeGroup_(record) === '모의고사' ? getGradeRecordMockExamSource_(record) : '',
           record.examRound || '',
           record.examMonth || '',
           record.examDate || '',
@@ -41605,6 +41691,12 @@
         var parts = [];
         if (type === '내신' && record.term) {
           parts.push(record.term);
+        }
+        if (type === '모의고사') {
+          var source = formatGradeMockExamSourcePrefix_(record);
+          if (source) {
+            parts.push(source);
+          }
         }
         if (record.examName) {
           parts.push(record.examName);
@@ -41976,6 +42068,7 @@
           record.examYear || record.schoolYear || '',
           record.term || '',
           record.examName || '',
+          getGradeExamTypeGroup_(record) === '모의고사' ? getGradeRecordMockExamSource_(record) : '',
           record.examRound || '',
           record.examMonth || '',
           record.examDate || ''
@@ -41985,7 +42078,10 @@
       function buildGradeTrendSubjectKey_(record) {
         var family = getGradeSubjectFamily_(record && (record.subjectCategory || record.subjectArea || ''), record && (record.subjectName || record.detailSubject || ''));
         var detail = getGradeComparableSubjectDetail_(record, family);
-        return [family || record.subjectCategory || '', detail || family || record.subjectName || record.detailSubject || ''].join('|');
+        var source = getGradeExamTypeGroup_(record) === '모의고사' ? getGradeRecordMockExamSource_(record) : '';
+        return [family || record.subjectCategory || '', detail || family || record.subjectName || record.detailSubject || '', source].filter(function(value, index) {
+          return index < 2 || value;
+        }).join('|');
       }
 
       function getGradeComparableSubjectDetail_(record, family) {
@@ -42003,9 +42099,11 @@
         var subjectName = String(record && (record.subjectName || record.detailSubject || '') || '').trim();
         var detail = getGradeComparableSubjectDetail_(record, family);
         if ((family === '사회' || family === '과학') && detail && normalizeSearchText(detail) !== normalizeSearchText(family || '')) {
-          return subjectName || detail;
+          var detailLabel = subjectName || detail;
+          return getGradeRecordMockExamSource_(record) === '사설' ? detailLabel + ' · 사설' : detailLabel;
         }
-        return family || subjectName || record.subjectCategory || '과목';
+        var label = family || subjectName || record.subjectCategory || '과목';
+        return getGradeRecordMockExamSource_(record) === '사설' ? label + ' · 사설' : label;
       }
 
       function getGradeSubjectFamily_(category, subjectName) {
@@ -42091,6 +42189,9 @@
       function formatGradeTrendExamShortLabel_(record) {
         var month = String(record && (record.examMonth || getGradeExamMonth_(record.examName || '')) || '');
         if (month) {
+          if (getGradeExamTypeGroup_(record) === '모의고사') {
+            return (getGradeRecordMockExamSource_(record) === '사설' ? '사설 ' : '교육 ') + month;
+          }
           return month;
         }
         var label = formatGradeExamSubtypeLabel_(record);
@@ -42625,6 +42726,7 @@
       function applyGradeExamType_(type) {
         var nextType = getGradeTypeOrder_().indexOf(type) === -1 ? '내신' : type;
         APP_STATE.gradeFilters.examCategory = nextType;
+        APP_STATE.gradeFilters.mockExamSource = nextType === '모의고사' ? (APP_STATE.gradeFilters.mockExamSource || '') : '';
         APP_STATE.gradeFilters.term = nextType === '내신' ? (APP_STATE.gradeFilters.term || '1학기') : '';
         APP_STATE.gradeFilters.examName = getDefaultGradeExamName_(nextType);
         APP_STATE.gradeFilters.examRound = '';
