@@ -23133,15 +23133,43 @@
         return months;
       }
 
-      function buildMonthlyReportDocId_(studentId, monthKey, subject) {
-        return 'MR-' + firebaseDirectBase64UrlEncode_([studentId, monthKey, subject].join('|')).slice(0, 90);
+      function getMonthlyReportAuthorId_() {
+        var user = APP_STATE.user || {};
+        var candidates = [
+          user.userId,
+          user.email,
+          getCurrentInstructorPrimaryPermissionId_(),
+          user.phone,
+          user.name
+        ];
+        for (var i = 0; i < candidates.length; i += 1) {
+          var value = String(candidates[i] || '').trim();
+          if (value) {
+            return value;
+          }
+        }
+        return 'unknown-user';
+      }
+
+      function getMonthlyReportAuthorName_() {
+        var user = APP_STATE.user || {};
+        return String(user.name || user.userId || user.email || '작성자').trim();
+      }
+
+      function buildMonthlyReportDocId_(studentId, monthKey, subject, authorId) {
+        var parts = [studentId, monthKey, subject];
+        if (authorId) {
+          parts.push(authorId);
+        }
+        return 'MR-' + firebaseDirectBase64UrlEncode_(parts.join('|')).slice(0, 90);
       }
 
       function getMonthlyReportsForStudent_(studentId) {
         var rows = APP_STATE.monthlyReportsByStudentId[String(studentId || '')] || [];
         return rows.slice().sort(function(a, b) {
           return String(b.month || '').localeCompare(String(a.month || '')) ||
-            MONTHLY_REPORT_SUBJECTS.indexOf(a.subject) - MONTHLY_REPORT_SUBJECTS.indexOf(b.subject);
+            MONTHLY_REPORT_SUBJECTS.indexOf(a.subject) - MONTHLY_REPORT_SUBJECTS.indexOf(b.subject) ||
+            Number(b.updatedAtMs || b.createdAtMs || 0) - Number(a.updatedAtMs || a.createdAtMs || 0);
         });
       }
 
@@ -23149,24 +23177,41 @@
         return getMonthlyReportsForStudent_(studentId).filter(hasMonthlyReportContent_).length;
       }
 
-      function getMonthlyReportForSubject_(studentId, monthKey, subject) {
+      function getMonthlyReportsForSubject_(studentId, monthKey, subject) {
         var targetMonth = String(monthKey || '');
         var targetSubject = String(subject || '');
-        return getMonthlyReportsForStudent_(studentId).find(function(item) {
+        return getMonthlyReportsForStudent_(studentId).filter(function(item) {
           return String(item.month || '') === targetMonth && String(item.subject || '') === targetSubject;
+        }).filter(hasMonthlyReportContent_).sort(function(a, b) {
+          return Number(b.updatedAtMs || b.createdAtMs || 0) - Number(a.updatedAtMs || a.createdAtMs || 0);
+        });
+      }
+
+      function getMonthlyReportForSubject_(studentId, monthKey, subject) {
+        return getMonthlyReportsForSubject_(studentId, monthKey, subject)[0] || null;
+      }
+
+      function getMonthlyReportForSubjectAndAuthor_(studentId, monthKey, subject, authorId) {
+        var targetAuthor = String(authorId || getMonthlyReportAuthorId_()).trim();
+        return getMonthlyReportsForStudent_(studentId).find(function(item) {
+          var reportAuthor = String(item.authorId || '').trim();
+          return String(item.month || '') === String(monthKey || '') &&
+            String(item.subject || '') === String(subject || '') &&
+            reportAuthor &&
+            reportAuthor === targetAuthor;
         }) || null;
       }
 
-      function getMonthlyReportDraftKey_(studentId, monthKey, subject) {
-        return [studentId, monthKey, subject].join('|');
+      function getMonthlyReportDraftKey_(studentId, monthKey, subject, authorId) {
+        return [studentId, monthKey, subject, authorId || getMonthlyReportAuthorId_()].join('|');
       }
 
       function getMonthlyReportPanelKey_(studentId, monthKey) {
         return [studentId || '', monthKey || getCurrentMonthlyReportMonth_()].join('|');
       }
 
-      function getMonthlyReportDetailKey_(studentId, monthKey, subject) {
-        return [studentId || '', monthKey || '', subject || ''].join('|');
+      function getMonthlyReportDetailKey_(studentId, monthKey, subject, reportKey) {
+        return [studentId || '', monthKey || '', subject || '', reportKey || ''].join('|');
       }
 
       function getMonthlyReportLoadKey_(studentId, monthKey) {
@@ -23174,11 +23219,12 @@
       }
 
       function getMonthlyReportDraft_(studentId, monthKey, subject) {
-        var key = getMonthlyReportDraftKey_(studentId, monthKey, subject);
+        var authorId = getMonthlyReportAuthorId_();
+        var key = getMonthlyReportDraftKey_(studentId, monthKey, subject, authorId);
         if (APP_STATE.monthlyReportDrafts[key]) {
           return APP_STATE.monthlyReportDrafts[key];
         }
-        var existing = getMonthlyReportForSubject_(studentId, monthKey, subject) || {};
+        var existing = getMonthlyReportForSubjectAndAuthor_(studentId, monthKey, subject, authorId) || {};
         return {
           goal: existing.goal || '',
           progress: existing.progress || '',
@@ -23221,8 +23267,9 @@
         if (!report) {
           return null;
         }
-        var rawScore = Number(report.score);
-        if (!isNaN(rawScore)) {
+        var scoreText = String(report.score === 0 || report.score ? report.score : '').trim();
+        var rawScore = Number(scoreText);
+        if (scoreText && !isNaN(rawScore)) {
           return Math.max(0, Math.min(10, rawScore));
         }
         var filled = ['goal', 'progress', 'plan'].filter(function(field) {
@@ -23241,9 +23288,14 @@
         return MONTHLY_REPORT_SUBJECTS.map(function(subject) {
           var visual = getSubjectVisual_(subject);
           var points = months.map(function(monthKey) {
-            var report = getMonthlyReportForSubject_(studentId, monthKey, subject);
-            var value = getMonthlyReportScoreValue_(report);
-            return { month: monthKey, subject: subject, report: report, value: value };
+            var reports = getMonthlyReportsForSubject_(studentId, monthKey, subject);
+            var values = reports.map(getMonthlyReportScoreValue_).filter(function(value) {
+              return value !== null;
+            });
+            var value = values.length
+              ? Math.round((values.reduce(function(sum, item) { return sum + item; }, 0) / values.length) * 10) / 10
+              : null;
+            return { month: monthKey, subject: subject, reports: reports, report: reports[0] || null, value: value };
           });
           return { subject: subject, visual: visual, visible: getMonthlyReportChartSubjectVisible_(studentId, subject), points: points };
         });
@@ -23290,12 +23342,18 @@
             return (index ? 'L' : 'M') + point[0].toFixed(1) + ' ' + point[1].toFixed(1);
           }).join(' ');
           var circles = pathPoints.map(function(point) {
-            var report = point[2].report || {};
+            var reports = point[2].reports || [];
+            var authorText = reports.map(function(report) {
+              return report.authorName || report.updatedByName || report.createdByName || '공유 리포트';
+            }).join(', ') || '-';
+            var planText = reports.map(function(report) {
+              return report.plan || report.goal || report.progress || '';
+            }).filter(Boolean).join(' / ') || '-';
             var title = [
               formatMonthlyReportMonth_(point[2].month) + ' ' + item.subject,
-              '작성자: ' + (report.updatedByName || report.createdByName || '-'),
-              '점수: ' + point[2].value + '/10',
-              '계획: ' + (report.plan || report.goal || '-')
+              '작성자: ' + authorText,
+              '평균 점수: ' + point[2].value + '/10',
+              '계획: ' + planText
             ].join('\\n');
             return '<circle cx="' + point[0].toFixed(1) + '" cy="' + point[1].toFixed(1) + '" r="4" fill="#fff" stroke="' + item.visual.color + '" stroke-width="2"><title>' + escapeHtml(title) + '</title></circle>';
           }).join('');
@@ -23303,14 +23361,16 @@
         }).join('');
         var notes = visibleSeries.reduce(function(list, item) {
           item.points.forEach(function(point) {
-            if (point.report && hasMonthlyReportContent_(point.report)) {
-              list.push({ subject: item.subject, visual: item.visual, report: point.report, month: point.month, value: point.value });
-            }
+            (point.reports || []).forEach(function(report) {
+              if (hasMonthlyReportContent_(report)) {
+                list.push({ subject: item.subject, visual: item.visual, report: report, month: point.month, value: point.value });
+              }
+            });
           });
           return list;
         }, []).slice(-6).reverse().map(function(item) {
           var plan = item.report.plan || item.report.goal || item.report.progress || '-';
-          return '<div class="monthly-report-trend-note" style="' + escapeAttribute(buildSubjectVisualStyle_(item.visual, 'subject')) + '"><strong>' + escapeHtml(formatMonthlyReportMonthShort_(item.month) + ' · ' + item.subject + ' · ' + (item.report.updatedByName || item.report.createdByName || '-')) + '</strong><span>' + escapeHtml(plan) + '</span></div>';
+          return '<div class="monthly-report-trend-note" style="' + escapeAttribute(buildSubjectVisualStyle_(item.visual, 'subject')) + '"><strong>' + escapeHtml(formatMonthlyReportMonthShort_(item.month) + ' · ' + item.subject + ' · ' + (item.report.authorName || item.report.updatedByName || item.report.createdByName || '공유 리포트')) + '</strong><span>' + escapeHtml(plan) + '</span></div>';
         }).join('');
         return [
           '<section class="monthly-report-trend" aria-label="과목별 월간 학습 추이">',
@@ -23329,29 +23389,33 @@
       }
 
       function renderMonthlyReportSummary_(studentId, monthKey, subject) {
-        var report = getMonthlyReportForSubject_(studentId, monthKey, subject);
-        if (!hasMonthlyReportContent_(report)) {
+        var reports = getMonthlyReportsForSubject_(studentId, monthKey, subject);
+        if (!reports.length) {
           return '<div class="monthly-report-summary empty">아직 저장된 ' + escapeHtml(subject) + ' 리포트가 없습니다.</div>';
         }
         var visual = getSubjectVisual_(subject);
-        var detailKey = getMonthlyReportDetailKey_(studentId, monthKey, subject);
-        var expanded = Boolean(APP_STATE.monthlyReportExpandedRows[detailKey]);
-        var author = report.updatedByName || report.createdByName || '입력자 미상';
-        var time = report.updatedAt || report.createdAt || '';
-        var timeText = time ? (formatTeachingLogDateTime(time) || time) : '일시 미상';
-        return [
-          '<article class="monthly-report-summary" style="' + escapeAttribute(buildSubjectVisualStyle_(visual, 'subject')) + '">',
-          '  <button type="button" class="monthly-report-summary-title" data-action="toggle-monthly-report-detail" data-monthly-detail-key="' + escapeAttribute(detailKey) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '"><span><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(formatMonthlyReportMonth_(monthKey) + ' ' + subject + ' 월간 리포트') + '</span><i data-lucide="' + (expanded ? 'chevron-up' : 'chevron-down') + '"></i></button>',
-          '  <div class="monthly-report-summary-meta">' + escapeHtml(author) + ' · ' + escapeHtml(timeText) + '</div>',
-          expanded ? [
-            '  <div class="monthly-report-summary-detail">',
-            '    <div><strong>목표</strong><p>' + escapeHtml(report.goal || '-') + '</p></div>',
-            '    <div><strong>진도</strong><p>' + escapeHtml(report.progress || '-') + '</p></div>',
-            '    <div><strong>계획/보완</strong><p>' + escapeHtml(report.plan || '-') + '</p></div>',
-            '  </div>'
-          ].join('') : '',
-          '</article>'
-        ].join('');
+        return reports.map(function(report) {
+          var reportKey = report.reportId || report.authorId || report.updatedAtMs || report.createdAtMs || '';
+          var detailKey = getMonthlyReportDetailKey_(studentId, monthKey, subject, reportKey);
+          var expanded = Boolean(APP_STATE.monthlyReportExpandedRows[detailKey]);
+          var author = report.authorName || report.updatedByName || report.createdByName || '공유 리포트';
+          var time = report.updatedAt || report.createdAt || '';
+          var timeText = time ? (formatTeachingLogDateTime(time) || time) : '일시 미상';
+          var scoreText = report.score === 0 || report.score ? ' · 추이 ' + report.score + '/10' : '';
+          return [
+            '<article class="monthly-report-summary" style="' + escapeAttribute(buildSubjectVisualStyle_(visual, 'subject')) + '">',
+            '  <button type="button" class="monthly-report-summary-title" data-action="toggle-monthly-report-detail" data-monthly-detail-key="' + escapeAttribute(detailKey) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '"><span><i data-lucide="' + escapeAttribute(visual.icon) + '"></i>' + escapeHtml(formatMonthlyReportMonth_(monthKey) + ' ' + subject + ' 월간 리포트 · ' + author) + '</span><i data-lucide="' + (expanded ? 'chevron-up' : 'chevron-down') + '"></i></button>',
+            '  <div class="monthly-report-summary-meta">' + escapeHtml(author) + ' · ' + escapeHtml(timeText + scoreText) + '</div>',
+            expanded ? [
+              '  <div class="monthly-report-summary-detail">',
+              '    <div><strong>목표</strong><p>' + escapeHtml(report.goal || '-') + '</p></div>',
+              '    <div><strong>진도</strong><p>' + escapeHtml(report.progress || '-') + '</p></div>',
+              '    <div><strong>계획/보완</strong><p>' + escapeHtml(report.plan || '-') + '</p></div>',
+              '  </div>'
+            ].join('') : '',
+            '</article>'
+          ].join('');
+        }).join('');
       }
 
       function normalizeMonthlyReportDoc_(doc) {
@@ -23368,6 +23432,8 @@
           progress: data.progress || '',
           plan: data.plan || '',
           score: data.score === 0 || data.score ? Number(data.score) : '',
+          authorId: data.authorId || '',
+          authorName: data.authorName || '',
           createdAt: data.createdAt || '',
           createdAtMs: data.createdAtMs || 0,
           createdById: data.createdById || '',
@@ -23397,6 +23463,10 @@
         var targetId = String(studentId || '');
         var targetMonth = normalizeMonthlyReportMonthKey_(monthKey || getCurrentMonthlyReportMonth_());
         var loadKey = getMonthlyReportLoadKey_(targetId, targetMonth);
+        if (targetId && APP_STATE.monthlyReportsAllLoadedStudentIds[targetId]) {
+          APP_STATE.monthlyReportsLoadedStudentIds[loadKey] = true;
+          return;
+        }
         if (!targetId || APP_STATE.monthlyReportsLoadedStudentIds[loadKey] || APP_STATE.monthlyReportsLoadingStudentIds[loadKey]) {
           return;
         }
@@ -23404,6 +23474,7 @@
         loadMonthlyReportsForStudentViaFirebaseDirect_(targetId, targetMonth)
           .then(function(rows) {
             mergeMonthlyReportsInState_(targetId, rows);
+            APP_STATE.monthlyReportsAllLoadedStudentIds[targetId] = true;
             APP_STATE.monthlyReportsLoadedStudentIds[loadKey] = true;
           })
           .catch(function(error) {
@@ -23434,28 +23505,7 @@
           if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('monthlyReportRead')) {
             return [];
           }
-          var collectionName = (state.collections && state.collections.monthlyReports) || 'studentMonthlyReports';
-          var collection = state.firestore.collection(collectionName);
-          var targetMonth = monthKey || getCurrentMonthlyReportMonth_();
-          return Promise.all(MONTHLY_REPORT_SUBJECTS.map(function(subject) {
-            var docId = buildMonthlyReportDocId_(studentId, targetMonth, subject);
-            return firestoreGet_(collection.doc(docId), 'monthly report doc', {
-              collection: collectionName,
-              scope: 'student-month-subject',
-              studentId: String(studentId || ''),
-              month: targetMonth,
-              subject: subject
-            }).catch(function(error) {
-              if (window.console && console.warn) {
-                console.warn('Monthly report subject load skipped:', subject, error);
-              }
-              return null;
-            });
-          })).then(function(docs) {
-            return docs.filter(function(doc) {
-              return doc && doc.exists;
-            }).map(normalizeMonthlyReportDoc_);
-          });
+          return loadAllMonthlyReportsForStudentViaFirebaseDirect_(studentId);
         });
       }
 
@@ -23530,8 +23580,8 @@
         var loaded = APP_STATE.monthlyReportsLoadedStudentIds[loadKey];
         var loading = APP_STATE.monthlyReportsLoadingStudentIds[loadKey];
         var editable = canEditMonthlyReport_(student);
-        var saving = APP_STATE.monthlyReportSavingKey === [studentId, monthKey].join('|');
         var activeSubject = getMonthlyReportActiveSubject_(studentId, monthKey);
+        var saving = APP_STATE.monthlyReportSavingKey === [studentId, monthKey, activeSubject, getMonthlyReportAuthorId_()].join('|');
         var activeDraft = getMonthlyReportDraft_(studentId, monthKey, activeSubject);
         var activeVisual = getSubjectVisual_(activeSubject);
         var latest = getMonthlyReportsForStudent_(studentId).filter(function(item) {
@@ -23593,12 +23643,14 @@
           }
           var now = new Date();
           var user = APP_STATE.user || {};
+          var authorId = getMonthlyReportAuthorId_();
+          var authorName = getMonthlyReportAuthorName_();
           var collectionName = (state.collections && state.collections.monthlyReports) || 'studentMonthlyReports';
           var collection = state.firestore.collection(collectionName);
           var batch = state.firestore.batch();
           var payloads = rows.map(function(row) {
-            var reportId = buildMonthlyReportDocId_(student.studentId, monthKey, row.subject);
-            var existing = getMonthlyReportForSubject_(student.studentId, monthKey, row.subject) || {};
+            var reportId = buildMonthlyReportDocId_(student.studentId, monthKey, row.subject, authorId);
+            var existing = getMonthlyReportForSubjectAndAuthor_(student.studentId, monthKey, row.subject, authorId) || {};
             return {
               reportId: reportId,
               studentId: student.studentId,
@@ -23611,14 +23663,16 @@
               progress: row.progress || '',
               plan: row.plan || '',
               score: APP_STATE.isAdmin ? (row.score === '' || row.score === null || row.score === undefined ? '' : Math.max(0, Math.min(10, Number(row.score) || 0))) : (existing.score === 0 || existing.score ? existing.score : ''),
+              authorId: existing.authorId || authorId,
+              authorName: existing.authorName || authorName,
               createdAt: existing.createdAt || now.toISOString(),
               createdAtMs: existing.createdAtMs || now.getTime(),
-              createdById: existing.createdById || user.userId || '',
-              createdByName: existing.createdByName || user.name || user.userId || '',
+              createdById: existing.createdById || user.userId || authorId,
+              createdByName: existing.createdByName || user.name || user.userId || authorName,
               updatedAt: now.toISOString(),
               updatedAtMs: now.getTime(),
-              updatedById: user.userId || '',
-              updatedByName: user.name || user.userId || ''
+              updatedById: user.userId || authorId,
+              updatedByName: user.name || user.userId || authorName
             };
           });
           payloads.forEach(function(payload) {
@@ -23635,12 +23689,12 @@
         var current = (APP_STATE.monthlyReportsByStudentId[targetId] || []).slice();
         var map = {};
         current.forEach(function(item) {
-          map[String(item.reportId || buildMonthlyReportDocId_(item.studentId, item.month, item.subject))] = item;
+          map[String(item.reportId || buildMonthlyReportDocId_(item.studentId, item.month, item.subject, item.authorId))] = item;
         });
         (rows || []).forEach(function(item) {
           var normalized = normalizeMonthlyReportDoc_(item);
-          map[String(normalized.reportId || buildMonthlyReportDocId_(normalized.studentId, normalized.month, normalized.subject))] = normalized;
-          delete APP_STATE.monthlyReportDrafts[getMonthlyReportDraftKey_(normalized.studentId, normalized.month, normalized.subject)];
+          map[String(normalized.reportId || buildMonthlyReportDocId_(normalized.studentId, normalized.month, normalized.subject, normalized.authorId))] = normalized;
+          delete APP_STATE.monthlyReportDrafts[getMonthlyReportDraftKey_(normalized.studentId, normalized.month, normalized.subject, normalized.authorId)];
         });
         APP_STATE.monthlyReportsByStudentId[targetId] = Object.keys(map).map(function(key) {
           return map[key];
@@ -23715,17 +23769,16 @@
           setNotice('이 학생의 월간 학습 리포트를 수정할 권한이 없습니다.', 'warning');
           return;
         }
-        var rows = MONTHLY_REPORT_SUBJECTS.map(function(subject) {
-          var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
-          return {
-            subject: subject,
-            goal: draft.goal || '',
-            progress: draft.progress || '',
-            plan: draft.plan || '',
-            score: draft.score === undefined ? '' : draft.score
-          };
-        });
-        var savingKey = [studentId, monthKey].join('|');
+        var subject = getMonthlyReportActiveSubject_(studentId, monthKey);
+        var draft = getMonthlyReportDraft_(studentId, monthKey, subject);
+        var rows = [{
+          subject: subject,
+          goal: draft.goal || '',
+          progress: draft.progress || '',
+          plan: draft.plan || '',
+          score: draft.score === undefined ? '' : draft.score
+        }];
+        var savingKey = [studentId, monthKey, subject, getMonthlyReportAuthorId_()].join('|');
         APP_STATE.monthlyReportSavingKey = savingKey;
         setLoading('월간 학습 리포트를 저장하는 중입니다.', true);
         renderStudents();
