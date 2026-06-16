@@ -42007,48 +42007,17 @@
 
       function mergeCurrentAndHistoryGradeRecordsForDisplay_(currentRows, historyRows) {
         var map = {};
-        var deletedGradeIds = {};
-        var deletedDisplayKeysWithoutId = {};
-        (historyRows || []).forEach(function(record) {
-          if (String(record.changeType || '').toLowerCase() !== 'delete') {
-            return;
-          }
-          if (record.gradeId) {
-            deletedGradeIds[String(record.gradeId)] = true;
-            return;
-          }
-          deletedDisplayKeysWithoutId[buildGradeRecordDisplayKey_(record)] = true;
-        });
-        (currentRows || []).forEach(function(record) {
-          if (record.gradeId && deletedGradeIds[String(record.gradeId)]) {
-            return;
-          }
+        (currentRows || []).concat(historyRows || []).forEach(function(record) {
           var key = buildGradeRecordDisplayKey_(record);
-          if (!record.gradeId && deletedDisplayKeysWithoutId[key]) {
-            return;
-          }
-          if (!map[key] || sortGradesByUpdatedDesc_(record, map[key]) < 0) {
-            map[key] = record;
-          }
-        });
-        (historyRows || []).forEach(function(record) {
-          if (String(record.changeType || '').toLowerCase() === 'delete') {
-            return;
-          }
-          if (record.gradeId && deletedGradeIds[String(record.gradeId)]) {
-            return;
-          }
-          var key = buildGradeRecordDisplayKey_(record);
-          if (!record.gradeId && deletedDisplayKeysWithoutId[key]) {
-            return;
-          }
           if (!map[key] || sortGradesByUpdatedDesc_(record, map[key]) < 0) {
             map[key] = record;
           }
         });
         return Object.keys(map).map(function(key) {
           return map[key];
-        }).filter(Boolean).sort(sortGradesByUpdatedDesc_);
+        }).filter(function(record) {
+          return record && String(record.changeType || '').toLowerCase() !== 'delete';
+        }).sort(sortGradesByUpdatedDesc_);
       }
 
       function findVisibleSubjectForGradeRecordV3_(record, subjects) {
