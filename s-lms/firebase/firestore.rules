@@ -99,27 +99,36 @@ service cloud.firestore {
       return isStaffOrAdmin() || hasStudentAccess(studentId) || hasStudentPermissionDoc(studentId);
     }
 
-    function currentUserMonthlyReportIdentifiers() {
-      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        ? [
-          request.auth.uid,
-          currentUserDoc().data.loginId,
-          currentUserDoc().data.instructorId,
-          currentUserDoc().data.teacherId,
-          currentUserDoc().data.phone,
-          currentUserDoc().data.phoneNumber,
-          currentUserDoc().data.mobile,
-          currentUserDoc().data.mobilePhone,
-          currentUserDoc().data.email,
-          currentUserDoc().data.name
-        ]
-        : [request.auth.uid];
+    function currentUserFieldMatches(value, field) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        currentUserDoc().data[field] is string &&
+        currentUserDoc().data[field] != '' &&
+        currentUserDoc().data[field] == value;
     }
 
     function ownsMonthlyReportData(data) {
       return signedIn() && (
-        data.authorId in currentUserMonthlyReportIdentifiers() ||
-        data.createdById in currentUserMonthlyReportIdentifiers()
+        data.authorId == request.auth.uid ||
+        data.createdById == request.auth.uid ||
+        currentUserFieldMatches(data.authorId, 'loginId') ||
+        currentUserFieldMatches(data.authorId, 'instructorId') ||
+        currentUserFieldMatches(data.authorId, 'teacherId') ||
+        currentUserFieldMatches(data.authorId, 'phone') ||
+        currentUserFieldMatches(data.authorId, 'phoneNumber') ||
+        currentUserFieldMatches(data.authorId, 'mobile') ||
+        currentUserFieldMatches(data.authorId, 'mobilePhone') ||
+        currentUserFieldMatches(data.authorId, 'email') ||
+        currentUserFieldMatches(data.authorId, 'name') ||
+        currentUserFieldMatches(data.createdById, 'loginId') ||
+        currentUserFieldMatches(data.createdById, 'instructorId') ||
+        currentUserFieldMatches(data.createdById, 'teacherId') ||
+        currentUserFieldMatches(data.createdById, 'phone') ||
+        currentUserFieldMatches(data.createdById, 'phoneNumber') ||
+        currentUserFieldMatches(data.createdById, 'mobile') ||
+        currentUserFieldMatches(data.createdById, 'mobilePhone') ||
+        currentUserFieldMatches(data.createdById, 'email') ||
+        currentUserFieldMatches(data.createdById, 'name')
       );
     }
 
