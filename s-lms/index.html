@@ -14715,6 +14715,35 @@
         overflow: hidden;
       }
 
+      .grade-overview-score.grade-rank-1 {
+        --grade-rank-color: #facc15;
+        --grade-rank-shadow: rgba(120, 53, 15, 0.22);
+      }
+
+      .grade-overview-score.grade-rank-2 {
+        --grade-rank-color: #e2e8f0;
+        --grade-rank-shadow: rgba(15, 23, 42, 0.18);
+      }
+
+      .grade-overview-score.grade-rank-3 {
+        --grade-rank-color: #fb923c;
+        --grade-rank-shadow: rgba(124, 45, 18, 0.22);
+      }
+
+      .grade-overview-score.grade-rank-4,
+      .grade-overview-score.grade-rank-5 {
+        --grade-rank-color: #bfdbfe;
+        --grade-rank-shadow: rgba(30, 64, 175, 0.16);
+      }
+
+      .grade-overview-score.grade-rank-6,
+      .grade-overview-score.grade-rank-7,
+      .grade-overview-score.grade-rank-8,
+      .grade-overview-score.grade-rank-9 {
+        --grade-rank-color: #cbd5e1;
+        --grade-rank-shadow: rgba(15, 23, 42, 0.18);
+      }
+
       .grade-overview-score.active {
         border-color: var(--grade-subject-color, #2563eb);
         background: var(--grade-subject-color, #2563eb);
@@ -14750,6 +14779,8 @@
       }
 
       .grade-level-badge {
+        position: relative;
+        z-index: 1;
         display: inline-grid;
         place-items: center;
         width: 22px;
@@ -14815,11 +14846,17 @@
       .grade-overview-score-ghost {
         position: absolute;
         z-index: 0;
-        left: 28px;
+        left: -12px;
         top: 50%;
         transform: translateY(-50%);
-        color: rgba(255, 255, 255, 0.18);
-        font-size: 2.2rem;
+        width: 72px;
+        overflow: hidden;
+        color: var(--grade-rank-color, rgba(255, 255, 255, 0.72));
+        opacity: 0.18;
+        text-shadow:
+          0 2px 10px var(--grade-rank-shadow, rgba(15, 23, 42, 0.14)),
+          0 0 1px rgba(255, 255, 255, 0.22);
+        font-size: 4.05rem;
         font-weight: 950;
         line-height: 1;
         letter-spacing: 0;
@@ -14841,6 +14878,7 @@
         color: #ffffff;
         font-size: 0.68rem;
         font-weight: 950;
+        text-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
       }
 
       .grade-overview-score-title .subject-name {
@@ -14885,6 +14923,7 @@
         color: #ffffff;
         font-size: 0.73rem;
         font-weight: 950;
+        text-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
       }
 
       .grade-overview-score span {
@@ -41210,11 +41249,13 @@
         var gradeLevel = getGradeDisplayLevelForRecord_(record, score);
         var gradeBadge = renderGradeLevelBadge_(gradeLevel);
         var deltaBadge = renderGradeTrendDeltaBadge_(delta);
-        var ghostScore = score && score !== '-' ? '<span class="grade-overview-score-ghost">' + escapeHtml(score) + '</span>' : '';
+        var activeClass = active ? ' active' : '';
+        var gradeRankClass = gradeLevel ? ' grade-rank-' + escapeAttribute(String(gradeLevel)) : '';
+        var ghostScore = score && score !== '-' ? '<span class="grade-overview-score-ghost" aria-hidden="true">' + escapeHtml(score) + '</span>' : '';
         if (record.__placeholder) {
           return '<button type="button" class="grade-overview-score placeholder">' + renderGradeLevelBadge_('') + '<span class="grade-overview-score-text"><strong class="grade-overview-score-title"><span class="subject-name">' + escapeHtml(record.subjectName || '-') + '</span></strong><span>' + escapeHtml(record.subjectCategory || '-') + '</span></span><span class="grade-overview-score-metric"><strong class="grade-overview-score-value">미입력</strong>' + renderGradeTrendDeltaBadge_(null) + '</span></button>';
         }
-        return '<button type="button" class="grade-overview-score ' + (active ? 'active' : '') + '" style="' + escapeAttribute(buildGradeSubjectStyle_(color)) + '" data-grade-action="highlight-grade-overview-subject" data-student-id="' + escapeAttribute(record.studentId || '') + '" data-subject-key="' + escapeAttribute(subjectKey) + '">' + ghostScore + gradeBadge + '<span class="grade-overview-score-text"><strong class="grade-overview-score-title"><span class="subject-name">' + escapeHtml(record.subjectName || '-') + '</span></strong><span>' + escapeHtml(record.subjectCategory || '-') + '</span></span><span class="grade-overview-score-metric"><strong class="grade-overview-score-value">' + escapeHtml(score) + '</strong>' + deltaBadge + '</span></button>';
+        return '<button type="button" class="grade-overview-score' + activeClass + gradeRankClass + '" style="' + escapeAttribute(buildGradeSubjectStyle_(color)) + '" data-grade-action="highlight-grade-overview-subject" data-student-id="' + escapeAttribute(record.studentId || '') + '" data-subject-key="' + escapeAttribute(subjectKey) + '">' + ghostScore + gradeBadge + '<span class="grade-overview-score-text"><strong class="grade-overview-score-title"><span class="subject-name">' + escapeHtml(record.subjectName || '-') + '</span></strong><span>' + escapeHtml(record.subjectCategory || '-') + '</span></span><span class="grade-overview-score-metric"><strong class="grade-overview-score-value">' + escapeHtml(score) + '</strong>' + deltaBadge + '</span></button>';
       }
 
       function renderGradeStudentTrendChart_(student, records) {
