@@ -16592,6 +16592,8 @@
         monthlyReportsByStudentId: {},
         monthlyReportsLoadedStudentIds: {},
         monthlyReportsLoadingStudentIds: {},
+        monthlyReportsAllLoadedStudentIds: {},
+        monthlyReportsAllLoadingStudentIds: {},
         monthlyReportDrafts: {},
         monthlyReportSelectedMonths: {},
         monthlyReportSubjectTabs: {},
@@ -22817,7 +22819,7 @@
       function renderStudentIndexRow_(student) {
         var permissions = getStudentPermissionInstructors_(student.studentId);
         if (student && student.studentId && !student.isRestricted) {
-          ensureMonthlyReportsLoadedForStudent_(student.studentId, getCurrentMonthlyReportMonth_(), { silentRender: true });
+          ensureAllMonthlyReportsLoadedForStudent_(student.studentId, { silentRender: true });
         }
         var selected = student.studentId === APP_STATE.selectedStudentId ? ' selected' : '';
         var logs = student.logs || [];
@@ -23453,6 +23455,56 @@
             return docs.filter(function(doc) {
               return doc && doc.exists;
             }).map(normalizeMonthlyReportDoc_);
+          });
+        });
+      }
+
+      function ensureAllMonthlyReportsLoadedForStudent_(studentId, options) {
+        var config = options || {};
+        var targetId = String(studentId || '');
+        if (!targetId || APP_STATE.monthlyReportsAllLoadedStudentIds[targetId] || APP_STATE.monthlyReportsAllLoadingStudentIds[targetId]) {
+          return;
+        }
+        APP_STATE.monthlyReportsAllLoadingStudentIds[targetId] = true;
+        loadAllMonthlyReportsForStudentViaFirebaseDirect_(targetId)
+          .then(function(rows) {
+            mergeMonthlyReportsInState_(targetId, rows);
+            APP_STATE.monthlyReportsAllLoadedStudentIds[targetId] = true;
+          })
+          .catch(function(error) {
+            if (window.console && console.warn) {
+              console.warn('Monthly report all-load failed:', error);
+            }
+            APP_STATE.monthlyReportsByStudentId[targetId] = APP_STATE.monthlyReportsByStudentId[targetId] || [];
+            APP_STATE.monthlyReportsAllLoadedStudentIds[targetId] = true;
+          })
+          .finally(function() {
+            delete APP_STATE.monthlyReportsAllLoadingStudentIds[targetId];
+            if (config.silentRender) {
+              scheduleMonthlyReportIndexRender_();
+              return;
+            }
+            renderStudents();
+            if (APP_STATE.selectedStudentDetailId === targetId) {
+              renderStudentDetailModal_();
+            }
+          });
+      }
+
+      function loadAllMonthlyReportsForStudentViaFirebaseDirect_(studentId) {
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('monthlyReportRead')) {
+            return [];
+          }
+          var collectionName = (state.collections && state.collections.monthlyReports) || 'studentMonthlyReports';
+          var query = state.firestore.collection(collectionName).where('studentId', '==', String(studentId || ''));
+          return firestoreGet_(query, 'monthly report student query', {
+            collection: collectionName,
+            scope: 'student-all-months',
+            studentId: String(studentId || '')
+          }).then(function(snapshot) {
+            return (snapshot.docs || []).map(normalizeMonthlyReportDoc_);
           });
         });
       }
@@ -37021,6 +37073,8 @@
         APP_STATE.monthlyReportsByStudentId = {};
         APP_STATE.monthlyReportsLoadedStudentIds = {};
         APP_STATE.monthlyReportsLoadingStudentIds = {};
+        APP_STATE.monthlyReportsAllLoadedStudentIds = {};
+        APP_STATE.monthlyReportsAllLoadingStudentIds = {};
         APP_STATE.monthlyReportDrafts = {};
         APP_STATE.monthlyReportSelectedMonths = {};
         APP_STATE.monthlyReportSubjectTabs = {};
