@@ -13542,6 +13542,161 @@
         gap: 9px;
       }
 
+      .grade-missing-dashboard {
+        display: grid;
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .grade-missing-dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .grade-missing-list {
+        display: grid;
+        gap: 10px;
+        max-height: 520px;
+        overflow: auto;
+      }
+
+      .grade-missing-row {
+        display: grid;
+        grid-template-columns: minmax(150px, 0.9fr) minmax(0, 2.4fr) auto;
+        gap: 12px;
+        align-items: start;
+        padding: 12px;
+        border: 1px solid #fee2e2;
+        border-radius: 8px;
+        background: #fffafa;
+      }
+
+      .grade-missing-student strong {
+        display: block;
+        color: #0f172a;
+        font-size: 0.82rem;
+        font-weight: 950;
+      }
+
+      .grade-missing-student span {
+        display: block;
+        margin-top: 4px;
+        color: #64748b;
+        font-size: 0.68rem;
+        font-weight: 820;
+      }
+
+      .grade-missing-subjects {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .grade-missing-subject-chip {
+        display: inline-grid;
+        gap: 4px;
+        min-width: 130px;
+        max-width: 220px;
+        padding: 8px 9px;
+        border: 1px solid #dbe5f3;
+        border-radius: 7px;
+        background: #ffffff;
+      }
+
+      .grade-missing-subject-chip strong {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #0f172a;
+        font-size: 0.72rem;
+        font-weight: 950;
+      }
+
+      .grade-missing-subject-chip span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #64748b;
+        font-size: 0.66rem;
+        font-weight: 820;
+      }
+
+      .grade-missing-side-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 14px;
+      }
+
+      .grade-missing-subpanel {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid #e5edf7;
+        border-radius: 8px;
+        background: #f8fbff;
+      }
+
+      .grade-missing-subpanel-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .grade-missing-subpanel-head h3 {
+        margin: 0;
+        color: #0f172a;
+        font-size: 0.84rem;
+        font-weight: 950;
+      }
+
+      .grade-missing-subpanel-head p {
+        margin: 4px 0 0;
+        color: #64748b;
+        font-size: 0.68rem;
+        font-weight: 820;
+      }
+
+      .grade-missing-mini-list {
+        display: grid;
+        gap: 8px;
+        max-height: 320px;
+        overflow: auto;
+      }
+
+      .grade-missing-mini-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 9px 10px;
+        border: 1px solid #e5edf7;
+        border-radius: 7px;
+        background: #f8fbff;
+      }
+
+      .grade-missing-mini-row strong {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #0f172a;
+        font-size: 0.74rem;
+        font-weight: 950;
+      }
+
+      .grade-missing-mini-row span {
+        display: block;
+        margin-top: 3px;
+        color: #64748b;
+        font-size: 0.66rem;
+        font-weight: 820;
+      }
+
       .grade-dashboard-subject {
         display: grid;
         grid-template-columns: minmax(90px, 1fr) minmax(120px, 2fr) 52px;
@@ -15035,6 +15190,9 @@
         .grade-overview-types,
         .grade-dashboard-grid,
         .grade-dashboard-panels,
+        .grade-missing-dashboard-grid,
+        .grade-missing-row,
+        .grade-missing-side-grid,
         .grade-ranking-grid,
         .grade-instructor-row,
         .grade-exam-matrix-row {
@@ -40926,6 +41084,7 @@
       function renderGradeOverviewTab_() {
         var students = getGradeFilteredStudents_();
         var records = getGradeOverviewRecords_(students);
+        var missingDashboard = buildGradeMissingDashboardV2_(students, getGradeVisibleSubjects_());
         var grouped = groupGradeOverviewByStudent_(students, records);
         return [
           renderGradeFilters_(),
@@ -40933,7 +41092,233 @@
           '  <div><h3>성적 조회</h3><p>학생 이름 아래에 입력된 성적을 시험 유형별로 묶어 표시합니다.</p></div>',
           '  <div class="grades-toolbar-actions"><span class="grade-chip blue">' + records.length + '건</span><button type="button" class="mini-button" data-grade-action="sync"><i data-lucide="refresh-cw"></i> 새로고침</button></div>',
           '</div>',
+          renderGradeMissingDashboardV2_(missingDashboard),
           grouped.length ? '<div class="grade-overview-list">' + grouped.map(renderGradeOverviewStudentCard_).join('') + '</div>' : '<div class="grade-empty">표시할 성적 데이터가 없습니다.</div>'
+        ].join('');
+      }
+
+      function buildGradeMissingDashboardV2_(students, subjects) {
+        students = students || [];
+        subjects = subjects || [];
+        var recordMap = buildGradeRecordMapV3_(students, subjects);
+        var cells = [];
+        var studentMap = {};
+        var subjectMap = {};
+        var instructorMap = {};
+        subjects.forEach(function(subject) {
+          subjectMap[subject.subjectId] = {
+            subject: subject,
+            count: 0,
+            students: {}
+          };
+        });
+        students.forEach(function(student) {
+          subjects.forEach(function(subject) {
+            var key = student.studentId + '|' + subject.subjectId;
+            var records = recordMap[key] || [];
+            var entered = records.some(hasGradeRecordInputValueV2_);
+            if (entered) {
+              return;
+            }
+            var instructors = getGradeResponsibleInstructorsForSubjectV2_(student, subject);
+            var cell = {
+              student: student,
+              subject: subject,
+              instructors: instructors
+            };
+            cells.push(cell);
+            if (!studentMap[student.studentId]) {
+              studentMap[student.studentId] = {
+                student: student,
+                cells: [],
+                unassignedCount: 0
+              };
+            }
+            studentMap[student.studentId].cells.push(cell);
+            if (!instructors.length) {
+              studentMap[student.studentId].unassignedCount += 1;
+            }
+            if (!subjectMap[subject.subjectId]) {
+              subjectMap[subject.subjectId] = { subject: subject, count: 0, students: {} };
+            }
+            subjectMap[subject.subjectId].count += 1;
+            subjectMap[subject.subjectId].students[student.studentId] = true;
+            if (!instructors.length) {
+              instructorMap.__unassigned = instructorMap.__unassigned || {
+                key: '__unassigned',
+                name: '권한 미배정',
+                subjectLabel: '담당 강사 없음',
+                count: 0,
+                students: {}
+              };
+              instructorMap.__unassigned.count += 1;
+              instructorMap.__unassigned.students[student.studentId] = true;
+            }
+            instructors.forEach(function(instructor) {
+              var instructorKey = getGradeMissingInstructorKeyV2_(instructor);
+              if (!instructorMap[instructorKey]) {
+                instructorMap[instructorKey] = {
+                  key: instructorKey,
+                  name: instructor.name || instructor.userId || instructor.loginId || '강사',
+                  subjectLabel: instructor.subject || instructor.department || '',
+                  count: 0,
+                  students: {}
+                };
+              }
+              instructorMap[instructorKey].count += 1;
+              instructorMap[instructorKey].students[student.studentId] = true;
+            });
+          });
+        });
+        var studentRows = Object.keys(studentMap).map(function(key) {
+          return studentMap[key];
+        }).sort(function(a, b) {
+          return b.cells.length - a.cells.length ||
+            String((a.student.school || '') + (a.student.grade || '') + (a.student.studentName || '')).localeCompare(String((b.student.school || '') + (b.student.grade || '') + (b.student.studentName || '')), 'ko');
+        });
+        var subjectRows = Object.keys(subjectMap).map(function(key) {
+          var row = subjectMap[key];
+          row.studentCount = Object.keys(row.students || {}).length;
+          return row;
+        }).filter(function(row) {
+          return row.count > 0;
+        }).sort(function(a, b) {
+          return b.count - a.count || getGradeSubjectOrderIndex_(a.subject) - getGradeSubjectOrderIndex_(b.subject);
+        });
+        var instructorRows = Object.keys(instructorMap).map(function(key) {
+          var row = instructorMap[key];
+          row.studentCount = Object.keys(row.students || {}).length;
+          return row;
+        }).sort(function(a, b) {
+          return b.count - a.count || String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+        });
+        return {
+          students: students,
+          subjects: subjects,
+          cells: cells,
+          studentRows: studentRows,
+          subjectRows: subjectRows,
+          instructorRows: instructorRows,
+          unassignedCells: cells.filter(function(cell) { return !cell.instructors.length; })
+        };
+      }
+
+      function hasGradeRecordInputValueV2_(record) {
+        return Boolean(String(record && (record.finalScore || record.provisionalScore || record.rawScore || record.gradeLevel) || '').trim());
+      }
+
+      function getGradeMissingInstructorKeyV2_(instructor) {
+        instructor = instructor || {};
+        return normalizeSearchText([
+          instructor.userId,
+          instructor.loginId,
+          instructor.instructorId,
+          instructor.teacherId,
+          instructor.name,
+          instructor.subject
+        ].filter(Boolean).join('|')) || 'unknown';
+      }
+
+      function getGradeResponsibleInstructorsForSubjectV2_(student, subject) {
+        var seen = {};
+        return (APP_STATE.permissions || []).filter(function(permission) {
+          return String(permission.studentId || '') === String(student && student.studentId || '') &&
+            String(permission.permission || 'ALLOW').toUpperCase() === 'ALLOW';
+        }).map(function(permission) {
+          var instructorId = String(permission.instructorId || permission.userId || '').trim();
+          if (!instructorId || seen[instructorId]) {
+            return null;
+          }
+          var instructor = findInstructorById_(instructorId) || {};
+          var subjectLabel = permission.subject || instructor.subject || instructor.department || '';
+          if (!gradeSubjectMatchesInstructorSubjectV2_(subject, subjectLabel)) {
+            return null;
+          }
+          seen[instructorId] = true;
+          return Object.assign({}, instructor, {
+            userId: instructor.userId || instructorId,
+            loginId: instructor.loginId || instructorId,
+            name: instructor.name || permission.instructorName || instructorId,
+            subject: subjectLabel,
+            subjectLabel: subjectLabel
+          });
+        }).filter(Boolean).sort(function(a, b) {
+          return String(a.name || a.userId || '').localeCompare(String(b.name || b.userId || ''), 'ko');
+        });
+      }
+
+      function renderGradeMissingDashboardV2_(dashboard) {
+        dashboard = dashboard || {};
+        var cells = dashboard.cells || [];
+        return [
+          '<section class="grades-panel grade-missing-dashboard">',
+          '  <div class="grades-panel-head"><div><h3>미입력 확인 대시보드</h3><p>현재 필터 기준으로 성적이 비어 있는 학생-과목과 권한 강사를 모았습니다.</p></div><span class="grade-chip warn">' + cells.length + '칸</span></div>',
+          '  <div class="grade-missing-dashboard-grid">',
+          renderGradeDashboardMetricCardV2_('필터 대상', (dashboard.students || []).length + '명', (dashboard.subjects || []).length + '과목'),
+          renderGradeDashboardMetricCardV2_('미입력 학생', (dashboard.studentRows || []).length + '명', '연락 대상'),
+          renderGradeDashboardMetricCardV2_('미입력 과목', cells.length + '칸', '학생-과목 기준'),
+          renderGradeDashboardMetricCardV2_('권한 미배정', (dashboard.unassignedCells || []).length + '칸', '담당 확인 필요'),
+          '  </div>',
+          renderGradeMissingStudentRowsV2_(dashboard.studentRows || []),
+          '  <div class="grade-missing-side-grid">',
+          renderGradeMissingSubjectPanelV2_(dashboard.subjectRows || []),
+          renderGradeMissingInstructorPanelV2_(dashboard.instructorRows || []),
+          '  </div>',
+          '</section>'
+        ].join('');
+      }
+
+      function renderGradeMissingStudentRowsV2_(rows) {
+        if (!rows.length) {
+          return '<div class="grade-empty">현재 필터에서 미입력 대상자가 없습니다.</div>';
+        }
+        return '<div class="grade-missing-list">' + rows.slice(0, 120).map(function(row) {
+          var student = row.student || {};
+          return [
+            '<div class="grade-missing-row">',
+            '  <div class="grade-missing-student"><strong>' + escapeHtml(student.studentName || '-') + '</strong><span>' + renderGradeSchoolGradeHtml_(student) + '</span></div>',
+            '  <div class="grade-missing-subjects">' + row.cells.map(renderGradeMissingSubjectChipV2_).join('') + '</div>',
+            '  <span class="grade-chip warn">' + row.cells.length + '과목</span>',
+            '</div>'
+          ].join('');
+        }).join('') + (rows.length > 120 ? '<div class="grades-v3-meta">외 ' + (rows.length - 120) + '명은 필터를 좁혀 확인하세요.</div>' : '') + '</div>';
+      }
+
+      function renderGradeMissingSubjectChipV2_(cell) {
+        var subject = cell.subject || {};
+        var instructors = cell.instructors && cell.instructors.length
+          ? cell.instructors.map(function(instructor) {
+              return (instructor.name || instructor.userId || '-') + (instructor.subjectLabel || instructor.subject ? '(' + (instructor.subjectLabel || instructor.subject) + ')' : '');
+            }).join(', ')
+          : '권한 미배정';
+        return [
+          '<span class="grade-missing-subject-chip ' + escapeAttribute(getSubjectToneClass_(subject.subjectCategory || subject.subjectName)) + '">',
+          '  <strong>' + escapeHtml(subject.subjectName || '-') + '</strong>',
+          '  <span>' + escapeHtml(subject.subjectCategory || '-') + '</span>',
+          '  <span title="' + escapeAttribute(instructors) + '">' + escapeHtml(instructors) + '</span>',
+          '</span>'
+        ].join('');
+      }
+
+      function renderGradeMissingSubjectPanelV2_(rows) {
+        return [
+          '<section class="grade-missing-subpanel">',
+          '  <div class="grade-missing-subpanel-head"><div><h3>과목별 미입력</h3><p>현재 필터에서 많이 비어 있는 과목</p></div></div>',
+          rows.length ? '<div class="grade-missing-mini-list">' + rows.slice(0, 30).map(function(row) {
+            return '<div class="grade-missing-mini-row"><div><strong>' + escapeHtml(row.subject.subjectName || '-') + '</strong><span>' + escapeHtml(row.subject.subjectCategory || '-') + ' · 학생 ' + row.studentCount + '명</span></div><span class="grade-chip warn">' + row.count + '칸</span></div>';
+          }).join('') + '</div>' : '<div class="grade-empty">미입력 과목이 없습니다.</div>',
+          '</section>'
+        ].join('');
+      }
+
+      function renderGradeMissingInstructorPanelV2_(rows) {
+        return [
+          '<section class="grade-missing-subpanel">',
+          '  <div class="grade-missing-subpanel-head"><div><h3>강사별 확인 대상</h3><p>권한 연결 기준으로 연락할 담당 강사</p></div></div>',
+          rows.length ? '<div class="grade-missing-mini-list">' + rows.slice(0, 40).map(function(row) {
+            return '<div class="grade-missing-mini-row"><div><strong>' + escapeHtml(row.name || '-') + '</strong><span>' + escapeHtml(row.subjectLabel || '과목 미지정') + ' · 학생 ' + row.studentCount + '명</span></div><span class="grade-chip ' + (row.key === '__unassigned' ? 'warn' : 'blue') + '">' + row.count + '칸</span></div>';
+          }).join('') + '</div>' : '<div class="grade-empty">권한 연결 강사 기준 확인 대상이 없습니다.</div>',
+          '</section>'
         ].join('');
       }
 
