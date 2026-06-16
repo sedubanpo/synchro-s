@@ -99,6 +99,30 @@ service cloud.firestore {
       return isStaffOrAdmin() || hasStudentAccess(studentId) || hasStudentPermissionDoc(studentId);
     }
 
+    function currentUserMonthlyReportIdentifiers() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? [
+          request.auth.uid,
+          currentUserDoc().data.loginId,
+          currentUserDoc().data.instructorId,
+          currentUserDoc().data.teacherId,
+          currentUserDoc().data.phone,
+          currentUserDoc().data.phoneNumber,
+          currentUserDoc().data.mobile,
+          currentUserDoc().data.mobilePhone,
+          currentUserDoc().data.email,
+          currentUserDoc().data.name
+        ]
+        : [request.auth.uid];
+    }
+
+    function ownsMonthlyReportData(data) {
+      return signedIn() && (
+        data.authorId in currentUserMonthlyReportIdentifiers() ||
+        data.createdById in currentUserMonthlyReportIdentifiers()
+      );
+    }
+
     match /loginAliases/{aliasHash} {
       allow get: if true;
       allow list: if false;
@@ -234,13 +258,28 @@ service cloud.firestore {
 
     match /studentMonthlyReports/{reportId} {
       allow get, list: if canUseMonthlyReport(resource.data.studentId);
-      allow create, update: if signedIn()
+      allow create: if signedIn()
         && canUseMonthlyReport(request.resource.data.studentId)
         && request.resource.data.studentId is string
         && request.resource.data.month is string
         && request.resource.data.subject in ['국어', '수학', '영어', '과학', '사회']
         && request.resource.data.updatedById == request.auth.uid
-        && (!exists(/databases/$(database)/documents/studentMonthlyReports/$(reportId)) || resource.data.studentId == request.resource.data.studentId);
+        && (isAdmin() || ownsMonthlyReportData(request.resource.data));
+      allow update: if signedIn()
+        && canUseMonthlyReport(request.resource.data.studentId)
+        && request.resource.data.studentId is string
+        && request.resource.data.month is string
+        && request.resource.data.subject in ['국어', '수학', '영어', '과학', '사회']
+        && request.resource.data.updatedById == request.auth.uid
+        && resource.data.studentId == request.resource.data.studentId
+        && (
+          isAdmin() ||
+          (
+            ownsMonthlyReportData(resource.data) &&
+            ownsMonthlyReportData(request.resource.data) &&
+            request.resource.data.authorId == resource.data.authorId
+          )
+        );
       allow delete: if isAdmin();
     }
 
