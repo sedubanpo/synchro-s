@@ -23432,8 +23432,8 @@
           progress: data.progress || '',
           plan: data.plan || '',
           score: data.score === 0 || data.score ? Number(data.score) : '',
-          authorId: data.authorId || '',
-          authorName: data.authorName || '',
+          authorId: data.authorId || data.createdById || data.updatedById || '',
+          authorName: data.authorName || data.createdByName || data.updatedByName || '',
           createdAt: data.createdAt || '',
           createdAtMs: data.createdAtMs || 0,
           createdById: data.createdById || '',
@@ -23649,8 +23649,8 @@
           var collection = state.firestore.collection(collectionName);
           var batch = state.firestore.batch();
           var payloads = rows.map(function(row) {
-            var reportId = buildMonthlyReportDocId_(student.studentId, monthKey, row.subject, authorId);
             var existing = getMonthlyReportForSubjectAndAuthor_(student.studentId, monthKey, row.subject, authorId) || {};
+            var reportId = existing.reportId || buildMonthlyReportDocId_(student.studentId, monthKey, row.subject, authorId);
             return {
               reportId: reportId,
               studentId: student.studentId,
@@ -23716,6 +23716,8 @@
         }
         delete APP_STATE.monthlyReportsLoadedStudentIds[loadKey];
         delete APP_STATE.monthlyReportsLoadingStudentIds[loadKey];
+        delete APP_STATE.monthlyReportsAllLoadedStudentIds[targetId];
+        delete APP_STATE.monthlyReportsAllLoadingStudentIds[targetId];
         ensureMonthlyReportsLoadedForStudent_(targetId, targetMonth);
         renderStudents();
         if (APP_STATE.selectedStudentDetailId === targetId) {
