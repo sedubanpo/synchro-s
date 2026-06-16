@@ -96,7 +96,7 @@ service cloud.firestore {
     }
 
     function canUseMonthlyReport(studentId) {
-      return isStaffOrAdmin() || hasStudentPermissionDoc(studentId);
+      return isStaffOrAdmin() || hasStudentAccess(studentId) || hasStudentPermissionDoc(studentId);
     }
 
     match /loginAliases/{aliasHash} {
