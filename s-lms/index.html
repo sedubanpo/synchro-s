@@ -17414,6 +17414,7 @@
         editingJikboOverrideRowNumber: '',
         jikboLoaded: false,
         jikboLoading: false,
+        jikboLoadPromise: null,
         jikboSearchKeyword: '',
         isJikboSearchComposing: false,
         selectedJikboStatusKey: '',
@@ -19262,6 +19263,9 @@
         APP_STATE.materialsLoaded = false;
         APP_STATE.eventsLoaded = false;
         APP_STATE.jikboLoaded = false;
+        APP_STATE.jikboLoading = false;
+        APP_STATE.jikboLoadPromise = null;
+        APP_STATE.jikboBoardLoadPromise = null;
         APP_STATE.gradesLoaded = false;
         APP_STATE.gradesRemoteLoaded = false;
         APP_STATE.gradeHistoryLoaded = false;
@@ -20720,6 +20724,7 @@
       function loadJikboManagerData_(silent) {
         APP_STATE.jikboLoaded = false;
         APP_STATE.jikboLoading = false;
+        APP_STATE.jikboLoadPromise = null;
         return ensureViewDataLoaded_('jikbo', { silent: Boolean(silent) });
       }
 
@@ -22569,8 +22574,11 @@
           if (!APP_STATE.isAdmin) {
             return Promise.resolve();
           }
-          if (APP_STATE.jikboLoaded || APP_STATE.jikboLoading) {
+          if (APP_STATE.jikboLoaded) {
             return Promise.resolve();
+          }
+          if (APP_STATE.jikboLoading) {
+            return APP_STATE.jikboLoadPromise || Promise.resolve();
           }
           APP_STATE.jikboLoading = true;
           if (!config.silent && APP_STATE.currentView === 'jikbo') {
@@ -22583,7 +22591,7 @@
                   console.warn('Jikbo event preload failed:', error);
                 }
               });
-          return ensureEventsForJikbo.then(function() {
+          APP_STATE.jikboLoadPromise = ensureEventsForJikbo.then(function() {
             return loadJikboViaFirebaseDirect_();
           })
             .catch(function(error) {
@@ -22607,10 +22615,12 @@
             })
             .finally(function() {
               APP_STATE.jikboLoading = false;
+              APP_STATE.jikboLoadPromise = null;
               if (!config.silent && APP_STATE.currentView === 'jikbo') {
                 renderJikboView();
               }
           });
+          return APP_STATE.jikboLoadPromise;
         }
 
         if (viewName === 'grades') {
@@ -32875,6 +32885,7 @@
           return true;
         }
         if (APP_STATE.jikboLoading && !APP_STATE.jikboLoaded) {
+          requestJikboBoardRenderAfterLoad_();
           return false;
         }
         var currentMonthExamCount = getJikboExamEventsForCurrentMonth_().length;
@@ -32886,6 +32897,22 @@
         }
         requestJikboBoardDataLoad_();
         return false;
+      }
+
+      function requestJikboBoardRenderAfterLoad_() {
+        if (!APP_STATE.jikboLoadPromise || APP_STATE.jikboBoardLoadPromise) {
+          return;
+        }
+        APP_STATE.jikboBoardLoadPromise = APP_STATE.jikboLoadPromise
+          .catch(function(error) {
+            handleApiError_(error);
+          })
+          .finally(function() {
+            APP_STATE.jikboBoardLoadPromise = null;
+            if (APP_STATE.currentView === 'jikbo' && APP_STATE.jikboPanelMode === 'board') {
+              renderJikboView();
+            }
+          });
       }
 
       function requestJikboBoardDataLoad_() {
@@ -39005,7 +39032,10 @@
         APP_STATE.editingJikboOverrideRowNumber = '';
         APP_STATE.jikboLoaded = false;
         APP_STATE.jikboLoading = false;
+        APP_STATE.jikboLoadPromise = null;
+        APP_STATE.jikboBoardLoadPromise = null;
         APP_STATE.jikboSearchKeyword = '';
+        APP_STATE.focusedJikboExamKey = '';
         APP_STATE.selectedJikboStatusKey = '';
         APP_STATE.jikboCalendarYear = new Date().getFullYear();
         APP_STATE.jikboCalendarMonth = new Date().getMonth();
