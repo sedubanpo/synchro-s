@@ -22440,7 +22440,16 @@
           if (!config.silent && APP_STATE.currentView === 'jikbo') {
             renderJikboView();
           }
-          return loadJikboViaFirebaseDirect_()
+          var ensureEventsForJikbo = APP_STATE.eventsLoaded
+            ? Promise.resolve()
+            : ensureViewDataLoaded_('events', { silent: true }).catch(function(error) {
+                if (window.console && console.warn) {
+                  console.warn('Jikbo event preload failed:', error);
+                }
+              });
+          return ensureEventsForJikbo.then(function() {
+            return loadJikboViaFirebaseDirect_();
+          })
             .catch(function(error) {
               if (window.console && console.warn) {
                 console.warn('Firebase jikbo load fallback:', error);
@@ -32981,6 +32990,7 @@
       function renderJikboSummary_(model) {
         var stats = model && model.stats ? model.stats : {};
         var summary = model && model.summary ? model.summary : {};
+        var hasAnyJikboData = Number(stats.examCount || 0) > 0 || Number(stats.jikboCount || 0) > 0 || (model && model.groups && model.groups.length);
         APP_STATE.jikboSummaryDraftMap = {};
         var panelMap = {
           todayJikbos: {
@@ -33018,7 +33028,7 @@
             description: '확정되지 않은 학생 수',
             count: Number(stats.unresolvedStudentCount || 0),
             items: summary.unresolvedStudents || [],
-            emptyText: '모든 직보가 확정되었습니다.',
+            emptyText: hasAnyJikboData ? '모든 직보가 확정되었습니다.' : '아직 구성된 직보 데이터가 없습니다.',
             alert: true,
             compactGrid: true,
             panelKey: 'unresolvedStudents'
@@ -33157,7 +33167,7 @@
 
       function renderJikboBoardTable_(model) {
         if (!model.groups.length) {
-          return '<div class="empty-state">조건에 맞는 직보 데이터가 없습니다.<br>주요일정에 `학교|학년` 또는 `학교 1학년`, 과목명, 시험구분 형식으로 입력한 시험만 직보 보드에 반영됩니다.</div>';
+          return '<div class="empty-state">조건에 맞는 직보 데이터가 없습니다.<br>학교 일정에 등록된 내신 시험을 불러오지 못했거나, 해당 학교/학년에 연결된 학생과 과목 권한이 없습니다.</div>';
         }
 
         var schoolRowSpanMap = {};
@@ -33327,7 +33337,10 @@
       }
 
       function getJikboExamEventsForCurrentMonth_() {
-        return (APP_STATE.jikboExamEvents || []).filter(function(item) {
+        var sourceEvents = (APP_STATE.jikboExamEvents && APP_STATE.jikboExamEvents.length)
+          ? APP_STATE.jikboExamEvents
+          : buildJikboExamEventsFromEvents_(APP_STATE.events || []);
+        return (sourceEvents || []).filter(function(item) {
           var parsed = parseEventDateForClient_(item.isoDate || item.date);
           return parsed &&
             parsed.getFullYear() === APP_STATE.jikboCalendarYear &&
