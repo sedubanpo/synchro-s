@@ -32886,7 +32886,7 @@
         }
         if (APP_STATE.jikboLoading && !APP_STATE.jikboLoaded) {
           requestJikboBoardRenderAfterLoad_();
-          return false;
+          return hasJikboBoardSeedData_();
         }
         var currentMonthExamCount = getJikboExamEventsForCurrentMonth_().length;
         var shouldLoad =
@@ -32897,6 +32897,13 @@
         }
         requestJikboBoardDataLoad_();
         return false;
+      }
+
+      function hasJikboBoardSeedData_() {
+        return Boolean(
+          (APP_STATE.jikboExamEvents && APP_STATE.jikboExamEvents.length) ||
+          (APP_STATE.eventsLoaded && getJikboExamEventsForCurrentMonth_().length)
+        );
       }
 
       function requestJikboBoardRenderAfterLoad_() {
