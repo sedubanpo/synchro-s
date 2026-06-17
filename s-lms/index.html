@@ -6060,6 +6060,130 @@
         font-size: 0.82rem;
       }
 
+      .jikbo-exam-timeline-wrap {
+        display: grid;
+        gap: 12px;
+        padding: 14px 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(214, 226, 247, 0.9);
+        background: rgba(255, 255, 255, 0.84);
+      }
+
+      .jikbo-exam-timeline-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .jikbo-exam-timeline-head strong {
+        display: block;
+        font-size: 0.94rem;
+        color: var(--text-strong);
+      }
+
+      .jikbo-exam-timeline-head span:not(.jikbo-summary-badge) {
+        display: block;
+        margin-top: 3px;
+        color: var(--text-soft);
+        font-size: 0.76rem;
+      }
+
+      .jikbo-exam-timeline {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        padding: 2px 2px 10px;
+        scroll-snap-type: x proximity;
+      }
+
+      .jikbo-exam-card {
+        flex: 0 0 188px;
+        display: grid;
+        gap: 5px;
+        min-height: 104px;
+        padding: 12px 13px;
+        border-radius: 14px;
+        border: 1px solid rgba(239, 68, 68, 0.16);
+        background: rgba(255, 247, 237, 0.94);
+        color: var(--text-strong);
+        text-align: left;
+        font: inherit;
+        cursor: pointer;
+        scroll-snap-align: start;
+      }
+
+      .jikbo-exam-card.active,
+      .jikbo-exam-card:hover {
+        border-color: rgba(37, 99, 235, 0.34);
+        background: rgba(239, 246, 255, 0.98);
+        box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+      }
+
+      .jikbo-exam-card-date {
+        display: inline-flex;
+        width: fit-content;
+        min-height: 22px;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(239, 68, 68, 0.1);
+        color: #b91c1c;
+        font-size: 0.7rem;
+        font-weight: 900;
+      }
+
+      .jikbo-exam-card strong {
+        font-size: 0.84rem;
+      }
+
+      .jikbo-exam-card span,
+      .jikbo-exam-card small {
+        color: var(--text-soft);
+        font-size: 0.74rem;
+        line-height: 1.35;
+      }
+
+      .jikbo-exam-timeline-detail {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(214, 226, 247, 0.82);
+        background: rgba(248, 251, 255, 0.9);
+      }
+
+      .jikbo-exam-timeline-detail-title {
+        color: var(--brand-deep);
+        font-size: 0.82rem;
+        font-weight: 900;
+      }
+
+      .jikbo-exam-timeline-students {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 8px;
+      }
+
+      .jikbo-exam-timeline-students article {
+        display: grid;
+        gap: 4px;
+        padding: 10px 11px;
+        border-radius: 12px;
+        border: 1px solid rgba(203, 213, 225, 0.72);
+        background: rgba(255, 255, 255, 0.9);
+      }
+
+      .jikbo-exam-timeline-students strong {
+        font-size: 0.78rem;
+      }
+
+      .jikbo-exam-timeline-students span {
+        color: var(--text-soft);
+        font-size: 0.72rem;
+        line-height: 1.45;
+      }
+
       .jikbo-board-toolbar {
         display: flex;
         align-items: flex-end;
@@ -6268,11 +6392,11 @@
         min-width: 136px;
         padding: 10px 8px;
         vertical-align: top;
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 247, 237, 0.9);
       }
 
       .jikbo-day-cell.jikbo-class-cell {
-        background: rgba(244, 246, 250, 0.98);
+        background: rgba(239, 246, 255, 0.98);
       }
 
       .jikbo-empty-cell {
@@ -6294,8 +6418,12 @@
         min-width: 40px;
         font-size: 0.68rem;
         font-weight: 900;
-        color: var(--text-soft);
+        color: #b45309;
         letter-spacing: 0.01em;
+      }
+
+      .jikbo-class-cell .jikbo-row-label {
+        color: #1d4ed8;
       }
 
       .jikbo-student-split-label {
@@ -6378,33 +6506,39 @@
       }
 
       .jikbo-chip.exam.subject-math {
-        background: rgba(227, 238, 255, 0.96);
-        color: #2458ca;
+        background: rgba(255, 237, 213, 0.96);
+        border-color: rgba(234, 88, 12, 0.22);
+        color: #c2410c;
       }
 
       .jikbo-chip.exam.subject-korean {
-        background: rgba(255, 239, 225, 0.96);
-        color: #c96b10;
+        background: rgba(255, 228, 230, 0.96);
+        border-color: rgba(225, 29, 72, 0.2);
+        color: #be123c;
       }
 
       .jikbo-chip.exam.subject-english {
-        background: rgba(227, 248, 234, 0.96);
-        color: #16804c;
+        background: rgba(254, 249, 195, 0.96);
+        border-color: rgba(202, 138, 4, 0.2);
+        color: #a16207;
       }
 
       .jikbo-chip.exam.subject-science {
-        background: rgba(235, 232, 255, 0.96);
-        color: #6f42c9;
+        background: rgba(254, 226, 226, 0.96);
+        border-color: rgba(220, 38, 38, 0.2);
+        color: #b91c1c;
       }
 
       .jikbo-chip.exam.subject-social {
-        background: rgba(255, 243, 214, 0.96);
-        color: #b77908;
+        background: rgba(255, 237, 213, 0.96);
+        border-color: rgba(234, 88, 12, 0.2);
+        color: #c2410c;
       }
 
       .jikbo-chip.exam.subject-other {
-        background: rgba(236, 242, 250, 0.96);
-        color: #5f6e89;
+        background: rgba(255, 247, 237, 0.96);
+        border-color: rgba(148, 163, 184, 0.24);
+        color: #9a3412;
       }
 
       .jikbo-chip.exam.warning,
@@ -17272,6 +17406,8 @@
         jikboScheduleStatuses: [],
         jikboStatusDraftMap: {},
         jikboSummaryDraftMap: {},
+        focusedJikboExamKey: '',
+        jikboBoardLoadPromise: null,
         selectedJikboAssignmentKey: '',
         selectedJikboStatusDraft: null,
         editingJikboSubjectRowNumber: '',
@@ -32683,6 +32819,13 @@
           return;
         }
 
+        var timelineButton = event.target.closest('[data-jikbo-focus-exam]');
+        if (timelineButton) {
+          APP_STATE.focusedJikboExamKey = timelineButton.getAttribute('data-jikbo-focus-exam') || '';
+          renderJikboSummary_(buildJikboBoardModel_());
+          return;
+        }
+
         var summaryItemButton = event.target.closest('[data-jikbo-summary-student]');
         if (summaryItemButton) {
           openJikboAssignmentModal_(summaryItemButton.getAttribute('data-jikbo-summary-student') || '');
@@ -32716,7 +32859,7 @@
         setInputValueIfNotActive_('jikboSearchInput', APP_STATE.jikboSearchKeyword || '');
         APP_STATE.jikboStatusDraftMap = {};
 
-        if (APP_STATE.jikboLoading && !APP_STATE.jikboLoaded) {
+        if (!isJikboBoardDataReady_()) {
           document.getElementById('jikboSummaryWrap').innerHTML = '';
           document.getElementById('jikboBoardWrap').innerHTML = renderJikboLoadingCard_();
           return;
@@ -32725,6 +32868,42 @@
         var model = buildJikboBoardModel_();
         renderJikboSummary_(model);
         document.getElementById('jikboBoardWrap').innerHTML = renderJikboBoardTable_(model);
+      }
+
+      function isJikboBoardDataReady_() {
+        if (!APP_STATE.token) {
+          return true;
+        }
+        if (APP_STATE.jikboLoading && !APP_STATE.jikboLoaded) {
+          return false;
+        }
+        var currentMonthExamCount = getJikboExamEventsForCurrentMonth_().length;
+        var shouldLoad =
+          !APP_STATE.jikboLoaded ||
+          (!currentMonthExamCount && !APP_STATE.eventsLoaded);
+        if (!shouldLoad) {
+          return true;
+        }
+        requestJikboBoardDataLoad_();
+        return false;
+      }
+
+      function requestJikboBoardDataLoad_() {
+        if (APP_STATE.jikboBoardLoadPromise) {
+          return APP_STATE.jikboBoardLoadPromise;
+        }
+        APP_STATE.jikboLoaded = false;
+        APP_STATE.jikboBoardLoadPromise = ensureViewDataLoaded_('jikbo', { silent: true })
+          .catch(function(error) {
+            handleApiError_(error);
+          })
+          .finally(function() {
+            APP_STATE.jikboBoardLoadPromise = null;
+            if (APP_STATE.currentView === 'jikbo' && APP_STATE.jikboPanelMode === 'board') {
+              renderJikboView();
+            }
+          });
+        return APP_STATE.jikboBoardLoadPromise;
       }
 
       function renderJikboLoadingCard_() {
@@ -32833,6 +33012,7 @@
                 cellMap[eventItem.isoDate] = { exams: [], jikbos: [] };
               }
               cellMap[eventItem.isoDate].exams.push({
+                eventKey: buildJikboTimelineEventKey_(eventItem),
                 subjectName: eventItem.subjectName,
                 toneClass: getSubjectToneClass_(eventItem.subjectName),
                 isDefined: Boolean(subjectDefinition && subjectDefinition.isEnabled !== false),
@@ -32983,7 +33163,8 @@
           monthDateKeys: monthDateKeys,
           groups: groups,
           stats: stats,
-          summary: summary
+          summary: summary,
+          timelineEvents: buildJikboTimelineEvents_(monthEventList)
         };
       }
 
@@ -33041,6 +33222,7 @@
         APP_STATE.selectedJikboSummaryPanel = activePanel;
 
         document.getElementById('jikboSummaryWrap').innerHTML = [
+          renderJikboExamTimeline_(model),
           '<div class="jikbo-summary-cards">',
           panelOrder.map(function(key) {
             return renderJikboSummaryCard_(key, panelMap[key], activePanel === key);
@@ -33079,6 +33261,130 @@
             : '<div class="jikbo-summary-empty">' + escapeHtml(panel.emptyText || '표시할 항목이 없습니다.') + '</div>',
           '</section>'
         ].join('');
+      }
+
+      function buildJikboTimelineEventKey_(eventItem) {
+        return [
+          eventItem && (eventItem.rowNumber || eventItem.eventId || ''),
+          eventItem && eventItem.school || '',
+          eventItem && normalizeJikboGradeForClient_(eventItem.grade) || '',
+          eventItem && eventItem.subjectName || '',
+          eventItem && (eventItem.isoDate || eventItem.date) || ''
+        ].join('|');
+      }
+
+      function buildJikboTimelineEvents_(events) {
+        var seen = {};
+        return (events || []).slice().sort(function(a, b) {
+          return String(a.isoDate || '').localeCompare(String(b.isoDate || '')) ||
+            String(a.school || '').localeCompare(String(b.school || ''), 'ko') ||
+            String(a.grade || '').localeCompare(String(b.grade || ''), 'ko') ||
+            String(a.subjectName || '').localeCompare(String(b.subjectName || ''), 'ko');
+        }).map(function(eventItem) {
+          var key = buildJikboTimelineEventKey_(eventItem);
+          if (seen[key]) {
+            return null;
+          }
+          seen[key] = true;
+          return Object.assign({}, eventItem, { timelineKey: key });
+        }).filter(Boolean);
+      }
+
+      function renderJikboExamTimeline_(model) {
+        var timelineEvents = model && model.timelineEvents ? model.timelineEvents : [];
+        if (!timelineEvents.length) {
+          APP_STATE.focusedJikboExamKey = '';
+          return '<section class="jikbo-exam-timeline-wrap glass-panel"><div class="jikbo-summary-empty">표시할 시험 일정이 없습니다.</div></section>';
+        }
+        var activeKey = APP_STATE.focusedJikboExamKey;
+        if (!timelineEvents.some(function(item) { return item.timelineKey === activeKey; })) {
+          activeKey = timelineEvents[0].timelineKey;
+          APP_STATE.focusedJikboExamKey = activeKey;
+        }
+        var activeEvent = timelineEvents.find(function(item) { return item.timelineKey === activeKey; }) || timelineEvents[0];
+        return [
+          '<section class="jikbo-exam-timeline-wrap glass-panel" aria-label="시험 일정 타임라인">',
+          '  <div class="jikbo-exam-timeline-head"><div><strong>시험 일정 달력</strong><span>가장 이른 시험부터 직보 대상 흐름을 확인합니다.</span></div><span class="jikbo-summary-badge">' + escapeHtml(String(timelineEvents.length)) + '건</span></div>',
+          '  <div class="jikbo-exam-timeline" role="list">',
+          timelineEvents.map(function(item) {
+            var parsedDate = parseEventDateForClient_(item.isoDate);
+            var isActive = item.timelineKey === activeKey;
+            return [
+              '<button type="button" role="listitem" class="jikbo-exam-card ' + (isActive ? 'active' : '') + '" data-jikbo-focus-exam="' + escapeAttribute(item.timelineKey) + '">',
+              '  <span class="jikbo-exam-card-date">' + escapeHtml(renderJikboCompactDateLabel_(parsedDate, item.isoDate)) + '</span>',
+              '  <strong>' + escapeHtml([item.school || '-', formatJikboGradeLabel_(item.grade)].filter(Boolean).join(' ')) + '</strong>',
+              '  <span>' + escapeHtml(item.subjectName || '-') + '</span>',
+              '  <small>' + escapeHtml(item.examType || item.title || '내신 시험') + '</small>',
+              '</button>'
+            ].join('');
+          }).join(''),
+          '  </div>',
+          renderJikboTimelineDetail_(model, activeEvent),
+          '</section>'
+        ].join('');
+      }
+
+      function renderJikboCompactDateLabel_(date, fallback) {
+        if (!date) {
+          return fallback || '-';
+        }
+        var weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+        return String(date.getMonth() + 1) + '/' + String(date.getDate()) + ' ' + weekdays[date.getDay()];
+      }
+
+      function renderJikboTimelineDetail_(model, activeEvent) {
+        var rows = getJikboTimelineDetailRows_(model, activeEvent);
+        var title = activeEvent
+          ? [formatJikboRangeLabel_(activeEvent.isoDate), activeEvent.school, formatJikboGradeLabel_(activeEvent.grade), activeEvent.subjectName].filter(Boolean).join(' · ')
+          : '선택된 시험 일정';
+        return [
+          '<div class="jikbo-exam-timeline-detail">',
+          '  <div class="jikbo-exam-timeline-detail-title">' + escapeHtml(title) + '</div>',
+          rows.length
+            ? '<div class="jikbo-exam-timeline-students">' + rows.map(function(row) {
+              var teacherText = row.jikbos.length
+                ? row.jikbos.map(function(item) {
+                  return [item.subjectName || '-', item.instructorLabel || '미배정', item.progressStatus || '미정'].filter(Boolean).join(' · ');
+                }).join(' / ')
+                : '연결된 직보 강사가 없습니다.';
+              return '<article><strong>' + escapeHtml(row.studentName || '-') + '</strong><span>' + escapeHtml(teacherText) + '</span></article>';
+            }).join('') + '</div>'
+            : '<div class="jikbo-summary-empty">이 시험에 연결된 학생과 선생님이 없습니다.</div>',
+          '</div>'
+        ].join('');
+      }
+
+      function getJikboTimelineDetailRows_(model, activeEvent) {
+        if (!model || !activeEvent) {
+          return [];
+        }
+        var eventKey = activeEvent.timelineKey || buildJikboTimelineEventKey_(activeEvent);
+        var examDate = activeEvent.isoDate || '';
+        var jikboDate = getJikboPreviousDateKey_(examDate);
+        var result = [];
+        (model.groups || []).forEach(function(group) {
+          if (group.school !== activeEvent.school || normalizeJikboGradeForClient_(group.grade) !== normalizeJikboGradeForClient_(activeEvent.grade)) {
+            return;
+          }
+          (group.rows || []).forEach(function(row) {
+            var examCell = row.cellMap && row.cellMap[examDate] ? row.cellMap[examDate] : null;
+            var hasExam = (examCell && examCell.exams ? examCell.exams : []).some(function(item) {
+              return item.eventKey === eventKey || item.subjectName === activeEvent.subjectName;
+            });
+            if (!hasExam) {
+              return;
+            }
+            var jikboCell = row.cellMap && row.cellMap[jikboDate] ? row.cellMap[jikboDate] : null;
+            var jikbos = (jikboCell && jikboCell.jikbos ? jikboCell.jikbos : []).filter(function(item) {
+              return item.examDate === examDate && item.subjectName === activeEvent.subjectName;
+            });
+            result.push({
+              studentName: row.student && row.student.studentName,
+              jikbos: jikbos
+            });
+          });
+        });
+        return result;
       }
 
       function renderJikboSummaryItemBadges_(item, panel) {
