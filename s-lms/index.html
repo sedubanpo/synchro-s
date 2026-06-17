@@ -3282,6 +3282,15 @@
         display: none !important;
       }
 
+      .event-exam-fields {
+        display: grid;
+        gap: 8px;
+      }
+
+      .event-exam-fields.hidden {
+        display: none !important;
+      }
+
       .event-calendar-wrap {
         display: grid;
         gap: 8px;
@@ -16561,7 +16570,44 @@
                 </div>
                 <div class="field-shell">
                   <label class="field-label" for="eventTitleInput">이벤트명</label>
-                  <input id="eventTitleInput" class="field-input" type="text" placeholder="개학">
+                  <select id="eventTitleInput" class="field-input">
+                    <option value="">이벤트명 선택</option>
+                    <option value="내신">내신</option>
+                    <option value="모의고사">모의고사</option>
+                    <option value="학교일정">학교일정</option>
+                    <option value="공휴일">공휴일</option>
+                    <option value="여름방학">여름방학</option>
+                    <option value="겨울방학">겨울방학</option>
+                    <option value="개학식">개학식</option>
+                  </select>
+                </div>
+                <div id="eventExamFields" class="event-exam-fields hidden">
+                  <div class="field-shell">
+                    <label class="field-label" for="eventExamTypeInput">시험유형</label>
+                    <select id="eventExamTypeInput" class="field-input">
+                      <option value="">시험유형 선택</option>
+                      <option value="1학기 중간고사">1학기 중간고사</option>
+                      <option value="1학기 기말고사">1학기 기말고사</option>
+                      <option value="2학기 중간고사">2학기 중간고사</option>
+                      <option value="2학기 기말고사">2학기 기말고사</option>
+                    </select>
+                  </div>
+                  <div class="field-shell">
+                    <label class="field-label" for="eventMajorSubjectInput">대과목</label>
+                    <select id="eventMajorSubjectInput" class="field-input">
+                      <option value="">대과목 선택</option>
+                      <option value="국어">국어</option>
+                      <option value="수학">수학</option>
+                      <option value="영어">영어</option>
+                      <option value="과학">과학</option>
+                      <option value="사회">사회</option>
+                      <option value="한국사">한국사</option>
+                    </select>
+                  </div>
+                  <div class="field-shell">
+                    <label class="field-label" for="eventSelectedSubjectInput">선택과목</label>
+                    <input id="eventSelectedSubjectInput" class="field-input" type="text" placeholder="예: 미적분, 통합과학">
+                  </div>
                 </div>
                 <div class="field-shell">
                   <label class="field-label" for="eventNoteInput">비고</label>
@@ -20085,19 +20131,88 @@
         return 'EVT-' + key.replace(/[\/#?\[\]]/g, '_');
       }
 
+      function formatEventExamSubjectLabel_(majorSubject, selectedSubject) {
+        var major = String(majorSubject || '').trim();
+        var selected = String(selectedSubject || '').trim();
+        if (major && selected) {
+          return major + '(' + selected + ')';
+        }
+        return selected || major || '내신';
+      }
+
+      function resolveEventTypeForForm_(item) {
+        var type = String(item && (item.eventType || item.category) || '').trim();
+        if (['내신', '모의고사', '학교일정', '공휴일', '여름방학', '겨울방학', '개학식'].indexOf(type) !== -1) {
+          return type;
+        }
+        var text = normalizeSearchText([item && item.title, item && item.note, item && item.examType].filter(Boolean).join(' '));
+        if (text.indexOf('모의') !== -1) {
+          return '모의고사';
+        }
+        if (text.indexOf('공휴') !== -1) {
+          return '공휴일';
+        }
+        if (text.indexOf('여름방학') !== -1) {
+          return '여름방학';
+        }
+        if (text.indexOf('겨울방학') !== -1) {
+          return '겨울방학';
+        }
+        if (text.indexOf('개학') !== -1) {
+          return '개학식';
+        }
+        if (text.indexOf('고사') !== -1 || text.indexOf('시험') !== -1 || text.indexOf('내신') !== -1) {
+          return '내신';
+        }
+        return type || '학교일정';
+      }
+
+      function inferMajorSubjectFromLabel_(value) {
+        var text = normalizeSearchText(value);
+        var subjects = ['국어', '수학', '영어', '과학', '사회', '한국사'];
+        return subjects.find(function(subject) {
+          return text.indexOf(normalizeSearchText(subject)) !== -1;
+        }) || '';
+      }
+
+      function inferSelectedSubjectFromLabel_(value) {
+        var label = String(value || '').trim();
+        var paren = label.match(/\(([^)]+)\)/);
+        if (paren && paren[1]) {
+          return paren[1].trim();
+        }
+        var major = inferMajorSubjectFromLabel_(label);
+        return major && normalizeSearchText(label) === normalizeSearchText(major) ? '' : label.replace(major, '').trim();
+      }
+
       function normalizeEventFirebaseData_(data, docId) {
         data = data || {};
         var rowNumber = data.rowNumber || String(docId || '').replace(/^EVT-/i, '');
         var date = String(data.date || data.isoDate || data.eventDate || '');
         var parsedDate = parseEventDateForClient_(date);
+        var rawEventName = String(data.eventName || '');
+        var eventTypeFromName = ['내신', '모의고사', '학교일정', '공휴일', '여름방학', '겨울방학', '개학식'].indexOf(rawEventName) !== -1 ? rawEventName : '';
+        var eventType = String(data.eventType || data.category || eventTypeFromName || '');
+        var examType = String(data.examType || '');
+        var majorSubject = String(data.majorSubject || data.subjectCategory || data.subjectArea || '');
+        var selectedSubject = String(data.selectedSubject || data.detailSubject || data.subjectName || '');
         return {
           eventId: String(data.eventId || docId || ''),
           rowNumber: rowNumber,
           date: date,
           isoDate: String(data.isoDate || (parsedDate ? formatDateKey_(parsedDate) : '')),
           target: String(data.target || data.targetSchool || data.school || ''),
-          title: String(data.title || data.subjectName || data.eventName || ''),
-          note: String(data.note || data.examType || ''),
+          eventType: eventType,
+          category: eventType,
+          eventName: eventType || rawEventName,
+          examType: examType,
+          majorSubject: majorSubject,
+          subjectCategory: majorSubject,
+          selectedSubject: selectedSubject,
+          detailSubject: selectedSubject,
+          subjectName: selectedSubject || String(data.subjectName || ''),
+          title: String(data.title || selectedSubject || majorSubject || data.subjectName || data.eventName || eventType || ''),
+          note: String(data.note || ''),
           submitter: String(data.submitter || data.createdByName || data.createdBy || ''),
           createdById: String(data.createdById || ''),
           createdByName: String(data.createdByName || data.createdBy || data.submitter || ''),
@@ -20165,13 +20280,29 @@
         var existing = (APP_STATE.events || []).find(function(item) {
           return String(item.rowNumber || '') === rowNumber;
         }) || {};
+        var eventType = document.getElementById('eventTitleInput').value.trim();
+        var examType = document.getElementById('eventExamTypeInput').value.trim();
+        var majorSubject = document.getElementById('eventMajorSubjectInput').value.trim();
+        var selectedSubject = document.getElementById('eventSelectedSubjectInput').value.trim();
+        var displayTitle = eventType === '내신'
+          ? formatEventExamSubjectLabel_(majorSubject, selectedSubject)
+          : eventType;
         return {
           eventId: existing.eventId || buildEventFirebaseDocId_(rowNumber),
           rowNumber: rowNumber,
           date: document.getElementById('eventDateInput').value,
           isoDate: document.getElementById('eventDateInput').value,
           target: document.getElementById('eventTargetInput').value.trim(),
-          title: document.getElementById('eventTitleInput').value.trim(),
+          eventType: eventType,
+          category: eventType,
+          eventName: eventType,
+          examType: eventType === '내신' ? examType : '',
+          majorSubject: eventType === '내신' ? majorSubject : '',
+          subjectCategory: eventType === '내신' ? majorSubject : '',
+          selectedSubject: eventType === '내신' ? selectedSubject : '',
+          detailSubject: eventType === '내신' ? selectedSubject : '',
+          subjectName: eventType === '내신' ? (selectedSubject || majorSubject) : '',
+          title: displayTitle,
           note: document.getElementById('eventNoteInput').value.trim(),
           submitter: existing.submitter || (APP_STATE.user && APP_STATE.user.name) || '',
           createdById: existing.createdById || (APP_STATE.user && APP_STATE.user.userId) || '',
@@ -20195,6 +20326,9 @@
           var payload = buildEventPayloadFromForm_(isEditing);
           if (!payload.date || !payload.target || !payload.title) {
             throw new Error('날짜, 대상, 일정명을 입력해 주세요.');
+          }
+          if (payload.eventType === '내신' && (!payload.examType || !payload.majorSubject)) {
+            throw new Error('내신 일정은 시험유형과 대과목을 입력해 주세요.');
           }
           var docId = payload.eventId || buildEventFirebaseDocId_(payload.rowNumber);
           payload.eventId = docId;
@@ -20334,14 +20468,19 @@
       function buildJikboExamEventsFromEvents_(events) {
         return (events || []).map(function(eventItem) {
           var target = parseEventTargetForStudentConsole_(eventItem);
-          var subjectName = String(eventItem.subjectName || eventItem.title || '').trim();
+          var eventType = String(eventItem.eventType || eventItem.category || '').trim();
+          var majorSubject = String(eventItem.majorSubject || eventItem.subjectCategory || eventItem.subjectArea || '').trim();
+          var selectedSubject = String(eventItem.selectedSubject || eventItem.detailSubject || eventItem.subjectName || '').trim();
+          var subjectName = eventType === '내신'
+            ? formatEventExamSubjectLabel_(majorSubject || inferMajorSubjectFromLabel_(eventItem.title || selectedSubject), selectedSubject || inferSelectedSubjectFromLabel_(eventItem.title || ''))
+            : String(eventItem.subjectName || eventItem.title || '').trim();
           var examType = String(eventItem.examType || eventItem.note || '').trim();
           var title = String(eventItem.title || '').trim();
           var note = String(eventItem.note || '').trim();
           if (!target.school || !target.grade || !subjectName) {
             return null;
           }
-          if (!isJikboExamEventText_(title + ' ' + note + ' ' + examType)) {
+          if (eventType !== '내신' && !isJikboExamEventText_(title + ' ' + note + ' ' + examType)) {
             return null;
           }
           return {
@@ -20350,6 +20489,10 @@
             school: target.school,
             grade: normalizeJikboGradeForClient_(target.grade),
             subjectName: subjectName,
+            subjectCategory: majorSubject || inferMajorSubjectFromLabel_(subjectName),
+            majorSubject: majorSubject || inferMajorSubjectFromLabel_(subjectName),
+            selectedSubject: selectedSubject || inferSelectedSubjectFromLabel_(subjectName),
+            eventType: eventType,
             examType: examType || title,
             date: eventItem.date || eventItem.isoDate || '',
             isoDate: eventItem.isoDate || formatDateInputValue_(eventItem.date),
@@ -20422,7 +20565,8 @@
               APP_STATE.events = eventData.events;
               APP_STATE.eventsLoaded = true;
             }
-            if (!subjectDefinitions.length && !studentOverrides.length && !scheduleStatuses.length) {
+            var examEvents = buildJikboExamEventsFromEvents_(events);
+            if (!subjectDefinitions.length && !studentOverrides.length && !scheduleStatuses.length && !examEvents.length) {
               return null;
             }
             return {
@@ -20431,7 +20575,7 @@
               subjectDefinitions: subjectDefinitions,
               studentOverrides: studentOverrides,
               scheduleStatuses: scheduleStatuses,
-              examEvents: buildJikboExamEventsFromEvents_(events)
+              examEvents: examEvents
             };
           });
         });
@@ -26778,6 +26922,15 @@
             rawSchool = rawSchool || pipeParts[0];
             rawGrade = rawGrade || pipeParts[1].replace(/학년/g, '');
           } else {
+            var allGradeMatch = target.match(/^(.+?)\s*(전\s*학년|전체\s*학년|전교생)/);
+            if (allGradeMatch) {
+              rawSchool = rawSchool || allGradeMatch[1];
+              rawGrade = rawGrade || '전학년';
+              return {
+                school: String(rawSchool || '').trim(),
+                grade: String(rawGrade || '').trim()
+              };
+            }
             var match = target.match(/^(.+?)\s*([1-3])학년/);
             if (match) {
               rawSchool = rawSchool || match[1];
@@ -32653,7 +32806,7 @@
             var matchedExamCount = 0;
 
             group.events.forEach(function(eventItem) {
-              var subjectDefinition = subjectDefinitionMap[normalizeSearchText(eventItem.subjectName)] || null;
+              var subjectDefinition = resolveJikboSubjectDefinition_(eventItem, subjectDefinitionMap) || buildJikboFallbackSubjectDefinition_(eventItem);
               var overrideKey = buildJikboOverrideKey_(student.studentId, eventItem.subjectName);
               var override = overrideMap[overrideKey] || null;
               var shouldInclude = shouldIncludeJikboSubject_(student, eventItem, subjectDefinition, override, permissionMap);
@@ -32962,7 +33115,7 @@
         summary[bucket].push({
           title: [item.studentName || '-', item.subjectName || '-'].join(' · '),
           meta: [
-            [item.school || '-', item.grade ? String(item.grade) + '학년' : ''].filter(Boolean).join(' '),
+            [item.school || '-', formatJikboGradeLabel_(item.grade)].filter(Boolean).join(' '),
             item.instructorLabel || '강사 미배정',
             progressStatus === '확정' && item.confirmedTime ? item.confirmedTime : '',
             progressStatus === '대체진행' && item.substituteDate ? item.substituteDate : ''
@@ -32986,7 +33139,7 @@
         }
         seenMap[bucket][key] = true;
         summary[bucket].push({
-          title: [eventItem.school || '-', normalizeJikboGradeForClient_(eventItem.grade) ? normalizeJikboGradeForClient_(eventItem.grade) + '학년' : ''].filter(Boolean).join(' '),
+          title: [eventItem.school || '-', formatJikboGradeLabel_(eventItem.grade)].filter(Boolean).join(' '),
           meta: [eventItem.subjectName || '-', eventItem.examType || eventItem.isoDate].filter(Boolean).join(' · '),
           preview: [eventItem.school || '-', eventItem.subjectName || '-'].join(' · ')
         });
@@ -33204,6 +33357,38 @@
         return map;
       }
 
+      function resolveJikboSubjectDefinition_(eventItem, subjectDefinitionMap) {
+        var candidates = [
+          eventItem && eventItem.subjectName,
+          eventItem && eventItem.subjectCategory,
+          eventItem && eventItem.majorSubject,
+          inferMajorSubjectFromLabel_(eventItem && eventItem.subjectName)
+        ].map(function(value) {
+          return normalizeSearchText(value);
+        }).filter(Boolean);
+        for (var i = 0; i < candidates.length; i += 1) {
+          if (subjectDefinitionMap[candidates[i]]) {
+            return subjectDefinitionMap[candidates[i]];
+          }
+        }
+        return null;
+      }
+
+      function buildJikboFallbackSubjectDefinition_(eventItem) {
+        var category = String(eventItem && (eventItem.subjectCategory || eventItem.majorSubject) || '').trim();
+        if (!category) {
+          return null;
+        }
+        return {
+          subjectName: eventItem.subjectName || category,
+          instructorSubjectCategory: category,
+          instructorSubjectCategories: [category],
+          studentSubjectKeywords: [category],
+          isEnabled: true,
+          isDerivedFromEvent: true
+        };
+      }
+
       function getJikboOverrideMap_() {
         var map = {};
         (APP_STATE.jikboStudentOverrides || []).forEach(function(item) {
@@ -33345,7 +33530,8 @@
           return true;
         }
         if (!subjectDefinition || subjectDefinition.isEnabled === false) {
-          return matchesJikboSubjectFallback_(student, eventItem.subjectName);
+          return matchesJikboSubjectFallback_(student, eventItem.subjectName) ||
+            matchesJikboSubjectFallback_(student, eventItem.subjectCategory || eventItem.majorSubject);
         }
         if (matchesJikboStudentKeywords_(student, subjectDefinition.studentSubjectKeywords || [])) {
           return true;
@@ -33519,12 +33705,25 @@
       }
 
       function normalizeJikboGradeForClient_(value) {
-        return String(value === null || value === undefined ? '' : value).replace(/학년/g, '').trim();
+        var text = String(value === null || value === undefined ? '' : value).trim();
+        if (/전\s*학년|전체\s*학년|전교생|공통/.test(text)) {
+          return '전학년';
+        }
+        return text.replace(/학년/g, '').trim();
+      }
+
+      function formatJikboGradeLabel_(value) {
+        var normalized = normalizeJikboGradeForClient_(value);
+        if (!normalized) {
+          return '';
+        }
+        return normalized === '전학년' ? '전학년' : normalized + '학년';
       }
 
       function isSameJikboSchoolGrade_(studentSchool, studentGrade, eventSchool, eventGrade) {
+        var normalizedEventGrade = normalizeJikboGradeForClient_(eventGrade);
         return normalizeSearchText(studentSchool) === normalizeSearchText(eventSchool) &&
-          normalizeJikboGradeForClient_(studentGrade) === normalizeJikboGradeForClient_(eventGrade);
+          (normalizedEventGrade === '전학년' || normalizeJikboGradeForClient_(studentGrade) === normalizedEventGrade);
       }
 
       function compareJikboStudents_(a, b) {
@@ -33998,23 +34197,35 @@
               if (window.console && console.warn) {
                 console.warn('Firebase events save fallback:', error);
               }
+              var fallbackPayload = buildEventPayloadFromForm_(isEditing);
               return apiRequest(isEditing ? 'updateEvent' : 'addEvent', {
                 token: APP_STATE.token,
                 eventRowNumber: APP_STATE.editingEventRowNumber,
-                date: document.getElementById('eventDateInput').value,
-                target: document.getElementById('eventTargetInput').value.trim(),
-                title: document.getElementById('eventTitleInput').value.trim(),
-                note: document.getElementById('eventNoteInput').value.trim()
+                date: fallbackPayload.date,
+                target: fallbackPayload.target,
+                title: fallbackPayload.title,
+                note: fallbackPayload.note,
+                eventType: fallbackPayload.eventType,
+                examType: fallbackPayload.examType,
+                majorSubject: fallbackPayload.majorSubject,
+                selectedSubject: fallbackPayload.selectedSubject
               });
             })
-          : apiRequest(isEditing ? 'updateEvent' : 'addEvent', {
-              token: APP_STATE.token,
-              eventRowNumber: APP_STATE.editingEventRowNumber,
-              date: document.getElementById('eventDateInput').value,
-              target: document.getElementById('eventTargetInput').value.trim(),
-              title: document.getElementById('eventTitleInput').value.trim(),
-              note: document.getElementById('eventNoteInput').value.trim()
-            });
+          : (function() {
+              var fallbackPayload = buildEventPayloadFromForm_(isEditing);
+              return apiRequest(isEditing ? 'updateEvent' : 'addEvent', {
+                token: APP_STATE.token,
+                eventRowNumber: APP_STATE.editingEventRowNumber,
+                date: fallbackPayload.date,
+                target: fallbackPayload.target,
+                title: fallbackPayload.title,
+                note: fallbackPayload.note,
+                eventType: fallbackPayload.eventType,
+                examType: fallbackPayload.examType,
+                majorSubject: fallbackPayload.majorSubject,
+                selectedSubject: fallbackPayload.selectedSubject
+              });
+            })();
         savePromise
           .then(function(result) {
             APP_STATE.events = result.events || [];
@@ -34207,6 +34418,10 @@
           APP_STATE.eventOnlyExams = target.checked;
           APP_STATE.focusedEventId = '';
           renderEvents();
+          return;
+        }
+        if (target.id === 'eventTitleInput') {
+          syncEventExamFields_();
         }
       }
 
@@ -34270,6 +34485,16 @@
         document.getElementById('eventFormMode').classList.toggle('active', isEditing);
         document.getElementById('eventSaveButton').textContent = isEditing ? '일정 수정 저장' : '일정 저장';
         document.getElementById('eventEditCancelButton').classList.toggle('hidden', !isEditing);
+        syncEventExamFields_();
+      }
+
+      function syncEventExamFields_() {
+        var typeInput = document.getElementById('eventTitleInput');
+        var examFields = document.getElementById('eventExamFields');
+        if (!typeInput || !examFields) {
+          return;
+        }
+        examFields.classList.toggle('hidden', typeInput.value !== '내신');
       }
 
       function renderEventEditorState_() {
@@ -34669,9 +34894,16 @@
           return null;
         }
         var target = parseScheduleTarget_(item.target || item.school || item.targetSchool || '');
-        var subject = item.subjectName || item.title || item.eventName || '일정';
-        var title = item.examType || item.note || inferScheduleTitle_(subject);
-        var scheduleType = inferScheduleType_([subject, title, item.note].join(' '));
+        var eventType = String(item.eventType || item.category || item.eventName || '').trim();
+        var majorSubject = String(item.majorSubject || item.subjectCategory || item.subjectArea || '').trim();
+        var selectedSubject = String(item.selectedSubject || item.detailSubject || item.subjectName || '').trim();
+        var subject = eventType === '내신'
+          ? formatEventExamSubjectLabel_(majorSubject || inferMajorSubjectFromLabel_(item.title || selectedSubject), selectedSubject || inferSelectedSubjectFromLabel_(item.title || ''))
+          : (item.title || eventType || item.subjectName || '일정');
+        var title = eventType === '내신'
+          ? (item.examType || inferScheduleTitle_(subject))
+          : (item.note || item.title || eventType || inferScheduleTitle_(subject));
+        var scheduleType = normalizeEventTypeToScheduleType_(eventType, [subject, title, item.note].join(' '));
         var dateKey = formatDateKey_(parsed);
         var school = target.school || item.school || '학교 미지정';
         var grade = target.grade || '공통';
@@ -34683,6 +34915,11 @@
           school: school,
           grade: grade,
           subject: subject,
+          eventType: eventType,
+          examType: item.examType || '',
+          majorSubject: majorSubject,
+          subjectCategory: majorSubject,
+          selectedSubject: selectedSubject,
           scheduleType: scheduleType,
           title: title,
           targetStudentCount: countRelatedStudents_(school, grade),
@@ -34704,6 +34941,12 @@
             grade: normalizeScheduleGrade_(pieces[1])
           };
         }
+        if (/전\s*학년|전체\s*학년|전교생/.test(text)) {
+          return {
+            school: text.replace(/전\s*학년|전체\s*학년|전교생/g, '').trim() || text,
+            grade: '전학년'
+          };
+        }
         var gradeMatch = text.match(/([1-3])\s*학년/);
         if (!gradeMatch) {
           var compact = text.replace(/\s+/g, '');
@@ -34713,14 +34956,31 @@
           }
         }
         var grade = gradeMatch ? normalizeScheduleGrade_(gradeMatch[1]) : '공통';
-        var school = gradeMatch ? text.replace(gradeMatch[0], '').trim() : text;
+        var school = gradeMatch ? text.slice(0, gradeMatch.index).trim() : text;
         return { school: school || text, grade: grade };
       }
 
       function normalizeScheduleGrade_(value) {
         var text = String(value || '').trim();
+        if (/전\s*학년|전체\s*학년|전교생/.test(text)) {
+          return '전학년';
+        }
         var match = text.match(/[1-3]/);
         return match ? match[0] + '학년' : '공통';
+      }
+
+      function normalizeEventTypeToScheduleType_(eventType, fallbackText) {
+        var type = String(eventType || '').trim();
+        if (type === '내신') {
+          return '내신 시험';
+        }
+        if (type === '모의고사') {
+          return '모의고사';
+        }
+        if (type === '학교일정' || type === '공휴일' || type === '여름방학' || type === '겨울방학' || type === '개학식') {
+          return '기타 일정';
+        }
+        return inferScheduleType_(fallbackText || type);
       }
 
       function inferScheduleType_(text) {
@@ -34829,11 +35089,12 @@
 
       function countRelatedStudents_(school, grade) {
         var gradeNumber = getGradeNumber_(grade);
+        var allGrades = normalizeScheduleGrade_(grade) === '전학년' || normalizeScheduleGrade_(grade) === '공통';
         var count = (APP_STATE.visibleStudents || []).filter(function(student) {
           if (school && normalizeSearchText(student.school) !== normalizeSearchText(school)) {
             return false;
           }
-          if (gradeNumber && getGradeNumber_(student.grade) !== gradeNumber) {
+          if (!allGrades && gradeNumber && getGradeNumber_(student.grade) !== gradeNumber) {
             return false;
           }
           return true;
@@ -34948,7 +35209,10 @@
         document.getElementById('eventDateInput').value = dateKey || formatDateKey_(new Date(APP_STATE.calendarYear, APP_STATE.calendarMonth, 1));
         if (schedule) {
           document.getElementById('eventTargetInput').value = [schedule.school, schedule.grade].filter(Boolean).join(' ');
-          document.getElementById('eventTitleInput').value = schedule.subject || '';
+          document.getElementById('eventTitleInput').value = schedule.eventType || (schedule.scheduleType === '내신 시험' ? '내신' : (schedule.scheduleType === '모의고사' ? '모의고사' : '학교일정'));
+          document.getElementById('eventExamTypeInput').value = schedule.examType || schedule.title || '';
+          document.getElementById('eventMajorSubjectInput').value = schedule.majorSubject || schedule.subjectCategory || inferMajorSubjectFromLabel_(schedule.subject || '');
+          document.getElementById('eventSelectedSubjectInput').value = schedule.selectedSubject || inferSelectedSubjectFromLabel_(schedule.subject || '');
           document.getElementById('eventNoteInput').value = schedule.title || '';
         }
         renderEvents();
@@ -34970,7 +35234,10 @@
         APP_STATE.isEventEditorOpen = true;
         document.getElementById('eventDateInput').value = eventItem.isoDate || formatDateInputValue_(eventItem.date);
         document.getElementById('eventTargetInput').value = eventItem.target || '';
-        document.getElementById('eventTitleInput').value = eventItem.title || '';
+        document.getElementById('eventTitleInput').value = resolveEventTypeForForm_(eventItem);
+        document.getElementById('eventExamTypeInput').value = eventItem.examType || '';
+        document.getElementById('eventMajorSubjectInput').value = eventItem.majorSubject || eventItem.subjectCategory || inferMajorSubjectFromLabel_(eventItem.title || eventItem.subjectName || '');
+        document.getElementById('eventSelectedSubjectInput').value = eventItem.selectedSubject || eventItem.detailSubject || inferSelectedSubjectFromLabel_(eventItem.title || eventItem.subjectName || '');
         document.getElementById('eventNoteInput').value = eventItem.note || '';
         renderEvents();
         document.getElementById('eventTargetInput').focus();
