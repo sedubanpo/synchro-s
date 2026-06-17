@@ -7405,7 +7405,10 @@
       .student-index-table td:nth-child(5) { width: 112px; }
 
       .student-index-table th:nth-child(6),
-      .student-index-table td:nth-child(6) { width: 36px; }
+      .student-index-table td:nth-child(6) {
+        width: 72px;
+        text-align: center;
+      }
 
       .student-index-table th {
         position: sticky;
@@ -7773,6 +7776,8 @@
       .action-cluster {
         display: grid;
         grid-template-columns: minmax(0, max-content);
+        justify-content: center;
+        justify-items: center;
         gap: 6px;
       }
 
@@ -7826,7 +7831,7 @@
 
       .profile-summary {
         display: grid;
-        grid-template-columns: auto minmax(0, 0.78fr) minmax(260px, 1.45fr) minmax(150px, 0.72fr);
+        grid-template-columns: minmax(0, 0.92fr) minmax(180px, 1.12fr) minmax(140px, 0.86fr);
         gap: 12px;
         align-items: stretch;
         padding: 13px;
@@ -7970,7 +7975,7 @@
 
       @media (max-width: 1180px) {
         .profile-summary {
-          grid-template-columns: auto minmax(0, 1fr);
+          grid-template-columns: minmax(0, 1fr);
         }
 
         .student-learning-card {
@@ -20204,6 +20209,25 @@
         });
       }
 
+      function deleteEventViaFirebaseDirect_(eventItem) {
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!APP_STATE.isAdmin || !state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('eventWrite')) {
+            throw new Error('Firebase 직접 일정 삭제 경로가 준비되지 않았습니다.');
+          }
+          var docId = String(eventItem && (eventItem.eventId || eventItem.id) || '').trim();
+          if (!docId) {
+            docId = buildEventFirebaseDocId_(eventItem && eventItem.rowNumber);
+          }
+          if (!docId) {
+            throw new Error('삭제할 학교 일정 문서 ID가 없습니다.');
+          }
+          return state.firestore.collection(getEventsFirebaseCollectionName_()).doc(docId).delete().then(function() {
+            return eventItem;
+          });
+        });
+      }
+
       function getJikboFirebaseCollectionName_(key) {
         var collections = (APP_STATE.firebaseDirect && APP_STATE.firebaseDirect.collections) || {};
         if (key === 'subjects') {
@@ -26649,13 +26673,23 @@
             String(item.permission || 'ALLOW').toUpperCase() === 'ALLOW';
         });
         var seen = {};
+        var seenLabel = {};
         return rows.map(function(item) {
           var id = String(item.instructorId || item.userId || '').trim();
           if (!id || seen[id]) {
             return null;
           }
-          seen[id] = true;
           var instructor = findInstructorById_(id);
+          var displayName = instructor && (instructor.name || instructor.userName || instructor.displayName) || item.instructorName || id;
+          var displaySubject = instructor && (instructor.subject || instructor.department) || item.subject || '';
+          var labelKey = normalizeSearchText([displayName, displaySubject].join('|'));
+          if (labelKey && seenLabel[labelKey]) {
+            return null;
+          }
+          seen[id] = true;
+          if (labelKey) {
+            seenLabel[labelKey] = true;
+          }
           if (instructor) {
             return instructor;
           }
@@ -33997,6 +34031,48 @@
           .finally(clearLoading);
       }
 
+      function handleEventDelete_(button) {
+        if (!APP_STATE.isAdmin) {
+          setNotice('학교 일정 삭제는 관리자만 사용할 수 있습니다.', 'warning');
+          return;
+        }
+        var eventId = String(button.getAttribute('data-event-id') || '').trim();
+        var rowNumber = String(button.getAttribute('data-event-row') || '').trim();
+        var scheduleId = String(button.getAttribute('data-schedule-id') || '').trim();
+        var eventItem = (APP_STATE.events || []).find(function(item, index) {
+          var normalized = normalizeEventToSchedule_(item, index);
+          return (eventId && String(item.eventId || item.id || '') === eventId) ||
+            (rowNumber && String(item.rowNumber || '') === rowNumber) ||
+            (scheduleId && normalized && String(normalized.id || '') === scheduleId);
+        });
+        if (!eventItem) {
+          setNotice('삭제할 학교 일정을 찾을 수 없습니다.', 'warning');
+          return;
+        }
+        var label = [eventItem.target || eventItem.school || '', eventItem.title || eventItem.subjectName || eventItem.eventName || '', eventItem.isoDate || eventItem.date || ''].filter(Boolean).join(' · ');
+        if (!window.confirm((label || '선택한 학교 일정') + '을 삭제할까요? 삭제하면 모든 사용자에게 더 이상 표시되지 않습니다.')) {
+          return;
+        }
+        setLoading('학교 일정을 삭제하는 중입니다.');
+        deleteEventViaFirebaseDirect_(eventItem)
+          .then(function(deletedItem) {
+            var deletedEventId = String(deletedItem.eventId || deletedItem.id || '').trim();
+            var deletedRow = String(deletedItem.rowNumber || '').trim();
+            APP_STATE.events = (APP_STATE.events || []).filter(function(item) {
+              return deletedEventId
+                ? String(item.eventId || item.id || '') !== deletedEventId
+                : String(item.rowNumber || '') !== deletedRow;
+            });
+            APP_STATE.jikboLoaded = false;
+            APP_STATE.jikboExamEvents = [];
+            APP_STATE.focusedEventId = '';
+            renderEvents();
+            setNotice('학교 일정이 Firebase에서 삭제되었습니다.', 'success');
+          })
+          .catch(handleApiError_)
+          .finally(clearLoading);
+      }
+
       function handleEventsViewClick(event) {
         if (event.target && event.target.id === 'eventEditorOverlay') {
           APP_STATE.isEventEditorOpen = false;
@@ -34071,7 +34147,7 @@
           return;
         }
         if (action === 'event-delete') {
-          setNotice('삭제는 실제 데이터 보호를 위해 관리자 확인 후 처리됩니다.', 'warning');
+          handleEventDelete_(actionButton);
           return;
         }
         if (action === 'event-table-add') {
@@ -34398,7 +34474,7 @@
             '  <td>' + renderEventTypeBadge_(schedule.scheduleType) + '</td>',
             '  <td><strong>' + escapeHtml(schedule.title || '-') + '</strong></td>',
             '  <td>' + escapeHtml(String(schedule.targetStudentCount || 0)) + '명</td>',
-            '  <td><div class="event-table-actions"><button type="button" class="schedule-table-icon" data-action="edit-event" data-event-row="' + escapeAttribute(String(schedule.rowNumber || '')) + '" data-schedule-id="' + escapeAttribute(schedule.id) + '" data-date="' + escapeAttribute(schedule.date) + '" aria-label="수정"><i data-lucide="edit-2"></i></button><button type="button" class="schedule-table-icon danger" data-action="event-delete" aria-label="삭제"><i data-lucide="trash-2"></i></button></div></td>',
+            '  <td><div class="event-table-actions"><button type="button" class="schedule-table-icon" data-action="edit-event" data-event-row="' + escapeAttribute(String(schedule.rowNumber || '')) + '" data-schedule-id="' + escapeAttribute(schedule.id) + '" data-date="' + escapeAttribute(schedule.date) + '" aria-label="수정"><i data-lucide="edit-2"></i></button><button type="button" class="schedule-table-icon danger" data-action="event-delete" data-event-row="' + escapeAttribute(String(schedule.rowNumber || '')) + '" data-event-id="' + escapeAttribute(String(schedule.source && schedule.source.eventId || schedule.source && schedule.source.id || '')) + '" data-schedule-id="' + escapeAttribute(schedule.id) + '" aria-label="삭제"><i data-lucide="trash-2"></i></button></div></td>',
             '</tr>'
           ].join('');
         }).join('');
