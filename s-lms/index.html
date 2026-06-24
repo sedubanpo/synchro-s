@@ -6249,6 +6249,40 @@
         gap: 14px;
       }
 
+      .jikbo-top-panel-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .jikbo-top-panel-toggle {
+        min-height: 38px;
+        padding: 7px 12px;
+        border: 1px solid rgba(37, 99, 235, 0.26);
+        border-radius: 10px;
+        background: rgba(239, 246, 255, 0.96);
+        color: var(--brand-blue);
+        font: inherit;
+        font-size: 0.76rem;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .jikbo-top-panel-toggle:hover {
+        border-color: rgba(37, 99, 235, 0.46);
+        background: rgba(219, 234, 254, 0.96);
+      }
+
+      .jikbo-top-panel-collapsed-summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding-top: 2px;
+      }
+
       .jikbo-top-panel-title {
         display: grid;
         gap: 4px;
@@ -18000,6 +18034,7 @@
         isJikboSearchComposing: false,
         jikboSearchRenderTimer: null,
         jikboTopPanelMode: 'school',
+        isJikboExamCalendarCollapsed: true,
         selectedJikboStatusKey: '',
         jikboCalendarYear: new Date().getFullYear(),
         jikboCalendarMonth: new Date().getMonth(),
@@ -19170,7 +19205,7 @@
         return {
           studentId: data.id || (doc.id || ''),
           studentName: data.studentName || data.name || '',
-          school: data.school || '',
+          school: normalizeSchoolName_(data.school || ''),
           grade: data.grade || '',
           status: status,
           active: status !== 'INACTIVE',
@@ -19179,6 +19214,9 @@
           subject: data.subject || '',
           baseSubject: data.baseSubject || '',
           rowNumber: data.rowNumber || data.row || '',
+          source: data.source || data.migrationSource || '',
+          supabaseStudentId: data.supabaseStudentId || '',
+          linkedAt: data.linkedAt || '',
           createdAt: data.createdAt || data.registeredAt || data.enrolledAt || '',
           createdAtMs: Number(data.createdAtMs || data.registeredAtMs || data.enrolledAtMs || 0),
           registeredAt: data.registeredAt || data.createdAt || data.enrolledAt || '',
@@ -21008,7 +21046,7 @@
           rowNumber: rowNumber,
           date: date,
           isoDate: String(data.isoDate || (parsedDate ? formatDateKey_(parsedDate) : '')),
-          target: String(data.target || data.targetSchool || data.school || ''),
+          target: normalizeEventTargetSchoolName_(data.target || data.targetSchool || data.school || ''),
           eventType: eventType,
           category: eventType,
           eventName: eventType || rawEventName,
@@ -21217,6 +21255,8 @@
           overrideId: String(data.overrideId || docId || ''),
           rowNumber: String(data.rowNumber || docId || ''),
           studentId: String(data.studentId || ''),
+          canonicalStudentId: String(data.canonicalStudentId || ''),
+          studentIdAliases: Array.isArray(data.studentIdAliases) ? data.studentIdAliases.map(String) : [],
           studentName: String(data.studentName || ''),
           subjectName: String(data.subjectName || ''),
           applyMode: String(data.applyMode || 'INCLUDE'),
@@ -21236,8 +21276,10 @@
           statusId: String(data.statusId || docId || ''),
           rowNumber: String(data.rowNumber || docId || ''),
           studentId: String(data.studentId || ''),
+          canonicalStudentId: String(data.canonicalStudentId || ''),
+          studentIdAliases: Array.isArray(data.studentIdAliases) ? data.studentIdAliases.map(String) : [],
           studentName: String(data.studentName || ''),
-          school: String(data.school || ''),
+          school: normalizeSchoolName_(data.school || ''),
           grade: String(data.grade || ''),
           subjectName: String(data.subjectName || ''),
           examDate: formatDateInputValue_(data.examDate || ''),
@@ -21307,7 +21349,7 @@
           return {
             rowNumber: eventItem.rowNumber || eventItem.eventId || '',
             eventId: eventItem.eventId || '',
-            school: target.school,
+            school: normalizeSchoolName_(target.school),
             grade: normalizeJikboGradeForClient_(target.grade),
             subjectName: subjectName,
             subjectCategory: majorSubject || inferMajorSubjectFromLabel_(subjectName),
@@ -21476,8 +21518,9 @@
         if (!rowNumber) {
           rowNumber = String(Date.now());
         }
-        var studentId = String(payloadSource.studentId || '').trim();
-        var student = findStudentById_(studentId) || {};
+        var sourceStudentId = String(payloadSource.studentId || '').trim();
+        var student = findAnyStudentById_(sourceStudentId) || {};
+        var studentId = String(student.studentId || sourceStudentId).trim();
         var subjectName = String(payloadSource.subjectName || '').trim();
         var instructorId = String(payloadSource.instructorId || '').trim();
         var existing = findJikboOverrideByRow_(rowNumber) || findJikboOverrideForStudentSubject_(studentId, subjectName) || {};
@@ -21485,6 +21528,8 @@
           overrideId: existing.overrideId || buildJikboFirebaseDocId_('JIKBO_OVERRIDE', [studentId, subjectName]),
           rowNumber: rowNumber,
           studentId: studentId,
+          canonicalStudentId: getCanonicalStudentId_(student),
+          studentIdAliases: getStudentIdAliases_(student),
           studentName: student.studentName || existing.studentName || '',
           subjectName: subjectName,
           applyMode: String(payloadSource.applyMode || 'INCLUDE'),
@@ -21537,24 +21582,34 @@
         var now = new Date();
         var sourceDraft = draft || {};
         var sourceValues = values || {};
-        var statusId = sourceDraft.statusId || buildJikboFirebaseDocId_('JIKBO_STATUS', [
-          sourceDraft.studentId,
+        var student = findAnyStudentById_(sourceDraft.studentId) || {};
+        var studentId = String(student.studentId || sourceDraft.studentId || '').trim();
+        var examDate = formatDateInputValue_(sourceDraft.examDate || '');
+        var jikboDate = formatDateInputValue_(sourceDraft.jikboDate || '');
+        var existing = getJikboStatusMap_()[buildJikboStatusLooseKey_(
+          studentId,
           sourceDraft.subjectName,
-          sourceDraft.examDate,
-          sourceDraft.jikboDate,
-          sourceDraft.instructorId,
-          sourceDraft.instructorName
+          examDate,
+          jikboDate
+        )] || {};
+        var statusId = sourceDraft.statusId || existing.statusId || buildJikboFirebaseDocId_('JIKBO_STATUS', [
+          studentId,
+          sourceDraft.subjectName,
+          examDate,
+          jikboDate
         ]);
         return {
           statusId: statusId,
           rowNumber: statusId,
-          studentId: sourceDraft.studentId || '',
-          studentName: sourceDraft.studentName || '',
-          school: sourceDraft.school || '',
-          grade: sourceDraft.grade || '',
+          studentId: studentId,
+          canonicalStudentId: getCanonicalStudentId_(student),
+          studentIdAliases: getStudentIdAliases_(student),
+          studentName: student.studentName || sourceDraft.studentName || '',
+          school: normalizeSchoolName_(student.school || sourceDraft.school || ''),
+          grade: student.grade || sourceDraft.grade || '',
           subjectName: sourceDraft.subjectName || '',
-          examDate: formatDateInputValue_(sourceDraft.examDate || ''),
-          jikboDate: formatDateInputValue_(sourceDraft.jikboDate || ''),
+          examDate: examDate,
+          jikboDate: jikboDate,
           instructorId: sourceValues.instructorId || sourceDraft.instructorId || '',
           instructorName: sourceValues.instructorName || sourceDraft.instructorName || '',
           progressStatus: normalizeJikboProgressStatusClient_(sourceValues.progressStatus || '미정'),
@@ -21604,6 +21659,7 @@
       function normalizeMaterialRows_(rows) {
         return (rows || []).map(function(row) {
           return Object.assign({}, row, {
+            school: normalizeSchoolName_(row && row.school),
             grade: normalizeMaterialGradeInput_(row && row.grade)
           });
         });
@@ -21614,7 +21670,7 @@
         var rowNumber = Number(data.rowNumber || String(docId || '').replace(/^MAT-/i, '')) || 0;
         return {
           rowNumber: rowNumber,
-          school: String(data.school || ''),
+          school: normalizeSchoolName_(data.school || ''),
           grade: normalizeMaterialGradeInput_(data.grade || ''),
           term: String(data.term || ''),
           year: String(data.year || ''),
@@ -21713,7 +21769,7 @@
         return {
           logId: data.logId || docId || '',
           materialRowNumber: String(data.materialRowNumber || data.rowNumber || ''),
-          school: String(data.school || ''),
+          school: normalizeSchoolName_(data.school || ''),
           year: String(data.year || ''),
           subject: String(data.subject || ''),
           examType: String(data.examType || ''),
@@ -22047,6 +22103,7 @@
           historyId: data.historyId || (changeType ? ((doc && doc.id) || '') : ''),
           changeType: data.changeType || changeType || ''
         }));
+        grade.school = normalizeSchoolName_(grade.school || '');
         grade.updatedAtMs = Number(data.updatedAtMs || data.createdAtMs || parseGradeDateValue_(grade.updatedAt || grade.createdAt) || 0);
         return grade;
       }
@@ -23160,8 +23217,16 @@
       function hydrateJikboData_(jikboData) {
         APP_STATE.jikboSubjectDefinitions = jikboData && jikboData.subjectDefinitions ? jikboData.subjectDefinitions : [];
         APP_STATE.jikboStudentOverrides = jikboData && jikboData.studentOverrides ? jikboData.studentOverrides : [];
-        APP_STATE.jikboExamEvents = jikboData && jikboData.examEvents ? jikboData.examEvents : [];
-        APP_STATE.jikboScheduleStatuses = jikboData && jikboData.scheduleStatuses ? jikboData.scheduleStatuses : [];
+        APP_STATE.jikboExamEvents = (jikboData && jikboData.examEvents ? jikboData.examEvents : []).map(function(item) {
+          return Object.assign({}, item, {
+            school: normalizeSchoolName_(item && item.school)
+          });
+        });
+        APP_STATE.jikboScheduleStatuses = (jikboData && jikboData.scheduleStatuses ? jikboData.scheduleStatuses : []).map(function(item) {
+          return Object.assign({}, item, {
+            school: normalizeSchoolName_(item && item.school)
+          });
+        });
       }
 
       function ensureViewDataLoaded_(viewName, options) {
@@ -23533,10 +23598,37 @@
       }
 
       function normalizeSearchText(value) {
-        return String(value === null || value === undefined ? '' : value)
+        var normalized = String(value === null || value === undefined ? '' : value)
           .replace(/\//g, '')
           .toLowerCase()
           .replace(/\s+/g, '');
+        if (normalized === '신반포' || normalized === '신반포중' || normalized === '신반포중학교') {
+          return '신반포중';
+        }
+        return normalized;
+      }
+
+      function normalizeSchoolName_(value) {
+        var name = String(value === null || value === undefined ? '' : value).trim();
+        var key = name.replace(/\s+/g, '');
+        if (key === '신반포' || key === '신반포중' || key === '신반포중학교') {
+          return '신반포중';
+        }
+        return name;
+      }
+
+      function normalizeEventTargetSchoolName_(value) {
+        var text = String(value === null || value === undefined ? '' : value).trim();
+        if (!text) {
+          return '';
+        }
+        return text.replace(/^(\s*신반포(?:중학교|중)?)(?=\s*(?:\||[1-3]\s*학년|전\s*학년|전체\s*학년|전교생|$))/, function() {
+          return '신반포중';
+        });
+      }
+
+      function normalizeSchoolKey_(value) {
+        return normalizeSearchText(normalizeSchoolName_(value));
       }
 
       function uniqueList_(values) {
@@ -23550,7 +23642,7 @@
           return '';
         }
         var name = normalizeSearchText(student.studentName || student.name || '');
-        var school = normalizeSearchText(student.school || '');
+        var school = normalizeSchoolKey_(student.school || '');
         var grade = normalizeSearchText(student.grade || '');
         if (name && (school || grade)) {
           return ['identity', name, school, grade].join('|');
@@ -23565,6 +23657,15 @@
         var priority = 0;
         if (String(student.studentId || '').indexOf('STU-') === 0) {
           priority += 1000000000000000;
+        }
+        if (String(student.studentId || '').indexOf('ROW-') === 0) {
+          priority += 500000000000000;
+        }
+        if (
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(student.studentId || '')) &&
+          (student.supabaseStudentId || normalizeSearchText(student.source).indexOf('synchros') !== -1)
+        ) {
+          priority += 100000000000;
         }
         priority += Number(student.updatedAtMs || student.registeredAtMs || student.createdAtMs || 0);
         if (student.subject || student.baseSubject) {
@@ -23582,6 +23683,7 @@
             return String(id || '').trim();
           }).filter(Boolean));
           return Object.assign({}, incoming, {
+            school: normalizeSchoolName_(incoming.school || ''),
             studentIdAliases: initialAliases
           });
         }
@@ -23611,7 +23713,7 @@
         return Object.assign({}, secondary, primary, {
           studentId: primary.studentId || secondary.studentId || '',
           studentName: primary.studentName || secondary.studentName || '',
-          school: primary.school || secondary.school || '',
+          school: normalizeSchoolName_(primary.school || secondary.school || ''),
           grade: primary.grade || secondary.grade || '',
           subject: primary.subject || secondary.subject || '',
           baseSubject: primary.baseSubject || secondary.baseSubject || '',
@@ -23646,6 +23748,15 @@
           .concat(student && student.studentIdAliases || [])
           .map(function(id) { return String(id || '').trim(); })
           .filter(Boolean));
+      }
+
+      function getCanonicalStudentId_(student) {
+        var aliases = getStudentIdAliases_(student);
+        return aliases.find(function(id) {
+          return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+        }) || aliases.find(function(id) {
+          return String(id || '').indexOf('STU-') === 0;
+        }) || String(student && student.studentId || '');
       }
 
       function collectStudentTagSet(student) {
@@ -27950,7 +28061,7 @@
               rawSchool = rawSchool || allGradeMatch[1];
               rawGrade = rawGrade || '전학년';
               return {
-                school: String(rawSchool || '').trim(),
+                school: normalizeSchoolName_(rawSchool || ''),
                 grade: String(rawGrade || '').trim()
               };
             }
@@ -27964,7 +28075,7 @@
           }
         }
         return {
-          school: String(rawSchool || '').trim(),
+          school: normalizeSchoolName_(rawSchool || ''),
           grade: String(rawGrade || '').replace(/학년/g, '').trim()
         };
       }
@@ -34141,6 +34252,13 @@
           return;
         }
 
+        var examCalendarToggleButton = event.target.closest('[data-jikbo-exam-calendar-toggle]');
+        if (examCalendarToggleButton) {
+          APP_STATE.isJikboExamCalendarCollapsed = !APP_STATE.isJikboExamCalendarCollapsed;
+          renderJikboSummary_(APP_STATE.currentJikboBoardModel || buildJikboBoardModel_());
+          return;
+        }
+
         var timelineButton = event.target.closest('[data-jikbo-focus-exam]');
         if (timelineButton) {
           APP_STATE.focusedJikboExamKey = timelineButton.getAttribute('data-jikbo-focus-exam') || '';
@@ -34323,13 +34441,13 @@
           if (!student || !student.studentId) {
             return;
           }
-          var school = String(student.school || '').trim();
+          var school = normalizeSchoolName_(student.school);
           var grade = normalizeJikboGradeForClient_(student.grade);
           var groupKey = [school, grade].join('|');
           if (!studentsByGroupKey[groupKey]) {
             studentsByGroupKey[groupKey] = [];
           }
-          studentsByGroupKey[groupKey].push(student);
+          studentsByGroupKey[groupKey].push(Object.assign({}, student, { school: school }));
         });
 
         Object.keys(studentsByGroupKey).forEach(function(key) {
@@ -34344,24 +34462,28 @@
           if (!isJikboDateInSelectedBoardRange_(manualDate)) {
             return;
           }
-          var studentId = String(statusItem.studentId || '');
-          if (!manualStatusesByStudentId[studentId]) {
-            manualStatusesByStudentId[studentId] = [];
-          }
-          manualStatusesByStudentId[studentId].push(statusItem);
+          var statusStudent = findAnyStudentById_(statusItem.studentId);
+          var statusStudentIds = statusStudent ? getStudentIdAliases_(statusStudent) : [String(statusItem.studentId || '')];
+          statusStudentIds.forEach(function(studentId) {
+            if (!manualStatusesByStudentId[studentId]) {
+              manualStatusesByStudentId[studentId] = [];
+            }
+            manualStatusesByStudentId[studentId].push(statusItem);
+          });
         });
 
         monthEventList.forEach(function(item) {
-          var groupKey = [item.school || '', normalizeJikboGradeForClient_(item.grade)].join('|');
+          var normalizedSchool = normalizeSchoolName_(item.school);
+          var groupKey = [normalizedSchool, normalizeJikboGradeForClient_(item.grade)].join('|');
           if (!groupsByKey[groupKey]) {
             groupsByKey[groupKey] = {
               key: groupKey,
-              school: item.school || '',
+              school: normalizedSchool,
               grade: normalizeJikboGradeForClient_(item.grade),
               events: []
             };
           }
-          groupsByKey[groupKey].events.push(item);
+          groupsByKey[groupKey].events.push(Object.assign({}, item, { school: normalizedSchool }));
           activeDateKeyMap[item.isoDate] = true;
         });
 
@@ -34768,15 +34890,37 @@
 
       function renderJikboTopPanel_(model) {
         var mode = APP_STATE.jikboTopPanelMode === 'teacher' ? 'teacher' : 'school';
+        var isExamCalendarCollapsed = mode === 'school' && APP_STATE.isJikboExamCalendarCollapsed;
         var title = mode === 'teacher' ? '강사별 직보 현황' : '시험 일정 달력';
         var description = mode === 'teacher'
           ? '입력된 강사를 과목별 색상으로 묶고, 강사 미입력 상태를 바로 확인합니다.'
           : '가까운 날짜의 학교, 학년, 과목 시험을 날짜순 카드로 확인합니다.';
+        var actions = [
+          renderJikboTopTabs_(mode),
+          mode === 'school'
+            ? '<button type="button" class="jikbo-top-panel-toggle" data-jikbo-exam-calendar-toggle="true" aria-expanded="' + (isExamCalendarCollapsed ? 'false' : 'true') + '">' + (isExamCalendarCollapsed ? '펼치기' : '접기') + '</button>'
+            : ''
+        ].join('');
         return [
-          '<section class="jikbo-exam-timeline-wrap glass-panel" aria-label="직보 상단 패널">',
-          '<div class="jikbo-top-panel-head"><div class="jikbo-top-panel-title"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(description) + '</span></div>' + renderJikboTopTabs_(mode) + '</div>',
-          mode === 'teacher' ? renderJikboTeacherOverview_(model) : renderJikboExamTimelineContent_(model),
+          '<section class="jikbo-exam-timeline-wrap glass-panel' + (isExamCalendarCollapsed ? ' collapsed' : '') + '" aria-label="직보 상단 패널">',
+          '<div class="jikbo-top-panel-head"><div class="jikbo-top-panel-title"><strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(description) + '</span></div><div class="jikbo-top-panel-actions">' + actions + '</div></div>',
+          isExamCalendarCollapsed
+            ? renderJikboExamTimelineCollapsedSummary_(model)
+            : (mode === 'teacher' ? renderJikboTeacherOverview_(model) : renderJikboExamTimelineContent_(model)),
           '</section>'
+        ].join('');
+      }
+
+      function renderJikboExamTimelineCollapsedSummary_(model) {
+        var timelineEvents = model && model.timelineEvents ? model.timelineEvents : [];
+        var examCount = timelineEvents.reduce(function(total, item) {
+          return total + ((item.events || []).length || 1);
+        }, 0);
+        return [
+          '<div class="jikbo-top-panel-collapsed-summary">',
+          '<span class="jikbo-summary-badge">' + escapeHtml(String(timelineEvents.length)) + '개 일정</span>',
+          '<span class="jikbo-summary-badge">' + escapeHtml(String(examCount)) + '과목</span>',
+          '</div>'
         ].join('');
       }
 
@@ -34866,6 +35010,9 @@
             String(a.grade || '').localeCompare(String(b.grade || ''), 'ko') ||
             String(a.subjectName || '').localeCompare(String(b.subjectName || ''), 'ko');
         }).forEach(function(eventItem) {
+          eventItem = Object.assign({}, eventItem, {
+            school: normalizeSchoolName_(eventItem && eventItem.school)
+          });
           var groupKey = buildJikboTimelineGroupKey_(eventItem);
           var eventKey = buildJikboTimelineEventKey_(eventItem);
           if (!groupMap[groupKey]) {
@@ -35668,7 +35815,14 @@
           if (!item || !item.studentId || !item.subjectName) {
             return;
           }
-          map[buildJikboOverrideKey_(item.studentId, item.subjectName)] = item;
+          var student = findAnyStudentById_(item.studentId);
+          var ids = uniqueList_((student ? getStudentIdAliases_(student) : [])
+            .concat(item.studentIdAliases || [], item.canonicalStudentId || [], item.studentId || [])
+            .map(function(studentId) { return String(studentId || '').trim(); })
+            .filter(Boolean));
+          ids.forEach(function(studentId) {
+            map[buildJikboOverrideKey_(studentId, item.subjectName)] = item;
+          });
         });
         return map;
       }
@@ -35679,12 +35833,19 @@
           if (!item || !item.studentId || !item.subjectName || !item.examDate || !item.jikboDate) {
             return;
           }
-          var exactKey = buildJikboStatusKey_(item.studentId, item.subjectName, item.examDate, item.jikboDate, item.instructorId, item.instructorName);
-          var looseKey = buildJikboStatusLooseKey_(item.studentId, item.subjectName, item.examDate, item.jikboDate);
-          map[exactKey] = item;
-          if (!map[looseKey] || Number(item.updatedAtMs || 0) >= Number(map[looseKey].updatedAtMs || 0)) {
-            map[looseKey] = item;
-          }
+          var student = findAnyStudentById_(item.studentId);
+          var ids = uniqueList_((student ? getStudentIdAliases_(student) : [])
+            .concat(item.studentIdAliases || [], item.canonicalStudentId || [], item.studentId || [])
+            .map(function(studentId) { return String(studentId || '').trim(); })
+            .filter(Boolean));
+          ids.forEach(function(studentId) {
+            var exactKey = buildJikboStatusKey_(studentId, item.subjectName, item.examDate, item.jikboDate, item.instructorId, item.instructorName);
+            var looseKey = buildJikboStatusLooseKey_(studentId, item.subjectName, item.examDate, item.jikboDate);
+            map[exactKey] = item;
+            if (!map[looseKey] || Number(item.updatedAtMs || 0) >= Number(map[looseKey].updatedAtMs || 0)) {
+              map[looseKey] = item;
+            }
+          });
         });
         return map;
       }
@@ -36054,7 +36215,7 @@
 
       function isSameJikboSchoolGrade_(studentSchool, studentGrade, eventSchool, eventGrade) {
         var normalizedEventGrade = normalizeJikboGradeForClient_(eventGrade);
-        return normalizeSearchText(studentSchool) === normalizeSearchText(eventSchool) &&
+        return normalizeSchoolKey_(studentSchool) === normalizeSchoolKey_(eventSchool) &&
           (normalizedEventGrade === '전학년' || normalizeJikboGradeForClient_(studentGrade) === normalizedEventGrade);
       }
 
@@ -37284,13 +37445,13 @@
         if (text.indexOf('|') !== -1) {
           var pieces = text.split('|');
           return {
-            school: pieces[0].trim(),
+            school: normalizeSchoolName_(pieces[0]),
             grade: normalizeScheduleGrade_(pieces[1])
           };
         }
         if (/전\s*학년|전체\s*학년|전교생/.test(text)) {
           return {
-            school: text.replace(/전\s*학년|전체\s*학년|전교생/g, '').trim() || text,
+            school: normalizeSchoolName_(text.replace(/전\s*학년|전체\s*학년|전교생/g, '').trim() || text),
             grade: '전학년'
           };
         }
@@ -37299,12 +37460,12 @@
           var compact = text.replace(/\s+/g, '');
           gradeMatch = compact.match(/^(.+?)([1-3])$/);
           if (gradeMatch) {
-            return { school: gradeMatch[1].trim(), grade: normalizeScheduleGrade_(gradeMatch[2]) };
+            return { school: normalizeSchoolName_(gradeMatch[1]), grade: normalizeScheduleGrade_(gradeMatch[2]) };
           }
         }
         var grade = gradeMatch ? normalizeScheduleGrade_(gradeMatch[1]) : '공통';
         var school = gradeMatch ? text.slice(0, gradeMatch.index).trim() : text;
-        return { school: school || text, grade: grade };
+        return { school: normalizeSchoolName_(school || text), grade: grade };
       }
 
       function normalizeScheduleGrade_(value) {
@@ -39616,7 +39777,7 @@
       }
 
       function getSchoolLogoFile_(schoolName) {
-        var name = String(schoolName || '').trim();
+        var name = normalizeSchoolName_(schoolName);
         return name ? (SCHOOL_LOGO_FILES[name] || '') : '';
       }
 
@@ -39626,7 +39787,7 @@
       }
 
       function renderSchoolNameWithLogo_(schoolName) {
-        var name = String(schoolName || '').trim();
+        var name = normalizeSchoolName_(schoolName);
         if (name === '-' || name === '전체' || name === '학생 자료') {
           return '<span class="school-logo-name">' + escapeHtml(name || '-') + '</span>';
         }
@@ -43284,6 +43445,7 @@
           cloned.school = cloned.school || matchedStudent.school || '';
           cloned.grade = cloned.grade || matchedStudent.grade || '';
         }
+        cloned.school = normalizeSchoolName_(cloned.school || '');
         cloned.examYear = cloned.examYear || cloned.year || cloned.schoolYear || '';
         cloned.mockExamSource = getGradeExamTypeGroup_(cloned) === '모의고사'
           ? (normalizeGradeMockExamSource_(cloned.mockExamSource || cloned.examSource || cloned.mockSource || cloned.providerType || cloned.provider) || '교육청')
