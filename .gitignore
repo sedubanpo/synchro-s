@@ -1,0 +1,15 @@
+.vercel
+.env*.local
+
+# Dependencies
+node_modules/
+
+# Build and test output
+.next/
+dist/
+build/
+coverage/
+
+# Local system and log files
+.DS_Store
+*.log
