@@ -6049,6 +6049,17 @@
         border-radius: 12px;
       }
 
+      .jikbo-summary-detail-list.missing-school-grid .jikbo-summary-detail-item {
+        min-height: 64px;
+        padding: 10px 11px;
+      }
+
+      .jikbo-summary-detail-list.missing-school-grid .jikbo-summary-detail-item-meta {
+        display: block;
+        overflow: visible;
+        -webkit-line-clamp: initial;
+      }
+
       .jikbo-summary-detail-item-title {
         display: flex;
         align-items: center;
@@ -6283,11 +6294,11 @@
       }
 
       .jikbo-exam-card {
-        flex: 0 0 300px;
+        flex: 0 0 260px;
         display: grid;
-        gap: 8px;
-        min-height: 148px;
-        padding: 12px;
+        gap: 6px;
+        min-height: 128px;
+        padding: 10px;
         border-radius: 8px;
         border: 1px solid rgba(239, 68, 68, 0.16);
         background: rgba(255, 247, 237, 0.94);
@@ -6308,37 +6319,37 @@
       .jikbo-exam-card-date {
         display: inline-flex;
         width: fit-content;
-        min-height: 22px;
+        min-height: 20px;
         align-items: center;
-        padding: 2px 8px;
+        padding: 2px 7px;
         border-radius: 999px;
         background: rgba(239, 68, 68, 0.1);
         color: #b91c1c;
-        font-size: 0.7rem;
+        font-size: 0.66rem;
         font-weight: 900;
       }
 
       .jikbo-exam-card strong {
-        font-size: 0.84rem;
+        font-size: 0.76rem;
       }
 
       .jikbo-exam-card-schools {
         display: grid;
-        gap: 6px;
+        gap: 4px;
       }
 
       .jikbo-exam-school-row {
         display: grid;
-        gap: 5px;
-        padding: 8px;
-        border-radius: 8px;
+        gap: 4px;
+        padding: 6px;
+        border-radius: 7px;
         border: 1px solid rgba(226, 232, 240, 0.9);
         background: rgba(255, 255, 255, 0.72);
       }
 
       .jikbo-exam-school-row strong {
         color: var(--text-strong);
-        font-size: 0.76rem;
+        font-size: 0.7rem;
       }
 
       .jikbo-exam-card-meta {
@@ -6351,20 +6362,20 @@
       .jikbo-exam-card-subjects {
         display: flex;
         flex-wrap: wrap;
-        gap: 5px;
+        gap: 4px;
         align-items: center;
       }
 
       .jikbo-exam-subject-badge {
         display: inline-flex;
         align-items: center;
-        min-height: 22px;
-        padding: 3px 8px;
-        border-radius: 6px;
+        min-height: 18px;
+        padding: 2px 6px;
+        border-radius: 5px;
         border: 1px solid rgba(203, 213, 225, 0.82);
         background: rgba(248, 250, 252, 0.95);
         color: var(--text-strong);
-        font-size: 0.68rem;
+        font-size: 0.62rem;
         font-weight: 900;
         line-height: 1.2;
       }
@@ -6372,7 +6383,7 @@
       .jikbo-exam-card span,
       .jikbo-exam-card small {
         color: var(--text-soft);
-        font-size: 0.74rem;
+        font-size: 0.68rem;
         line-height: 1.35;
       }
 
@@ -17993,6 +18004,7 @@
         jikboCalendarYear: new Date().getFullYear(),
         jikboCalendarMonth: new Date().getMonth(),
         selectedJikboSummaryPanel: '',
+        jikboMissingSchoolsExpanded: false,
         jikboUnresolvedExpanded: false,
         materialsLoaded: false,
         eventsLoaded: false,
@@ -33665,11 +33677,18 @@
         }
       }
 
-      function openJikboMissingExamSchoolsModal_() {
+      function openJikboMissingExamSchoolsModal_(schoolKey) {
         var model = APP_STATE.currentJikboBoardModel || buildJikboBoardModel_();
         var items = model && model.summary ? (model.summary.missingExamSchools || []) : [];
+        if (schoolKey) {
+          items = items.filter(function(item) {
+            return String(item.key || item.school || '') === String(schoolKey);
+          });
+        }
         document.getElementById('jikboMissingExamSchoolsModalDescription').textContent =
-          '시험 시작/종료 일정이 미등록된 학교 ' + String(items.length) + '곳과 해당 학생을 확인합니다.';
+          schoolKey && items[0]
+            ? String(items[0].school || '-') + ' 학생 명단을 확인합니다.'
+            : '시험 시작/종료 일정이 미등록된 학교 ' + String(items.length) + '곳과 해당 학생을 확인합니다.';
         document.getElementById('jikboMissingExamSchoolsModalBody').innerHTML = renderJikboMissingExamSchoolsModalBody_(items);
         document.getElementById('jikboMissingExamSchoolsModal').classList.remove('hidden');
       }
@@ -34088,11 +34107,10 @@
         var summaryButton = event.target.closest('[data-jikbo-summary-panel]');
         if (summaryButton) {
           var panelName = summaryButton.getAttribute('data-jikbo-summary-panel') || '';
-          if (panelName === 'missingExamSchools') {
-            openJikboMissingExamSchoolsModal_();
-            return;
-          }
           APP_STATE.selectedJikboSummaryPanel = APP_STATE.selectedJikboSummaryPanel === panelName ? '' : panelName;
+          if (panelName === 'missingExamSchools' && APP_STATE.selectedJikboSummaryPanel === panelName) {
+            APP_STATE.jikboMissingSchoolsExpanded = false;
+          }
           if (panelName === 'unresolvedStudents' && APP_STATE.selectedJikboSummaryPanel === panelName) {
             APP_STATE.jikboUnresolvedExpanded = true;
           }
@@ -34104,6 +34122,14 @@
         if (unresolvedToggleButton) {
           APP_STATE.jikboUnresolvedExpanded = !APP_STATE.jikboUnresolvedExpanded;
           APP_STATE.selectedJikboSummaryPanel = 'unresolvedStudents';
+          renderJikboSummary_(APP_STATE.currentJikboBoardModel || buildJikboBoardModel_());
+          return;
+        }
+
+        var missingSchoolsToggleButton = event.target.closest('[data-jikbo-summary-toggle-missing-schools]');
+        if (missingSchoolsToggleButton) {
+          APP_STATE.jikboMissingSchoolsExpanded = !APP_STATE.jikboMissingSchoolsExpanded;
+          APP_STATE.selectedJikboSummaryPanel = 'missingExamSchools';
           renderJikboSummary_(APP_STATE.currentJikboBoardModel || buildJikboBoardModel_());
           return;
         }
@@ -34125,6 +34151,12 @@
         var summaryItemButton = event.target.closest('[data-jikbo-summary-student]');
         if (summaryItemButton) {
           openJikboAssignmentModal_(summaryItemButton.getAttribute('data-jikbo-summary-student') || '');
+          return;
+        }
+
+        var missingSchoolButton = event.target.closest('[data-jikbo-summary-missing-school]');
+        if (missingSchoolButton) {
+          openJikboMissingExamSchoolsModal_(missingSchoolButton.getAttribute('data-jikbo-summary-missing-school') || '');
           return;
         }
 
@@ -34632,6 +34664,7 @@
           return {
             school: item.school,
             count: item.studentCount,
+            key: item.school,
             title: item.school,
             meta: item.grades.map(function(gradeItem) {
               return [gradeItem.gradeLabel, String((gradeItem.students || []).length) + '명'].filter(Boolean).join(' · ');
@@ -34773,24 +34806,35 @@
 
       function renderJikboSummaryDetailPanel_(panel) {
         var isUnresolvedPanel = panel && panel.panelKey === 'unresolvedStudents';
-        var isCollapsed = isUnresolvedPanel && !APP_STATE.jikboUnresolvedExpanded;
+        var isMissingExamSchoolsPanel = panel && panel.panelKey === 'missingExamSchools';
+        var isCollapsed = (isUnresolvedPanel && !APP_STATE.jikboUnresolvedExpanded) ||
+          (isMissingExamSchoolsPanel && !APP_STATE.jikboMissingSchoolsExpanded);
         var countUnit = panel && panel.unit ? panel.unit : '건';
         if (isCollapsed) {
+          var toggleAttribute = isMissingExamSchoolsPanel
+            ? 'data-jikbo-summary-toggle-missing-schools="true"'
+            : 'data-jikbo-summary-toggle-unresolved="true"';
+          var collapsedText = isMissingExamSchoolsPanel
+            ? '시험 미확인 학교 목록은 접혀 있습니다. 펼친 뒤 학교를 누르면 해당 학교 학생 명단이 팝업으로 열립니다.'
+            : '미확정 목록은 접혀 있습니다. 필요한 경우 펼쳐서 학생별 직보를 정리하세요.';
           return [
             '<section class="jikbo-summary-detail glass-panel collapsed">',
-            '<div class="jikbo-summary-detail-head"><div><h4>' + escapeHtml(panel.title || '-') + '</h4><p>' + escapeHtml(panel.description || '') + '</p></div><div class="jikbo-summary-status-badges"><span class="jikbo-summary-badge ' + (panel.alert ? 'alert' : '') + '">' + escapeHtml(String(panel.count || 0)) + escapeHtml(countUnit) + '</span><button type="button" class="jikbo-summary-toggle" data-jikbo-summary-toggle-unresolved="true">펼치기</button></div></div>',
-            '<div class="jikbo-summary-empty">미확정 목록은 접혀 있습니다. 필요한 경우 펼쳐서 학생별 직보를 정리하세요.</div>',
+            '<div class="jikbo-summary-detail-head"><div><h4>' + escapeHtml(panel.title || '-') + '</h4><p>' + escapeHtml(panel.description || '') + '</p></div><div class="jikbo-summary-status-badges"><span class="jikbo-summary-badge ' + (panel.alert ? 'alert' : '') + '">' + escapeHtml(String(panel.count || 0)) + escapeHtml(countUnit) + '</span><button type="button" class="jikbo-summary-toggle" ' + toggleAttribute + '>펼치기</button></div></div>',
+            '<div class="jikbo-summary-empty">' + escapeHtml(collapsedText) + '</div>',
             '</section>'
           ].join('');
         }
         return [
           '<section class="jikbo-summary-detail glass-panel">',
-          '<div class="jikbo-summary-detail-head"><div><h4>' + escapeHtml(panel.title || '-') + '</h4><p>' + escapeHtml(panel.description || '') + '</p></div><div class="jikbo-summary-status-badges"><span class="jikbo-summary-badge ' + (panel.alert ? 'alert' : '') + '">' + escapeHtml(String(panel.count || 0)) + escapeHtml(countUnit) + '</span>' + (isUnresolvedPanel ? '<button type="button" class="jikbo-summary-toggle" data-jikbo-summary-toggle-unresolved="true">접기</button>' : '') + '</div></div>',
+          '<div class="jikbo-summary-detail-head"><div><h4>' + escapeHtml(panel.title || '-') + '</h4><p>' + escapeHtml(panel.description || '') + '</p></div><div class="jikbo-summary-status-badges"><span class="jikbo-summary-badge ' + (panel.alert ? 'alert' : '') + '">' + escapeHtml(String(panel.count || 0)) + escapeHtml(countUnit) + '</span>' + (isUnresolvedPanel ? '<button type="button" class="jikbo-summary-toggle" data-jikbo-summary-toggle-unresolved="true">접기</button>' : '') + (isMissingExamSchoolsPanel ? '<button type="button" class="jikbo-summary-toggle" data-jikbo-summary-toggle-missing-schools="true">접기</button>' : '') + '</div></div>',
           (panel.items || []).length
-            ? '<div class="jikbo-summary-detail-list ' + (panel.compactGrid ? 'compact-grid' : '') + '">' + panel.items.map(function(item) {
+            ? '<div class="jikbo-summary-detail-list ' + (panel.compactGrid ? 'compact-grid' : '') + (panel.panelKey === 'missingExamSchools' ? ' missing-school-grid' : '') + '">' + panel.items.map(function(item) {
               if (panel.panelKey === 'unresolvedStudents' && item.key) {
                 APP_STATE.jikboSummaryDraftMap[item.key] = item;
                 return '<button type="button" class="jikbo-summary-detail-item clickable ' + (panel.alert ? 'alert' : '') + '" data-jikbo-summary-student="' + escapeAttribute(item.key) + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '') + '</div></button>';
+              }
+              if (panel.panelKey === 'missingExamSchools' && item.key) {
+                return '<button type="button" class="jikbo-summary-detail-item clickable alert" data-jikbo-summary-missing-school="' + escapeAttribute(item.key) + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '명단 보기') + '</div></button>';
               }
               return '<article class="jikbo-summary-detail-item ' + (panel.alert ? 'alert' : '') + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '') + '</div></article>';
             }).join('') + '</div>'
@@ -34903,8 +34947,8 @@
           timelineEvents.map(function(item) {
             var parsedDate = parseEventDateForClient_(item.isoDate);
             var isActive = item.timelineKey === activeKey;
-            var schoolRows = (item.schoolRows || []).slice(0, 4).map(function(row) {
-              var subjectBadges = (row.subjects || []).slice(0, 4).map(function(subject) {
+            var schoolRows = (item.schoolRows || []).map(function(row) {
+              var subjectBadges = (row.subjects || []).map(function(subject) {
                 return '<span class="jikbo-exam-subject-badge ' + escapeAttribute(subject.toneClass || getSubjectToneClass_(subject.subjectName)) + '">' + escapeHtml(subject.subjectName || '-') + '</span>';
               }).join('');
               return [
@@ -34914,12 +34958,10 @@
                 '</div>'
               ].join('');
             }).join('');
-            var hiddenSchoolCount = Math.max(0, (item.schoolRows || []).length - 4);
             return [
               '<button type="button" role="listitem" class="jikbo-exam-card ' + (isActive ? 'active' : '') + '" data-jikbo-focus-exam="' + escapeAttribute(item.timelineKey) + '">',
               '  <div class="jikbo-exam-card-meta"><span class="jikbo-exam-card-date">' + escapeHtml(renderJikboCompactDateLabel_(parsedDate, item.isoDate)) + '</span><small>' + escapeHtml(String((item.events || []).length || 1)) + '과목</small></div>',
               '  <div class="jikbo-exam-card-schools">' + (schoolRows || '<div class="jikbo-exam-school-row"><strong>학교 미지정</strong></div>') + '</div>',
-              hiddenSchoolCount ? '  <small>외 ' + escapeHtml(String(hiddenSchoolCount)) + '개 학교/학년</small>' : '',
               '  <small>' + escapeHtml((item.examTypes || []).slice(0, 2).join(' / ') || item.examType || item.title || '내신 시험') + '</small>',
               '</button>'
             ].join('');
@@ -41064,6 +41106,7 @@
         APP_STATE.jikboCalendarYear = new Date().getFullYear();
         APP_STATE.jikboCalendarMonth = new Date().getMonth();
         APP_STATE.selectedJikboSummaryPanel = '';
+        APP_STATE.jikboMissingSchoolsExpanded = false;
         APP_STATE.jikboUnresolvedExpanded = false;
         APP_STATE.materialsLoaded = false;
         APP_STATE.eventsLoaded = false;
