@@ -2916,6 +2916,157 @@
         margin-bottom: 12px;
       }
 
+      .permission-review-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .permission-review-summary > div {
+        padding: 13px 14px;
+        border: 1px solid #dbeafe;
+        border-radius: 14px;
+        background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+      }
+
+      .permission-review-summary strong,
+      .permission-review-summary span {
+        display: block;
+      }
+
+      .permission-review-summary strong {
+        color: #0f172a;
+        font-size: 0.88rem;
+        font-weight: 950;
+      }
+
+      .permission-review-summary span {
+        margin-top: 4px;
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 850;
+      }
+
+      .permission-review-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .permission-review-column {
+        min-height: 260px;
+        max-height: 560px;
+        overflow: auto;
+        padding: 12px;
+        border: 1px solid #dbe5f3;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .permission-review-card {
+        display: grid;
+        gap: 10px;
+        margin-top: 8px;
+        padding: 12px;
+        border: 1px solid #dbe5f3;
+        border-radius: 13px;
+        background: #fff;
+        box-shadow: 0 10px 20px rgba(15, 23, 42, 0.04);
+      }
+
+      .permission-review-card.danger {
+        border-color: #fecaca;
+        background: #fff7f7;
+      }
+
+      .permission-review-card-main,
+      .permission-review-actions,
+      .permission-review-chip-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .permission-review-card-main {
+        justify-content: space-between;
+      }
+
+      .permission-review-card-main strong {
+        display: block;
+        color: #0f172a;
+        font-size: 0.82rem;
+        font-weight: 950;
+      }
+
+      .permission-review-card-main span {
+        display: block;
+        margin-top: 3px;
+        color: #64748b;
+        font-size: 0.7rem;
+        font-weight: 850;
+      }
+
+      .permission-review-badge,
+      .permission-review-dday {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 54px;
+        padding: 6px 9px;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 0.7rem;
+        font-weight: 950;
+      }
+
+      .permission-review-dday {
+        background: #fff7ed;
+        color: #c2410c;
+      }
+
+      .permission-review-card.danger .permission-review-dday {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+
+      .permission-review-meta {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 5px 9px;
+        padding: 9px 10px;
+        border-radius: 11px;
+        background: #f8fafc;
+      }
+
+      .permission-review-meta span,
+      .permission-review-meta strong {
+        font-size: 0.7rem;
+      }
+
+      .permission-review-meta span {
+        color: #64748b;
+        font-weight: 900;
+      }
+
+      .permission-review-meta strong {
+        color: #334155;
+        font-weight: 950;
+      }
+
+      .permission-review-actions {
+        justify-content: flex-end;
+      }
+
+      @media (max-width: 1040px) {
+        .permission-review-summary,
+        .permission-review-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
       .permission-mode-bar {
         display: flex;
         flex-wrap: wrap;
@@ -6784,9 +6935,54 @@
       }
 
       .jikbo-student-name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: space-between;
         font-size: 0.82rem;
         font-weight: 900;
         color: var(--text-strong);
+      }
+
+      .jikbo-student-title-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .jikbo-student-timetable-button,
+      .jikbo-teacher-timetable-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border: 1px solid rgba(37, 99, 235, 0.18);
+        border-radius: 999px;
+        background: rgba(239, 246, 255, 0.96);
+        color: #1d4ed8;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+
+      .jikbo-student-timetable-button:hover,
+      .jikbo-teacher-timetable-button:hover {
+        background: rgba(219, 234, 254, 0.98);
+        transform: translateY(-1px);
+      }
+
+      .jikbo-student-timetable-button svg,
+      .jikbo-teacher-timetable-button svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      .jikbo-timetable-button-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        line-height: 1;
       }
 
       .jikbo-student-meta {
@@ -7162,6 +7358,236 @@
       .jikbo-inline-status.saving select,
       .jikbo-inline-status.saving input {
         opacity: 0.72;
+      }
+
+      .jikbo-timetable-modal-card {
+        width: min(1240px, calc(100vw - 36px));
+      }
+
+      .jikbo-timetable-modal-body {
+        max-height: min(72vh, 760px);
+        overflow: auto;
+      }
+
+      .jikbo-timetable-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .jikbo-timetable-shell {
+        overflow: auto;
+        border: 1px solid rgba(214, 226, 247, 0.9);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .jikbo-timetable-table {
+        width: 100%;
+        min-width: 920px;
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+
+      .jikbo-timetable-table th,
+      .jikbo-timetable-table td {
+        border-right: 1px solid rgba(214, 226, 247, 0.88);
+        border-bottom: 1px solid rgba(214, 226, 247, 0.88);
+      }
+
+      .jikbo-timetable-table th {
+        padding: 12px 10px;
+        background: rgba(247, 250, 255, 0.98);
+        color: var(--brand-deep);
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .jikbo-timetable-time-head,
+      .jikbo-timetable-time-cell {
+        width: 82px;
+        min-width: 82px;
+      }
+
+      .jikbo-timetable-time-cell {
+        padding: 10px 8px;
+        background: rgba(248, 250, 252, 0.98);
+        color: var(--text-soft);
+        font-size: 0.75rem;
+        font-weight: 900;
+        text-align: center;
+        vertical-align: top;
+      }
+
+      .jikbo-timetable-date-head strong {
+        display: block;
+        font-size: 0.86rem;
+      }
+
+      .jikbo-timetable-date-head span {
+        display: block;
+        margin-top: 3px;
+        color: var(--text-soft);
+        font-size: 0.72rem;
+      }
+
+      .jikbo-timetable-date-head.weekend,
+      .jikbo-timetable-day-cell.weekend {
+        background: rgba(241, 245, 249, 0.94);
+      }
+
+      .jikbo-timetable-day-cell {
+        min-width: 118px;
+        height: 76px;
+        padding: 6px;
+        background: rgba(255, 255, 255, 0.98);
+        vertical-align: top;
+      }
+
+      .jikbo-timetable-item {
+        position: relative;
+        display: grid;
+        gap: 3px;
+        margin-bottom: 5px;
+        padding: 7px 8px;
+        border-radius: 12px;
+        border: 1px solid rgba(203, 213, 225, 0.82);
+        background: rgba(248, 250, 252, 0.96);
+        color: var(--text-strong);
+        font-size: 0.72rem;
+        line-height: 1.35;
+        box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.04);
+      }
+
+      .jikbo-timetable-item.subject-math {
+        background: rgba(227, 238, 255, 0.96);
+        border-color: rgba(37, 99, 235, 0.2);
+      }
+
+      .jikbo-timetable-item.subject-korean {
+        background: rgba(255, 239, 225, 0.96);
+        border-color: rgba(201, 107, 16, 0.2);
+      }
+
+      .jikbo-timetable-item.subject-english {
+        background: rgba(227, 248, 234, 0.96);
+        border-color: rgba(22, 128, 76, 0.2);
+      }
+
+      .jikbo-timetable-item.subject-science {
+        background: rgba(235, 232, 255, 0.96);
+        border-color: rgba(111, 66, 201, 0.2);
+      }
+
+      .jikbo-timetable-item.subject-social {
+        background: rgba(255, 243, 214, 0.96);
+        border-color: rgba(183, 121, 8, 0.2);
+      }
+
+      .jikbo-timetable-item strong {
+        font-size: 0.74rem;
+      }
+
+      .jikbo-timetable-item span {
+        color: var(--text-soft);
+        font-weight: 800;
+      }
+
+      .jikbo-timetable-item.teacher-mode {
+        gap: 5px;
+        padding: 19px 8px 8px;
+      }
+
+      .jikbo-timetable-time-badge {
+        position: absolute;
+        top: 5px;
+        left: 7px;
+        display: inline-flex;
+        max-width: calc(100% - 14px);
+        overflow: hidden;
+        color: rgba(30, 64, 175, 0.72) !important;
+        font-size: 0.58rem;
+        font-weight: 950 !important;
+        letter-spacing: -0.01em;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .jikbo-timetable-student-title {
+        color: var(--text-strong);
+        font-size: 0.76rem !important;
+        line-height: 1.28;
+      }
+
+      .jikbo-timetable-item-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .jikbo-timetable-subject-label,
+      .jikbo-timetable-status-label {
+        display: inline-flex;
+        align-items: center;
+        min-width: 0;
+        padding: 2px 5px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.66);
+        color: var(--text-soft) !important;
+        font-size: 0.62rem;
+        font-weight: 900 !important;
+        line-height: 1.25;
+      }
+
+      .jikbo-timetable-note-button {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        border: 1px solid rgba(148, 163, 184, 0.36);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.78);
+        color: #475569;
+        cursor: help;
+        font-size: 0.72rem;
+      }
+
+      .jikbo-timetable-note-detail {
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 6px);
+        z-index: 4;
+        display: none;
+        width: max-content;
+        max-width: 260px;
+        padding: 8px 10px;
+        border: 1px solid rgba(148, 163, 184, 0.36);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.94);
+        color: #fff !important;
+        font-size: 0.68rem;
+        font-weight: 850 !important;
+        line-height: 1.45;
+        text-align: left;
+        white-space: normal;
+        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.24);
+        transform: translateX(-50%);
+      }
+
+      .jikbo-timetable-note-button:hover .jikbo-timetable-note-detail,
+      .jikbo-timetable-note-button:focus .jikbo-timetable-note-detail,
+      .jikbo-timetable-note-button:focus-visible .jikbo-timetable-note-detail {
+        display: block;
+      }
+
+      .jikbo-timetable-floating-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
       }
 
       .mobile-nav {
@@ -16978,7 +17404,7 @@
         <div class="console-actions">
           <label class="console-search" for="globalSearchInput">
             <i data-lucide="search"></i>
-            <input id="globalSearchInput" type="search" placeholder="학생명, 학교, 태그 검색">
+            <input id="globalSearchInput" type="text" inputmode="search" autocomplete="off" placeholder="학생명, 학교, 태그 검색">
           </label>
           <span class="console-time"><span id="headerDateText">날짜</span> · <strong id="headerTimeText">00:00</strong></span>
           <button id="refreshButton" type="button" class="console-icon-button"><i data-lucide="refresh-cw"></i><span>동기화</span></button>
@@ -17129,6 +17555,7 @@
               </section>
             </div>
             <div id="permissionRequestPanel" class="student-manage-stack hidden"></div>
+            <div id="permissionReviewPanel" class="student-manage-stack hidden"></div>
           </section>
         </section>
 
@@ -17157,7 +17584,7 @@
               <div class="jikbo-board-toolbar">
                 <div class="jikbo-board-search">
                   <label class="jikbo-board-search-label" for="jikboSearchInput">학교 / 학생 검색</label>
-                  <input id="jikboSearchInput" class="field-input" type="search" placeholder="예: 경원중, 송정현">
+                  <input id="jikboSearchInput" class="field-input" type="text" inputmode="search" autocomplete="off" placeholder="예: 경원중, 송정현">
                 </div>
               </div>
               <div id="jikboSummaryWrap" class="stats-grid jikbo-summary-grid"></div>
@@ -17360,7 +17787,7 @@
                     </label>
                     <label class="event-control-shell">
                       <i data-lucide="search"></i>
-                      <input id="eventSearchInput" class="field-input event-search-input" type="search" placeholder="학교명 검색">
+                      <input id="eventSearchInput" class="field-input event-search-input" type="text" inputmode="search" autocomplete="off" placeholder="학교명 검색">
                     </label>
                     <label class="event-checkbox-row">
                       <input id="eventExamOnlyToggle" type="checkbox" checked>
@@ -17489,7 +17916,7 @@
             <section class="material-console">
               <div class="material-search-console">
                 <div class="material-search-main">
-                  <input id="materialKeywordInput" class="field-input" type="search" placeholder="학교명, 과목, 파일명, 태그 검색">
+                  <input id="materialKeywordInput" class="field-input" type="text" inputmode="search" autocomplete="off" placeholder="학교명, 과목, 파일명, 태그 검색">
                   <div id="materialsPanelTabs" class="material-view-toggle"></div>
                   <select id="materialSortSelect" class="field-select material-sort-select">
                     <option value="recent">최근 등록순</option>
@@ -17725,6 +18152,19 @@
       </div>
     </div>
 
+    <div id="jikboTimetableModal" class="modal-backdrop hidden">
+      <div class="modal-card detail-modal-card jikbo-timetable-modal-card">
+        <div class="modal-top">
+          <div>
+            <h3 id="jikboTimetableModalTitle">직보 주간 시간표</h3>
+            <p id="jikboTimetableModalDescription">학생별 직보 진행일, 과목, 강사, 시간을 주간표로 확인합니다.</p>
+          </div>
+          <button id="closeJikboTimetableModalButton" type="button" class="icon-button" aria-label="직보 시간표창 닫기">×</button>
+        </div>
+        <div id="jikboTimetableModalBody" class="modal-body jikbo-timetable-modal-body"></div>
+      </div>
+    </div>
+
     <div id="jikboAssignmentModal" class="modal-backdrop hidden">
       <div class="modal-card detail-modal-card">
         <div class="modal-top">
@@ -17776,6 +18216,7 @@
         loginAliases: 'loginAliases',
         students: 'students',
         permissionRequests: 'permissionRequests',
+        permissionReviewQueue: 'permissionReviewQueue',
         homerooms: 'studentHomerooms',
         monthlyReports: 'studentMonthlyReports',
         events: 'events',
@@ -17947,6 +18388,7 @@
         permissionInstructorSelectionStart: null,
         permissionInstructorSelectionEnd: null,
         permissionRequestAlertDismissedKey: '',
+        permissionReviewSavingId: '',
         permissionDrafts: {},
         firebaseDirect: {
           enabled: false,
@@ -17977,6 +18419,7 @@
         instructors: [],
         permissions: [],
         permissionRequests: [],
+        permissionReviewQueue: [],
         materials: [],
         materialSettings: {
           examTypes: [],
@@ -17995,6 +18438,7 @@
         materialSearchRenderTimer: null,
         isStudentSearchComposing: false,
         studentSearchRenderTimer: null,
+        studentSearchCompositionValue: '',
         materialYearTabsBySchool: {},
         editingMaterialRowNumber: '',
         materialOpenLogs: [],
@@ -18257,6 +18701,8 @@
         document.getElementById('studentDetailModal').addEventListener('change', handleStudentLogAuthorInput_);
         document.getElementById('closeJikboStatusModalButton').addEventListener('click', closeJikboStatusModal_);
         document.getElementById('jikboStatusModal').addEventListener('click', handleJikboStatusModalBackdropClick_);
+        document.getElementById('closeJikboTimetableModalButton').addEventListener('click', closeJikboTimetableModal_);
+        document.getElementById('jikboTimetableModal').addEventListener('click', handleJikboTimetableModalBackdropClick_);
         document.getElementById('jikboStatusProgressInput').addEventListener('change', syncJikboStatusFormMode_);
         document.getElementById('saveJikboStatusButton').addEventListener('click', handleJikboStatusSave_);
         document.getElementById('closeJikboAssignmentModalButton').addEventListener('click', closeJikboAssignmentModal_);
@@ -18269,9 +18715,11 @@
         });
         document.getElementById('globalSearchInput').addEventListener('compositionstart', function() {
           APP_STATE.isStudentSearchComposing = true;
+          APP_STATE.studentSearchCompositionValue = document.getElementById('globalSearchInput').value || '';
         });
         document.getElementById('globalSearchInput').addEventListener('compositionend', function(event) {
           APP_STATE.isStudentSearchComposing = false;
+          APP_STATE.studentSearchCompositionValue = event.target ? (event.target.value || '') : '';
           handleGlobalStudentSearch_(event);
           scheduleStudentSearchRender_(30);
           flushPendingStudentRenderAfterComposition_();
@@ -18292,11 +18740,13 @@
         document.getElementById('studentList').addEventListener('compositionstart', function(event) {
           if (event.target.closest('[data-student-filter-input], [data-school-mode-search]')) {
             APP_STATE.isStudentSearchComposing = true;
+            APP_STATE.studentSearchCompositionValue = event.target.value || '';
           }
         });
         document.getElementById('studentList').addEventListener('compositionend', function(event) {
           if (event.target.closest('[data-student-filter-input], [data-school-mode-search]')) {
             APP_STATE.isStudentSearchComposing = false;
+            APP_STATE.studentSearchCompositionValue = event.target.value || '';
             handleStudentListInput_(event);
             scheduleStudentSearchRender_(30);
             flushPendingStudentRenderAfterComposition_();
@@ -18354,6 +18804,7 @@
         document.getElementById('permissionPanelTabs').addEventListener('click', handlePermissionTabClick);
         document.getElementById('permissionRequestPanel').addEventListener('click', handlePermissionRequestPanelClick_);
         document.getElementById('permissionRequestPanel').addEventListener('change', handlePermissionRequestPanelChange_);
+        document.getElementById('permissionReviewPanel').addEventListener('click', handlePermissionReviewPanelClick_);
         document.getElementById('permissionRequestAlert').addEventListener('click', handlePermissionRequestAlertClick_);
         document.getElementById('addStudentButton').addEventListener('click', handleStudentAdd);
         bindDeferredTextRender_('studentManageSearchInput', renderPermissionView, 180);
@@ -19202,8 +19653,19 @@
       function normalizeFirebaseStudentForApp_(doc) {
         var data = doc.data ? (doc.data() || {}) : (doc || {});
         var status = normalizeStudentStatusText_(data.status || data.studentStatus || data.state || '', data.active);
+        var sourceStudentId = String(data.id || data.studentId || (doc.id || '')).trim();
+        var canonicalStudentId = String(data.canonicalStudentId || data.mergedInto || '').trim();
+        var aliases = uniqueList_([sourceStudentId, canonicalStudentId]
+          .concat(Array.isArray(data.studentIdAliases) ? data.studentIdAliases : [])
+          .map(function(id) { return String(id || '').trim(); })
+          .filter(Boolean));
         return {
-          studentId: data.id || (doc.id || ''),
+          studentId: sourceStudentId,
+          canonicalStudentId: canonicalStudentId,
+          studentIdAliases: aliases,
+          identityStatus: String(data.identityStatus || '').toUpperCase(),
+          isAlias: data.isAlias === true || String(data.identityStatus || '').toUpperCase() === 'ALIAS',
+          mergedInto: String(data.mergedInto || ''),
           studentName: data.studentName || data.name || '',
           school: normalizeSchoolName_(data.school || ''),
           grade: data.grade || '',
@@ -19318,6 +19780,26 @@
           instructorId: String(data.instructorId || data.userId || data.teacherId || '').trim(),
           instructorName: data.instructorName || data.teacherName || data.userName || '',
           status: data.status || 'PENDING'
+        });
+      }
+
+      function normalizeFirebasePermissionReviewForApp_(doc) {
+        var data = normalizeFirebasePlainDoc_(doc);
+        return Object.assign({}, data, {
+          reviewId: data.reviewId || data.id || '',
+          type: String(data.type || 'ADD').toUpperCase(),
+          status: String(data.status || 'PENDING').toUpperCase(),
+          studentId: String(data.studentId || '').trim(),
+          studentName: data.studentName || '',
+          instructorId: String(data.instructorId || data.uid || data.teacherId || '').trim(),
+          instructorName: data.instructorName || data.teacherName || '',
+          subject: data.subject || data.instructorSubject || '',
+          permissionId: data.permissionId || '',
+          lessonCount: Number(data.lessonCount || 0),
+          hours: Number(data.hours || 0),
+          lastDate: data.lastDate || data.lastLessonDate || '',
+          ddayDate: data.ddayDate || data.removeDueDate || '',
+          reviewReasons: Array.isArray(data.reviewReasons) ? data.reviewReasons : parseFirebaseJsonArray_(data.reviewReasonsJson)
         });
       }
 
@@ -19651,7 +20133,8 @@
             safePermissionGet(collections.permissions || 'studentPermissions'),
             safePendingPermissionRequestsGet(collections.permissionRequests || 'permissionRequests'),
             user.role === 'ADMIN' ? safeCollectionGet(collections.homerooms || 'studentHomerooms', 'homeroom') : Promise.resolve({ docs: [] }),
-            Promise.resolve({ docs: [] })
+            Promise.resolve({ docs: [] }),
+            user.role === 'ADMIN' ? safeCollectionGet(collections.permissionReviewQueue || 'permissionReviewQueue', 'permission review queue') : Promise.resolve({ docs: [] })
           ]);
           return contextDataPromise.then(function(adminResults) {
           var userSnapshot = adminResults[0];
@@ -19660,6 +20143,7 @@
           var permissionRequestSnapshot = adminResults[3];
           var homeroomSnapshot = adminResults[4];
           var logSnapshot = adminResults[5];
+          var permissionReviewSnapshot = adminResults[6];
           var profileMap = {};
           profileSnapshot.docs.forEach(function(doc) {
             profileMap[doc.id] = doc.data() || {};
@@ -19694,10 +20178,14 @@
           var permissionRequests = permissionRequestSnapshot.docs.map(normalizeFirebasePermissionRequestForApp_).filter(function(item) {
             return item.requestId || item.studentId;
           });
+          var permissionReviewQueue = (permissionReviewSnapshot.docs || []).map(normalizeFirebasePermissionReviewForApp_).filter(function(item) {
+            return item.reviewId && (item.studentId || item.permissionId);
+          });
           if (user.role !== 'ADMIN') {
             permissionRequests = permissionRequests.filter(function(item) {
               return userMatchesInstructorIdentifier(item.instructorId);
             });
+            permissionReviewQueue = [];
           }
           var homeroomAssignments = [];
           homeroomSnapshot.docs.forEach(function(doc) {
@@ -19811,6 +20299,7 @@
             instructors: instructors,
             permissions: permissions,
             permissionRequests: permissionRequests,
+            permissionReviewQueue: permissionReviewQueue,
             homeroomAssignments: homeroomAssignments,
             appName: APP_STATE.appName,
             logoUrl: APP_STATE.logoUrl,
@@ -20093,6 +20582,7 @@
         APP_STATE.instructors = studentData.instructors || [];
         APP_STATE.permissions = studentData.permissions || [];
         APP_STATE.permissionRequests = studentData.permissionRequests || [];
+        APP_STATE.permissionReviewQueue = studentData.permissionReviewQueue || [];
         APP_STATE.homeroomAssignments = studentData.homeroomAssignments || [];
         hydrateGlobalNotice_(studentData.globalNotice);
         APP_STATE.studentDataLoading = false;
@@ -20131,6 +20621,7 @@
         APP_STATE.instructors = studentData.instructors || [];
         APP_STATE.permissions = studentData.permissions || [];
         APP_STATE.permissionRequests = studentData.permissionRequests || [];
+        APP_STATE.permissionReviewQueue = studentData.permissionReviewQueue || [];
         APP_STATE.homeroomAssignments = studentData.homeroomAssignments || [];
         hydrateGlobalNotice_(studentData.globalNotice);
         APP_STATE.studentDataLoading = false;
@@ -23641,6 +24132,10 @@
         if (!student) {
           return '';
         }
+        var canonicalStudentId = String(student.canonicalStudentId || student.mergedInto || '').trim();
+        if (canonicalStudentId) {
+          return ['canonical', canonicalStudentId].join('|');
+        }
         var name = normalizeSearchText(student.studentName || student.name || '');
         var school = normalizeSchoolKey_(student.school || '');
         var grade = normalizeSearchText(student.grade || '');
@@ -23655,6 +24150,16 @@
           return 0;
         }
         var priority = 0;
+        var identityStatus = String(student.identityStatus || '').toUpperCase();
+        if (identityStatus === 'CANONICAL' || (
+          student.canonicalStudentId &&
+          String(student.canonicalStudentId) === String(student.studentId || student.id || '')
+        )) {
+          priority += 10000000000000000;
+        }
+        if (student.isAlias || identityStatus === 'ALIAS') {
+          priority -= 10000000000000000;
+        }
         if (String(student.studentId || '').indexOf('STU-') === 0) {
           priority += 1000000000000000;
         }
@@ -23679,11 +24184,12 @@
 
       function mergeStudentRecordsForDisplay_(current, incoming) {
         if (!current) {
-          var initialAliases = uniqueList_([incoming.studentId, incoming.id].concat(incoming.studentIdAliases || []).map(function(id) {
+          var initialAliases = uniqueList_([incoming.studentId, incoming.id, incoming.canonicalStudentId, incoming.mergedInto].concat(incoming.studentIdAliases || []).map(function(id) {
             return String(id || '').trim();
           }).filter(Boolean));
           return Object.assign({}, incoming, {
             school: normalizeSchoolName_(incoming.school || ''),
+            canonicalStudentId: incoming.canonicalStudentId || incoming.mergedInto || '',
             studentIdAliases: initialAliases
           });
         }
@@ -23692,7 +24198,7 @@
         }
         var primary = getStudentRecordPriority_(incoming) >= getStudentRecordPriority_(current) ? incoming : current;
         var secondary = primary === incoming ? current : incoming;
-        var aliases = uniqueList_([primary.studentId, primary.id, secondary.studentId, secondary.id]
+        var aliases = uniqueList_([primary.studentId, primary.id, primary.canonicalStudentId, primary.mergedInto, secondary.studentId, secondary.id, secondary.canonicalStudentId, secondary.mergedInto]
           .concat(primary.studentIdAliases || [], secondary.studentIdAliases || [])
           .map(function(id) { return String(id || '').trim(); })
           .filter(Boolean));
@@ -23711,7 +24217,8 @@
           }
         });
         return Object.assign({}, secondary, primary, {
-          studentId: primary.studentId || secondary.studentId || '',
+          studentId: primary.canonicalStudentId || secondary.canonicalStudentId || primary.studentId || secondary.studentId || '',
+          canonicalStudentId: primary.canonicalStudentId || secondary.canonicalStudentId || '',
           studentName: primary.studentName || secondary.studentName || '',
           school: normalizeSchoolName_(primary.school || secondary.school || ''),
           grade: primary.grade || secondary.grade || '',
@@ -23744,13 +24251,17 @@
       }
 
       function getStudentIdAliases_(student) {
-        return uniqueList_([student && student.studentId, student && student.id]
+        return uniqueList_([student && student.studentId, student && student.id, student && student.canonicalStudentId, student && student.mergedInto]
           .concat(student && student.studentIdAliases || [])
           .map(function(id) { return String(id || '').trim(); })
           .filter(Boolean));
       }
 
       function getCanonicalStudentId_(student) {
+        var explicitCanonicalId = String(student && (student.canonicalStudentId || student.mergedInto) || '').trim();
+        if (explicitCanonicalId) {
+          return explicitCanonicalId;
+        }
         var aliases = getStudentIdAliases_(student);
         return aliases.find(function(id) {
           return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
@@ -23917,6 +24428,29 @@
         }
         APP_STATE.pendingStudentRenderAfterComposition = false;
         scheduleStudentSearchRender_(30);
+      }
+
+      function isImeComposingEvent_(event) {
+        if (!event) {
+          return false;
+        }
+        if (event.isComposing) {
+          return true;
+        }
+        return APP_STATE.isStudentSearchComposing && event.target &&
+          event.target.closest && event.target.closest('[data-student-filter-input], #globalSearchInput, [data-school-mode-search]');
+      }
+
+      function syncStudentSearchInputs_(value, sourceInput) {
+        var nextValue = String(value || '');
+        var hiddenInput = document.getElementById('studentSearchInput');
+        var globalInput = document.getElementById('globalSearchInput');
+        if (hiddenInput && hiddenInput !== sourceInput) {
+          hiddenInput.value = nextValue;
+        }
+        if (globalInput && globalInput !== sourceInput && !APP_STATE.isStudentSearchComposing) {
+          globalInput.value = nextValue;
+        }
       }
 
       function scheduleStudentSearchRender_(delay) {
@@ -24208,7 +24742,7 @@
       function renderStudentMobileFilterBar_(placeholder) {
         return [
           '<div class="mobile-filter-stack">',
-          '  <input class="field-input" data-student-filter-input type="search" value="' + escapeAttribute(document.getElementById('studentSearchInput').value || '') + '" placeholder="' + escapeAttribute(placeholder || '검색') + '">',
+          '  <input class="field-input" data-student-filter-input type="text" inputmode="search" autocomplete="off" value="' + escapeAttribute(document.getElementById('studentSearchInput').value || '') + '" placeholder="' + escapeAttribute(placeholder || '검색') + '">',
           '  <div class="mobile-filter-row">',
           '    <select class="field-select" data-student-school-select>' + buildStudentSchoolOptions_() + '</select>',
           '    <select class="field-select" data-student-tag-select>' + buildStudentTagOptions_() + '</select>',
@@ -24411,7 +24945,7 @@
           '  <button type="button" class="mini-button" data-action="export-student-index"><i data-lucide="download"></i> 내보내기</button>',
           '</div>',
           '<div class="filter-bar">',
-          '  <input class="field-input" data-student-filter-input type="search" value="' + escapeAttribute(document.getElementById('studentSearchInput').value || '') + '" placeholder="학생명, 학교, 태그 검색">',
+          '  <input class="field-input" data-student-filter-input type="text" inputmode="search" autocomplete="off" value="' + escapeAttribute(document.getElementById('studentSearchInput').value || '') + '" placeholder="학생명, 학교, 태그 검색">',
           '  <select class="field-select" data-student-school-select>' + buildStudentSchoolOptions_() + '</select>',
           '  <select class="field-select" data-student-tag-select>' + buildStudentTagOptions_() + '</select>',
           '  <select class="field-select" data-student-permission-status-select>' + buildStudentPermissionStatusOptions_() + '</select>',
@@ -24430,7 +24964,7 @@
           '    <span class="ops-chip blue">특이사항 검색</span>',
           '  </div>',
           '  <div class="filter-bar">',
-          '    <input class="field-input" data-student-filter-input type="search" value="' + escapeAttribute(document.getElementById('studentSearchInput').value || '') + '" placeholder="특이사항 검색: 학생명, 학교, 분류, 입력자, 내용">',
+          '    <input class="field-input" data-student-filter-input type="text" inputmode="search" autocomplete="off" value="' + escapeAttribute(document.getElementById('studentSearchInput').value || '') + '" placeholder="특이사항 검색: 학생명, 학교, 분류, 입력자, 내용">',
           '    <select class="field-select" data-student-school-select>' + buildStudentSchoolOptions_() + '</select>',
           '    <select class="field-select" data-student-tag-select>' + buildStudentTagOptions_() + '</select>',
           '    <select class="field-select" data-student-author-select>' + buildStudentAuthorOptions_() + '</select>',
@@ -28795,12 +29329,13 @@
 
       function handleGlobalStudentSearch_(event) {
         var value = event.target.value || '';
-        document.getElementById('studentSearchInput').value = value;
-        if (APP_STATE.currentView !== 'students') {
+        if (isImeComposingEvent_(event)) {
+          APP_STATE.studentSearchCompositionValue = value;
+          APP_STATE.pendingStudentRenderAfterComposition = true;
           return;
         }
-        if (APP_STATE.isStudentSearchComposing || event.isComposing) {
-          APP_STATE.pendingStudentRenderAfterComposition = true;
+        syncStudentSearchInputs_(value, event.target);
+        if (APP_STATE.currentView !== 'students') {
           return;
         }
         scheduleStudentSearchRender_(80);
@@ -28835,7 +29370,8 @@
         var schoolSearch = event.target.closest('[data-school-mode-search]');
         if (schoolSearch) {
           APP_STATE.schoolModeSearch = schoolSearch.value || '';
-          if (APP_STATE.isStudentSearchComposing || event.isComposing) {
+          if (isImeComposingEvent_(event)) {
+            APP_STATE.studentSearchCompositionValue = schoolSearch.value || '';
             APP_STATE.pendingStudentRenderAfterComposition = true;
             return;
           }
@@ -28847,12 +29383,12 @@
         if (!input) {
           return;
         }
-        document.getElementById('studentSearchInput').value = input.value || '';
-        document.getElementById('globalSearchInput').value = input.value || '';
-        if (APP_STATE.isStudentSearchComposing || event.isComposing) {
+        if (isImeComposingEvent_(event)) {
+          APP_STATE.studentSearchCompositionValue = input.value || '';
           APP_STATE.pendingStudentRenderAfterComposition = true;
           return;
         }
+        syncStudentSearchInputs_(input.value || '', input);
         scheduleStudentSearchRender_(80);
       }
 
@@ -30261,6 +30797,7 @@
         document.getElementById('permissionInstructorPanel').classList.toggle('hidden', APP_STATE.permissionTab !== 'instructors');
         document.getElementById('permissionStudentManagePanel').classList.toggle('hidden', APP_STATE.permissionTab !== 'students');
         document.getElementById('permissionRequestPanel').classList.toggle('hidden', APP_STATE.permissionTab !== 'requests');
+        document.getElementById('permissionReviewPanel').classList.toggle('hidden', APP_STATE.permissionTab !== 'review');
         document.getElementById('savePermissionButton').classList.toggle('hidden', APP_STATE.permissionAssignmentMode !== 'student');
 
         if (APP_STATE.permissionTab === 'students') {
@@ -30269,6 +30806,10 @@
         }
         if (APP_STATE.permissionTab === 'requests') {
           renderPermissionRequestPanel_();
+          return;
+        }
+        if (APP_STATE.permissionTab === 'review') {
+          renderPermissionReviewPanel_();
           return;
         }
 
@@ -30281,6 +30822,7 @@
         document.getElementById('permissionPanelTabs').innerHTML = [
           '<button type="button" class="material-subtab-button ' + (APP_STATE.permissionTab === 'instructors' ? 'active' : '') + '" data-permission-tab="instructors">강사</button>',
           '<button type="button" class="material-subtab-button ' + (APP_STATE.permissionTab === 'requests' ? 'active' : '') + '" data-permission-tab="requests">요청 <span>' + escapeHtml(String(getPendingPermissionRequests_().length)) + '</span></button>',
+          '<button type="button" class="material-subtab-button ' + (APP_STATE.permissionTab === 'review' ? 'active' : '') + '" data-permission-tab="review">검토 <span>' + escapeHtml(String(getPermissionReviewCount_())) + '</span></button>',
           '<button type="button" class="material-subtab-button ' + (APP_STATE.permissionTab === 'students' ? 'active' : '') + '" data-permission-tab="students">학생</button>'
         ].join('');
       }
@@ -30600,6 +31142,213 @@
         return (APP_STATE.permissionRequests || []).filter(function(item) {
           return String(item.status || '').toUpperCase() === 'PENDING';
         });
+      }
+
+      function getPendingPermissionReviewAddItems_() {
+        return (APP_STATE.permissionReviewQueue || []).filter(function(item) {
+          return String(item.type || '').toUpperCase() === 'ADD' &&
+            String(item.status || 'PENDING').toUpperCase() === 'PENDING';
+        }).sort(function(a, b) {
+          return dateValueForSort_(b.lastDate || '') - dateValueForSort_(a.lastDate || '') ||
+            Number(b.lessonCount || 0) - Number(a.lessonCount || 0) ||
+            String(a.studentName || '').localeCompare(String(b.studentName || ''), 'ko');
+        });
+      }
+
+      function parseReviewDate_(value) {
+        var text = String(value || '').trim();
+        if (!text) {
+          return null;
+        }
+        var match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+          return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        }
+        var date = new Date(text);
+        return isNaN(date.getTime()) ? null : date;
+      }
+
+      function formatReviewDate_(date) {
+        if (!date || isNaN(date.getTime())) {
+          return '';
+        }
+        var month = String(date.getMonth() + 1).padStart(2, '0');
+        var day = String(date.getDate()).padStart(2, '0');
+        return month + '/' + day;
+      }
+
+      function addDays_(date, days) {
+        var next = new Date(date.getTime());
+        next.setDate(next.getDate() + Number(days || 0));
+        return next;
+      }
+
+      function diffCalendarDays_(target, base) {
+        var targetStart = new Date(target.getFullYear(), target.getMonth(), target.getDate()).getTime();
+        var baseStart = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime();
+        return Math.round((targetStart - baseStart) / (1000 * 60 * 60 * 24));
+      }
+
+      function formatDdayText_(days) {
+        if (days > 0) {
+          return 'D-' + days;
+        }
+        if (days === 0) {
+          return 'D-Day';
+        }
+        return 'D+' + Math.abs(days);
+      }
+
+      function getPermissionLastLessonDate_(permission) {
+        var sourceSummary = permission && permission.sourceSummary && typeof permission.sourceSummary === 'object'
+          ? permission.sourceSummary
+          : {};
+        return permission && (permission.lastLessonDate || permission.lastDate || sourceSummary.lastLessonDate || sourceSummary.lastDate || '');
+      }
+
+      function getPermissionReviewRemovalItems_() {
+        var staleAfterDays = 45;
+        var warningDays = 14;
+        var today = new Date();
+        var queueRemovalMap = {};
+        var queueItems = (APP_STATE.permissionReviewQueue || []).filter(function(item) {
+          return String(item.type || '').toUpperCase() === 'REMOVE' &&
+            String(item.status || 'PENDING').toUpperCase() === 'PENDING';
+        }).map(function(item) {
+          var dueDate = parseReviewDate_(item.ddayDate || item.removeDueDate || '');
+          var lastDate = parseReviewDate_(item.lastDate || item.lastLessonDate || '');
+          var daysLeft = dueDate ? diffCalendarDays_(dueDate, today) : null;
+          if (item.permissionId) {
+            queueRemovalMap[item.permissionId] = true;
+          }
+          return Object.assign({}, item, {
+            dueDate: dueDate,
+            dueDateLabel: formatReviewDate_(dueDate),
+            ddayText: daysLeft === null ? '-' : formatDdayText_(daysLeft),
+            daysLeft: daysLeft,
+            lastDateLabel: formatReviewDate_(lastDate)
+          });
+        });
+
+        var derivedItems = (APP_STATE.permissions || []).filter(function(permission) {
+          if (String(permission.permission || 'ALLOW').toUpperCase() !== 'ALLOW') {
+            return false;
+          }
+          if (permission.autoRemovalKeep === true || String(permission.autoRemovalStatus || '').toUpperCase() === 'KEEP') {
+            return false;
+          }
+          var permissionId = permission.permissionId || buildStudentInstructorPermissionDocId_(permission.studentId, permission.instructorId);
+          if (queueRemovalMap[permissionId]) {
+            return false;
+          }
+          return Boolean(getPermissionLastLessonDate_(permission));
+        }).map(function(permission) {
+          var lastDate = parseReviewDate_(getPermissionLastLessonDate_(permission));
+          var dueDate = lastDate ? addDays_(lastDate, staleAfterDays) : null;
+          var daysLeft = dueDate ? diffCalendarDays_(dueDate, today) : null;
+          return {
+            reviewId: '',
+            type: 'REMOVE',
+            status: 'PENDING',
+            permissionId: permission.permissionId || buildStudentInstructorPermissionDocId_(permission.studentId, permission.instructorId),
+            studentId: permission.studentId,
+            studentName: permission.studentName,
+            school: permission.school,
+            grade: permission.grade,
+            instructorId: permission.instructorId,
+            instructorName: permission.instructorName,
+            subject: permission.subject,
+            lastDate: getPermissionLastLessonDate_(permission),
+            lastDateLabel: formatReviewDate_(lastDate),
+            dueDate: dueDate,
+            dueDateLabel: formatReviewDate_(dueDate),
+            daysLeft: daysLeft,
+            ddayText: daysLeft === null ? '-' : formatDdayText_(daysLeft),
+            source: 'client-derived'
+          };
+        }).filter(function(item) {
+          return item.daysLeft !== null && item.daysLeft <= warningDays;
+        });
+
+        return queueItems.concat(derivedItems).sort(function(a, b) {
+          return Number(a.daysLeft || 0) - Number(b.daysLeft || 0) ||
+            String(a.studentName || '').localeCompare(String(b.studentName || ''), 'ko');
+        });
+      }
+
+      function getPermissionReviewCount_() {
+        return getPendingPermissionReviewAddItems_().length + getPermissionReviewRemovalItems_().length;
+      }
+
+      function renderPermissionReviewReasonChips_(reasons) {
+        reasons = Array.isArray(reasons) ? reasons : [];
+        if (!reasons.length) {
+          return '<span class="teacher-chip secondary">수업 데이터 기반</span>';
+        }
+        return reasons.slice(0, 3).map(function(reason) {
+          return '<span class="teacher-chip secondary">' + escapeHtml(String(reason || '검토')) + '</span>';
+        }).join('');
+      }
+
+      function renderPermissionReviewPanel_() {
+        var wrap = document.getElementById('permissionReviewPanel');
+        var addItems = getPendingPermissionReviewAddItems_();
+        var removalItems = getPermissionReviewRemovalItems_();
+        var savingId = APP_STATE.permissionReviewSavingId || '';
+        wrap.innerHTML = [
+          '<div class="permission-review-summary">',
+          '  <div><strong>수업 기반 권한 추가 검토</strong><span>' + escapeHtml(String(addItems.length)) + '건 · 강사 포털 시수/출석 데이터에서 산출</span></div>',
+          '  <div><strong>권한 해제 예정 검토</strong><span>' + escapeHtml(String(removalItems.length)) + '건 · 마지막 수업일 기준 45일 규칙</span></div>',
+          '</div>',
+          '<div class="permission-review-grid">',
+          '  <section class="permission-review-column">',
+          '    <div class="permission-priority-head"><strong>추가 승인 후보</strong><span>실무자 확인 후 반영</span></div>',
+               addItems.length ? addItems.map(function(item) {
+                 var isSaving = savingId === item.reviewId;
+                 var disabled = isSaving ? ' disabled' : '';
+                 return [
+                   '<article class="permission-review-card">',
+                   '  <div class="permission-review-card-main">',
+                   '    <div><strong>' + escapeHtml(item.studentName || '-') + '</strong><span>' + renderSchoolNameWithLogo_(item.school || '-') + ' · ' + escapeHtml(item.grade ? String(item.grade) + '학년' : '학년 미지정') + '</span></div>',
+                   '    <span class="permission-review-badge">' + escapeHtml(item.lessonCount ? item.lessonCount + '회' : '수업 확인') + '</span>',
+                   '  </div>',
+                   '  <div class="permission-review-meta">',
+                   '    <span>강사</span><strong>' + escapeHtml(item.instructorName || item.instructorId || '-') + '</strong>',
+                   '    <span>과목</span><strong>' + escapeHtml(item.subject || '과목 미지정') + '</strong>',
+                   '    <span>최근 수업</span><strong>' + escapeHtml(item.lastDate || '-') + '</strong>',
+                   '  </div>',
+                   '  <div class="permission-review-chip-row">' + renderPermissionReviewReasonChips_(item.reviewReasons) + '</div>',
+                   '  <div class="permission-review-actions"><button type="button" class="button-primary" data-permission-review-approve="' + escapeAttribute(item.reviewId) + '"' + disabled + '>' + (isSaving ? '처리 중' : '권한 추가') + '</button></div>',
+                   '</article>'
+                 ].join('');
+               }).join('') : '<div class="empty-state">추가 승인 대기 후보가 없습니다.</div>',
+          '  </section>',
+          '  <section class="permission-review-column">',
+          '    <div class="permission-priority-head"><strong>권한 해제 예정</strong><span>필요 시 권한 유지</span></div>',
+               removalItems.length ? removalItems.map(function(item) {
+                 var rowKey = item.reviewId || item.permissionId;
+                 var isSaving = savingId === rowKey;
+                 var dangerClass = Number(item.daysLeft || 0) <= 0 ? ' danger' : '';
+                 var disabled = isSaving ? ' disabled' : '';
+                 return [
+                   '<article class="permission-review-card' + dangerClass + '">',
+                   '  <div class="permission-review-card-main">',
+                   '    <div><strong>' + escapeHtml(item.studentName || '-') + '</strong><span>' + renderSchoolNameWithLogo_(item.school || '-') + ' · ' + escapeHtml(item.grade ? String(item.grade) + '학년' : '학년 미지정') + '</span></div>',
+                   '    <span class="permission-review-dday">' + escapeHtml(item.ddayText || '-') + '</span>',
+                   '  </div>',
+                   '  <div class="permission-review-meta">',
+                   '    <span>강사</span><strong>' + escapeHtml(item.instructorName || item.instructorId || '-') + '</strong>',
+                   '    <span>마지막 수업</span><strong>' + escapeHtml(item.lastDate || '-') + '</strong>',
+                   '    <span>해제 예정</span><strong>' + escapeHtml(item.dueDateLabel || '-') + '</strong>',
+                   '  </div>',
+                   '  <div class="permission-review-actions"><button type="button" class="mini-button" data-permission-review-keep="' + escapeAttribute(rowKey) + '" data-permission-id="' + escapeAttribute(item.permissionId || '') + '"' + disabled + '>' + (isSaving ? '저장 중' : '권한 유지') + '</button></div>',
+                   '</article>'
+                 ].join('');
+               }).join('') : '<div class="empty-state">해제 예정 권한이 없습니다.<br>현재는 마지막 수업일이 기록된 권한만 자동 검토합니다.</div>',
+          '  </section>',
+          '</div>'
+        ].join('');
+        renderLucideIcons_();
       }
 
       function renderPermissionRequestPanel_() {
@@ -31157,6 +31906,181 @@
           handlePermissionBulkSave_(action === 'permission-bulk-save-remove' ? 'remove' : 'add');
           return;
         }
+      }
+
+      function buildPermissionPayloadFromReviewItem_(item) {
+        var payload = item && item.suggestedPayload && typeof item.suggestedPayload === 'object'
+          ? Object.assign({}, item.suggestedPayload)
+          : buildSingleStudentPermissionFirebasePayload_(item.studentId, item.instructorId);
+        var now = new Date();
+        payload.permissionId = payload.permissionId || item.permissionId || buildStudentInstructorPermissionDocId_(item.studentId, item.instructorId);
+        payload.studentId = payload.studentId || item.studentId;
+        payload.studentName = payload.studentName || item.studentName || '';
+        payload.school = payload.school || item.school || '';
+        payload.grade = payload.grade || item.grade || '';
+        payload.instructorId = payload.instructorId || item.instructorId || '';
+        payload.instructorName = payload.instructorName || item.instructorName || '';
+        payload.subject = payload.subject || item.subject || '';
+        payload.permission = payload.permission || 'ALLOW';
+        payload.createdAt = payload.createdAt || now.toISOString();
+        payload.createdAtMs = Number(payload.createdAtMs || 0) || now.getTime();
+        payload.updatedAt = now.toISOString();
+        payload.updatedAtMs = now.getTime();
+        payload.updatedById = APP_STATE.user && APP_STATE.user.userId || '';
+        payload.updatedByName = APP_STATE.user && APP_STATE.user.name || '';
+        payload.source = payload.source || 'teacher-portal-supabase-review';
+        payload.sourceSummary = payload.sourceSummary || {
+          source: 'teacher-portal-supabase',
+          lessonCount: Number(item.lessonCount || 0),
+          hours: Number(item.hours || 0),
+          firstLessonDate: item.firstDate || '',
+          lastLessonDate: item.lastDate || '',
+          reviewReasons: item.reviewReasons || []
+        };
+        return payload;
+      }
+
+      function approvePermissionReviewItemViaFirebaseDirect_(reviewId) {
+        var item = (APP_STATE.permissionReviewQueue || []).find(function(row) {
+          return String(row.reviewId || '') === String(reviewId || '');
+        });
+        if (!item) {
+          return Promise.reject(new Error('승인할 검토 항목을 찾을 수 없습니다.'));
+        }
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('permissionWrite')) {
+            throw new Error('Firebase 직접 권한 저장 경로가 준비되지 않았습니다.');
+          }
+          var permissionCollectionName = (state.collections && state.collections.permissions) || 'studentPermissions';
+          var reviewCollectionName = (state.collections && state.collections.permissionReviewQueue) || 'permissionReviewQueue';
+          var payload = buildPermissionPayloadFromReviewItem_(item);
+          var batch = state.firestore.batch();
+          var now = new Date();
+          batch.set(state.firestore.collection(permissionCollectionName).doc(payload.permissionId), payload, { merge: true });
+          batch.set(state.firestore.collection(reviewCollectionName).doc(String(reviewId || '')), {
+            status: 'APPROVED',
+            resolvedAt: now.toISOString(),
+            resolvedAtMs: now.getTime(),
+            resolvedBy: APP_STATE.user && APP_STATE.user.userId || '',
+            resolvedByName: APP_STATE.user && APP_STATE.user.name || '',
+            appliedPermissionId: payload.permissionId
+          }, { merge: true });
+          return batch.commit().then(function() {
+            APP_STATE.permissions = (APP_STATE.permissions || []).filter(function(row) {
+              var rowPermissionId = row.permissionId || buildStudentInstructorPermissionDocId_(row.studentId, row.instructorId);
+              return rowPermissionId !== payload.permissionId;
+            }).concat([payload]);
+            APP_STATE.permissionReviewQueue = (APP_STATE.permissionReviewQueue || []).map(function(row) {
+              if (String(row.reviewId || '') !== String(reviewId || '')) {
+                return row;
+              }
+              return Object.assign({}, row, {
+                status: 'APPROVED',
+                resolvedAt: now.toISOString(),
+                resolvedBy: APP_STATE.user && APP_STATE.user.userId || ''
+              });
+            });
+            return {
+              ok: true,
+              directFirebase: true,
+              message: '검토 후보 권한을 추가했습니다.'
+            };
+          });
+        });
+      }
+
+      function keepPermissionReviewItemViaFirebaseDirect_(rowKey, permissionId) {
+        var reviewItem = (APP_STATE.permissionReviewQueue || []).find(function(row) {
+          return String(row.reviewId || '') === String(rowKey || '') || String(row.permissionId || '') === String(permissionId || rowKey || '');
+        }) || null;
+        permissionId = permissionId || (reviewItem && reviewItem.permissionId) || rowKey;
+        if (!permissionId) {
+          return Promise.reject(new Error('유지할 권한 ID를 찾을 수 없습니다.'));
+        }
+        return prepareFirebaseDirectAuth_({ silent: true }).then(function(state) {
+          state = state || APP_STATE.firebaseDirect || {};
+          if (!state.enabled || !state.firestore || !isFirebaseDirectFeatureEnabled_('permissionWrite')) {
+            throw new Error('Firebase 직접 권한 저장 경로가 준비되지 않았습니다.');
+          }
+          var permissionCollectionName = (state.collections && state.collections.permissions) || 'studentPermissions';
+          var reviewCollectionName = (state.collections && state.collections.permissionReviewQueue) || 'permissionReviewQueue';
+          var batch = state.firestore.batch();
+          var now = new Date();
+          var keepPayload = {
+            autoRemovalKeep: true,
+            autoRemovalStatus: 'KEEP',
+            autoRemovalKeptAt: now.toISOString(),
+            autoRemovalKeptAtMs: now.getTime(),
+            autoRemovalKeptBy: APP_STATE.user && APP_STATE.user.userId || '',
+            autoRemovalKeptByName: APP_STATE.user && APP_STATE.user.name || ''
+          };
+          batch.set(state.firestore.collection(permissionCollectionName).doc(String(permissionId || '')), keepPayload, { merge: true });
+          if (reviewItem && reviewItem.reviewId) {
+            batch.set(state.firestore.collection(reviewCollectionName).doc(String(reviewItem.reviewId || '')), {
+              status: 'KEPT',
+              resolvedAt: now.toISOString(),
+              resolvedAtMs: now.getTime(),
+              resolvedBy: APP_STATE.user && APP_STATE.user.userId || '',
+              resolvedByName: APP_STATE.user && APP_STATE.user.name || ''
+            }, { merge: true });
+          }
+          return batch.commit().then(function() {
+            APP_STATE.permissions = (APP_STATE.permissions || []).map(function(row) {
+              var rowPermissionId = row.permissionId || buildStudentInstructorPermissionDocId_(row.studentId, row.instructorId);
+              if (String(rowPermissionId || '') !== String(permissionId || '')) {
+                return row;
+              }
+              return Object.assign({}, row, keepPayload);
+            });
+            if (reviewItem && reviewItem.reviewId) {
+              APP_STATE.permissionReviewQueue = (APP_STATE.permissionReviewQueue || []).map(function(row) {
+                if (String(row.reviewId || '') !== String(reviewItem.reviewId || '')) {
+                  return row;
+                }
+                return Object.assign({}, row, {
+                  status: 'KEPT',
+                  resolvedAt: now.toISOString(),
+                  resolvedBy: APP_STATE.user && APP_STATE.user.userId || ''
+                });
+              });
+            }
+            return {
+              ok: true,
+              directFirebase: true,
+              message: '권한 유지로 표시했습니다.'
+            };
+          });
+        });
+      }
+
+      function handlePermissionReviewPanelClick_(event) {
+        var approveButton = event.target.closest('[data-permission-review-approve]');
+        var keepButton = event.target.closest('[data-permission-review-keep]');
+        if (!approveButton && !keepButton) {
+          return;
+        }
+        event.preventDefault();
+        if (APP_STATE.permissionReviewSavingId) {
+          return;
+        }
+        var isApprove = Boolean(approveButton);
+        var rowKey = isApprove
+          ? approveButton.getAttribute('data-permission-review-approve')
+          : keepButton.getAttribute('data-permission-review-keep');
+        var permissionId = keepButton ? keepButton.getAttribute('data-permission-id') : '';
+        APP_STATE.permissionReviewSavingId = rowKey || '';
+        renderPermissionReviewPanel_();
+        (isApprove ? approvePermissionReviewItemViaFirebaseDirect_(rowKey) : keepPermissionReviewItemViaFirebaseDirect_(rowKey, permissionId))
+          .then(function(result) {
+            renderPermissionView();
+            setNotice(result.message || '검토 항목을 처리했습니다.', 'success');
+          })
+          .catch(handleApiError_)
+          .finally(function() {
+            APP_STATE.permissionReviewSavingId = '';
+            renderPermissionView();
+          });
       }
 
       function handlePermissionRequestPanelClick_(event) {
@@ -33424,6 +34348,391 @@
         }
       }
 
+      function closeJikboTimetableModal_() {
+        document.getElementById('jikboTimetableModal').classList.add('hidden');
+        document.getElementById('jikboTimetableModalBody').innerHTML = '';
+      }
+
+      function handleJikboTimetableModalBackdropClick_(event) {
+        if (event.target.id === 'jikboTimetableModal') {
+          closeJikboTimetableModal_();
+        }
+      }
+
+      function openJikboStudentTimetableModal_(studentId) {
+        var model = APP_STATE.currentJikboBoardModel || buildJikboBoardModel_();
+        var payload = buildJikboStudentTimetablePayload_(model, studentId);
+        document.getElementById('jikboTimetableModalTitle').textContent = (payload.student.studentName || '학생') + ' 직보 주간 시간표';
+        document.getElementById('jikboTimetableModalDescription').textContent = [
+          payload.student.school || '',
+          formatJikboGradeLabel_(payload.student.grade || ''),
+          payload.weekLabel || ''
+        ].filter(Boolean).join(' · ') || '학생별 직보 진행일, 과목, 강사, 시간을 주간표로 확인합니다.';
+        document.getElementById('jikboTimetableModalBody').innerHTML = renderJikboStudentTimetable_(payload);
+        document.getElementById('jikboTimetableModal').classList.remove('hidden');
+        renderLucideIcons_();
+      }
+
+      function openJikboTeacherTimetableModal_(teacherKey) {
+        var model = APP_STATE.currentJikboBoardModel || buildJikboBoardModel_();
+        var payload = buildJikboTeacherTimetablePayload_(model, teacherKey);
+        document.getElementById('jikboTimetableModalTitle').textContent = (payload.teacher.name || '강사') + ' 강사 직보 주간 시간표';
+        document.getElementById('jikboTimetableModalDescription').textContent = [
+          payload.teacher.total ? String(payload.teacher.total) + '건 전체' : '',
+          payload.weekLabel || ''
+        ].filter(Boolean).join(' · ') || '강사별 직보 진행일, 학생, 과목, 시간을 주간표로 확인합니다.';
+        document.getElementById('jikboTimetableModalBody').innerHTML = renderJikboStudentTimetable_(payload);
+        document.getElementById('jikboTimetableModal').classList.remove('hidden');
+        renderLucideIcons_();
+      }
+
+      function buildJikboStudentTimetablePayload_(model, studentId) {
+        var targetId = String(studentId || '');
+        var targetStudent = findAnyStudentById_(targetId) || {};
+        var targetAliases = getStudentIdAliases_(targetStudent);
+        if (targetAliases.indexOf(targetId) === -1) {
+          targetAliases.push(targetId);
+        }
+        var aliasMap = {};
+        targetAliases.forEach(function(id) {
+          if (id) aliasMap[String(id)] = true;
+        });
+        var itemMap = {};
+        var items = [];
+        (model && model.groups ? model.groups : []).forEach(function(group) {
+          (group.rows || []).forEach(function(row) {
+            var rowStudent = row.student || {};
+            var rowAliases = getStudentIdAliases_(rowStudent);
+            var matches = rowAliases.some(function(id) { return aliasMap[String(id || '')]; });
+            if (!matches && String(rowStudent.studentId || '') !== targetId) {
+              return;
+            }
+            if (!targetStudent.studentId) {
+              targetStudent = rowStudent;
+            }
+            Object.keys(row.cellMap || {}).forEach(function(dateKey) {
+              var cell = row.cellMap[dateKey] || {};
+              (cell.jikbos || []).forEach(function(item) {
+                var scheduleDate = item.actualDate || item.dateKey || dateKey;
+                var startTime = item.startTime || item.confirmedTime || '';
+                var endTime = item.endTime || '';
+                var key = [
+                  item.statusId || item.scheduleStatusKey || '',
+                  item.studentId || rowStudent.studentId || '',
+                  item.subjectName || '',
+                  scheduleDate || '',
+                  item.examDate || '',
+                  item.instructorId || item.instructorName || item.instructorLabel || '',
+                  startTime,
+                  endTime,
+                  item.note || ''
+                ].join('|');
+                if (itemMap[key]) {
+                  return;
+                }
+                itemMap[key] = true;
+                items.push(Object.assign({}, item, {
+                  scheduleDate: scheduleDate,
+                  startTime: startTime,
+                  endTime: endTime,
+                  displayInstructorName: item.progressInstructorName || item.instructorName || item.instructorLabel || '강사 미배정',
+                  toneClass: getSubjectToneClass_(item.subjectName)
+                }));
+              });
+            });
+          });
+        });
+        items.sort(function(a, b) {
+          return String(a.scheduleDate || '').localeCompare(String(b.scheduleDate || '')) ||
+            String(a.startTime || '').localeCompare(String(b.startTime || '')) ||
+            String(a.subjectName || '').localeCompare(String(b.subjectName || ''), 'ko');
+        });
+        var anchorDate = items.map(function(item) {
+          return parseEventDateForClient_(item.scheduleDate);
+        }).filter(Boolean)[0] || new Date(APP_STATE.jikboCalendarYear, APP_STATE.jikboCalendarMonth, 1);
+        var weekStart = getMondayOfWeek_(anchorDate);
+        var weekDates = [];
+        for (var i = 0; i < 7; i += 1) {
+          var day = new Date(weekStart);
+          day.setDate(weekStart.getDate() + i);
+          weekDates.push(day);
+        }
+        return {
+          student: targetStudent || {},
+          items: items,
+          weekStart: weekStart,
+          weekDates: weekDates,
+          weekDateKeys: weekDates.map(formatDateKey_),
+          weekLabel: formatJikboTimetableWeekLabel_(weekDates)
+        };
+      }
+
+      function buildJikboTeacherTimetablePayload_(model, teacherKey) {
+        var targetKey = String(teacherKey || '');
+        var teacher = {
+          key: targetKey,
+          name: '',
+          total: 0
+        };
+        var itemMap = {};
+        var items = [];
+        (model && model.groups ? model.groups : []).forEach(function(group) {
+          (group.rows || []).forEach(function(row) {
+            var rowStudent = row.student || {};
+            Object.keys(row.cellMap || {}).forEach(function(dateKey) {
+              var cell = row.cellMap[dateKey] || {};
+              (cell.jikbos || []).forEach(function(item) {
+                var teacherName = item.progressInstructorName || item.instructorName || item.instructorLabel || '';
+                var normalizedTeacherKey = normalizeSearchText(teacherName);
+                if (!teacherName || normalizedTeacherKey !== targetKey) {
+                  return;
+                }
+                var scheduleDate = item.actualDate || item.dateKey || dateKey;
+                var startTime = item.startTime || item.confirmedTime || '';
+                var endTime = item.endTime || '';
+                var key = [
+                  item.statusId || item.scheduleStatusKey || '',
+                  item.studentId || rowStudent.studentId || '',
+                  item.subjectName || '',
+                  scheduleDate || '',
+                  item.examDate || '',
+                  normalizedTeacherKey,
+                  startTime,
+                  endTime,
+                  item.note || ''
+                ].join('|');
+                if (itemMap[key]) {
+                  return;
+                }
+                itemMap[key] = true;
+                teacher.name = teacher.name || teacherName;
+                teacher.total += 1;
+                items.push(Object.assign({}, item, {
+                  scheduleDate: scheduleDate,
+                  startTime: startTime,
+                  endTime: endTime,
+                  displayInstructorName: [
+                    item.school || group.school || '',
+                    formatJikboGradeLabel_(item.grade || group.grade || ''),
+                    item.studentName || rowStudent.studentName || ''
+                  ].filter(Boolean).join(' · ') || '학생 미지정',
+                  timetableMode: 'teacher',
+                  toneClass: getSubjectToneClass_(item.subjectName)
+                }));
+              });
+            });
+          });
+        });
+        items.sort(function(a, b) {
+          return String(a.scheduleDate || '').localeCompare(String(b.scheduleDate || '')) ||
+            String(a.startTime || '').localeCompare(String(b.startTime || '')) ||
+            String(a.school || '').localeCompare(String(b.school || ''), 'ko') ||
+            String(a.studentName || '').localeCompare(String(b.studentName || ''), 'ko') ||
+            String(a.subjectName || '').localeCompare(String(b.subjectName || ''), 'ko');
+        });
+        var anchorDate = items.map(function(item) {
+          return parseEventDateForClient_(item.scheduleDate);
+        }).filter(Boolean)[0] || new Date(APP_STATE.jikboCalendarYear, APP_STATE.jikboCalendarMonth, 1);
+        var weekStart = getMondayOfWeek_(anchorDate);
+        var weekDates = [];
+        for (var i = 0; i < 7; i += 1) {
+          var day = new Date(weekStart);
+          day.setDate(weekStart.getDate() + i);
+          weekDates.push(day);
+        }
+        return {
+          teacher: teacher,
+          items: items,
+          weekStart: weekStart,
+          weekDates: weekDates,
+          weekDateKeys: weekDates.map(formatDateKey_),
+          weekLabel: formatJikboTimetableWeekLabel_(weekDates)
+        };
+      }
+
+      function getMondayOfWeek_(date) {
+        var base = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        var day = base.getDay();
+        var offset = day === 0 ? -6 : 1 - day;
+        base.setDate(base.getDate() + offset);
+        return base;
+      }
+
+      function formatJikboTimetableWeekLabel_(weekDates) {
+        if (!weekDates || !weekDates.length) {
+          return '';
+        }
+        var first = weekDates[0];
+        var last = weekDates[weekDates.length - 1];
+        return first.getFullYear() + '. ' + String(first.getMonth() + 1) + '/' + String(first.getDate()) + ' - ' + String(last.getMonth() + 1) + '/' + String(last.getDate());
+      }
+
+      function parseJikboTimeToMinutes_(value) {
+        var text = String(value || '').trim();
+        var match = text.match(/(\d{1,2})\s*:\s*(\d{2})/);
+        if (!match) {
+          return null;
+        }
+        var hour = parseInt(match[1], 10);
+        var minute = parseInt(match[2], 10);
+        if (isNaN(hour) || isNaN(minute)) {
+          return null;
+        }
+        return Math.max(0, Math.min(24 * 60, hour * 60 + minute));
+      }
+
+      function formatJikboMinutesLabel_(minutes) {
+        var safe = Math.max(0, Math.min(24 * 60, Number(minutes || 0)));
+        var hour = Math.floor(safe / 60);
+        var minute = safe % 60;
+        return String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+      }
+
+      function getJikboTimetableHourRows_(items) {
+        var timedItems = (items || []).filter(function(item) {
+          return parseJikboTimeToMinutes_(item.startTime || item.confirmedTime) !== null;
+        });
+        if (!timedItems.length) {
+          return [];
+        }
+        var minStart = 24 * 60;
+        var maxEnd = 0;
+        timedItems.forEach(function(item) {
+          var start = parseJikboTimeToMinutes_(item.startTime || item.confirmedTime);
+          var end = parseJikboTimeToMinutes_(item.endTime);
+          if (end === null || end <= start) {
+            end = start + 60;
+          }
+          minStart = Math.min(minStart, Math.floor(start / 60) * 60);
+          maxEnd = Math.max(maxEnd, Math.ceil(end / 60) * 60);
+        });
+        minStart = Math.max(0, minStart);
+        maxEnd = Math.min(24 * 60, Math.max(maxEnd, minStart + 60));
+        var rows = [];
+        for (var cursor = minStart; cursor < maxEnd; cursor += 60) {
+          rows.push(cursor);
+        }
+        return rows;
+      }
+
+      function isJikboItemInHourSlot_(item, dateKey, slotStart) {
+        if (String(item.scheduleDate || '') !== String(dateKey || '')) {
+          return false;
+        }
+        var start = parseJikboTimeToMinutes_(item.startTime || item.confirmedTime);
+        if (start === null) {
+          return false;
+        }
+        var end = parseJikboTimeToMinutes_(item.endTime);
+        if (end === null || end <= start) {
+          end = start + 60;
+        }
+        var slotEnd = slotStart + 60;
+        return start < slotEnd && end > slotStart;
+      }
+
+      function renderJikboStudentTimetable_(payload) {
+        var items = payload.items || [];
+        if (!items.length) {
+          return '<div class="empty-state">표시할 직보 일정이 없습니다.<br>직보 진행일과 시간을 먼저 입력해 주세요.</div>';
+        }
+        var weekMap = {};
+        (payload.weekDateKeys || []).forEach(function(key) { weekMap[key] = true; });
+        var weekItems = items.filter(function(item) { return weekMap[item.scheduleDate]; });
+        var outsideItems = items.filter(function(item) { return !weekMap[item.scheduleDate]; });
+        var hourRows = getJikboTimetableHourRows_(weekItems);
+        var summary = [
+          '<div class="jikbo-timetable-summary">',
+          '<span class="jikbo-summary-badge">' + escapeHtml(String(items.length)) + '건 전체</span>',
+          '<span class="jikbo-summary-badge">' + escapeHtml(String(weekItems.length)) + '건 주간표</span>',
+          outsideItems.length ? '<span class="jikbo-summary-badge alert">' + escapeHtml(String(outsideItems.length)) + '건 다른 주</span>' : '',
+          '</div>'
+        ].join('');
+        var tableHtml = hourRows.length
+          ? renderJikboStudentTimetableGrid_(payload, weekItems, hourRows)
+          : '<div class="empty-state">이 주에 시간까지 입력된 직보가 없습니다.<br>시간 미정 항목은 아래 목록에서 확인하세요.</div>';
+        var floatingItems = weekItems.filter(function(item) {
+          return parseJikboTimeToMinutes_(item.startTime || item.confirmedTime) === null;
+        });
+        return [
+          summary,
+          tableHtml,
+          floatingItems.length ? renderJikboFloatingTimetableList_('시간 미정 직보', floatingItems) : '',
+          outsideItems.length ? renderJikboFloatingTimetableList_('다른 주 직보', outsideItems) : ''
+        ].join('');
+      }
+
+      function renderJikboStudentTimetableGrid_(payload, weekItems, hourRows) {
+        return [
+          '<div class="jikbo-timetable-shell">',
+          '<table class="jikbo-timetable-table">',
+          '<thead><tr><th class="jikbo-timetable-time-head">시간<br><span class="helper-text">구간</span></th>',
+          (payload.weekDates || []).map(function(date) {
+            var weekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+            var weekendClass = isJikboWeekend_(date) ? ' weekend' : '';
+            return '<th class="jikbo-timetable-date-head' + weekendClass + '"><strong>' + weekdayLabels[date.getDay()] + '</strong><span>' + String(date.getMonth() + 1) + '/' + String(date.getDate()) + '</span></th>';
+          }).join(''),
+          '</tr></thead>',
+          '<tbody>',
+          hourRows.map(function(slotStart) {
+            return [
+              '<tr>',
+              '<td class="jikbo-timetable-time-cell">' + escapeHtml(formatJikboMinutesLabel_(slotStart)) + '<br>' + escapeHtml(formatJikboMinutesLabel_(slotStart + 60)) + '</td>',
+              (payload.weekDates || []).map(function(date) {
+                var dateKey = formatDateKey_(date);
+                var cellItems = weekItems.filter(function(item) {
+                  return isJikboItemInHourSlot_(item, dateKey, slotStart);
+                });
+                return '<td class="jikbo-timetable-day-cell ' + (isJikboWeekend_(date) ? 'weekend' : '') + '">' + cellItems.map(renderJikboTimetableItem_).join('') + '</td>';
+              }).join(''),
+              '</tr>'
+            ].join('');
+          }).join(''),
+          '</tbody></table></div>'
+        ].join('');
+      }
+
+      function renderJikboFloatingTimetableList_(title, items) {
+        return [
+          '<div class="jikbo-timetable-floating-list">',
+          '<h4>' + escapeHtml(title) + '</h4>',
+          (items || []).map(renderJikboTimetableItem_).join(''),
+          '</div>'
+        ].join('');
+      }
+
+      function renderJikboTimetableItem_(item) {
+        var timeText = [item.startTime || item.confirmedTime || '시간 미정', item.endTime].filter(Boolean).join('-');
+        if (item.timetableMode === 'teacher') {
+          var noteButton = item.note
+            ? '<button type="button" class="jikbo-timetable-note-button" aria-label="비고 보기" title="' + escapeAttribute(item.note) + '"><span aria-hidden="true">📝</span><span class="jikbo-timetable-note-detail">' + escapeHtml(item.note) + '</span></button>'
+            : '';
+          return [
+            '<div class="jikbo-timetable-item teacher-mode ' + escapeAttribute(item.toneClass || getSubjectToneClass_(item.subjectName)) + '">',
+            '<span class="jikbo-timetable-time-badge">' + escapeHtml(timeText) + '</span>',
+            '<strong class="jikbo-timetable-student-title">' + escapeHtml(item.displayInstructorName || '학생 미지정') + '</strong>',
+            '<div class="jikbo-timetable-item-meta">',
+            '<span class="jikbo-timetable-subject-label">' + escapeHtml(item.subjectName || '과목 미지정') + '</span>',
+            '<span class="jikbo-timetable-status-label">' + escapeHtml(item.progressStatus || '미정') + '</span>',
+            noteButton,
+            '</div>',
+            '</div>'
+          ].join('');
+        }
+        var meta = [
+          item.displayInstructorName || '강사 미배정',
+          timeText,
+          item.progressStatus || '미정',
+          item.note ? '비고: ' + item.note : ''
+        ].filter(Boolean).join(' · ');
+        return [
+          '<div class="jikbo-timetable-item ' + escapeAttribute(item.toneClass || getSubjectToneClass_(item.subjectName)) + '">',
+          '<strong>' + escapeHtml(item.subjectName || '과목 미지정') + '</strong>',
+          '<span>' + escapeHtml(meta) + '</span>',
+          '</div>'
+        ].join('');
+      }
+
       function openJikboStatusModal_(source) {
         var statusKey = '';
         var draft = null;
@@ -34284,6 +35593,18 @@
           return;
         }
 
+        var timetableButton = event.target.closest('[data-jikbo-student-timetable]');
+        if (timetableButton) {
+          openJikboStudentTimetableModal_(timetableButton.getAttribute('data-jikbo-student-timetable') || '');
+          return;
+        }
+
+        var teacherTimetableButton = event.target.closest('[data-jikbo-teacher-timetable]');
+        if (teacherTimetableButton) {
+          openJikboTeacherTimetableModal_(teacherTimetableButton.getAttribute('data-jikbo-teacher-timetable') || '');
+          return;
+        }
+
         var manualStatusButton = event.target.closest('[data-jikbo-manual-open]');
         if (manualStatusButton) {
           openManualJikboStatusModal_(manualStatusButton);
@@ -35136,9 +36457,12 @@
             ].join('');
           }).join('');
           var hiddenCount = Math.max(0, Number(teacher.total || 0) - 5);
+          var teacherTimetableButton = !teacher.isUnassigned
+            ? '<button type="button" class="jikbo-teacher-timetable-button" data-jikbo-teacher-timetable="' + escapeAttribute(teacher.key || normalizeSearchText(teacher.name || '')) + '" title="강사 직보 주간 시간표" aria-label="' + escapeAttribute((teacher.name || '강사') + ' 강사 직보 주간 시간표 열기') + '"><span class="jikbo-timetable-button-icon" aria-hidden="true">📅</span></button>'
+            : '';
           return [
             '<article class="jikbo-teacher-card ' + (teacher.isUnassigned ? 'unassigned' : '') + '">',
-            '  <div class="jikbo-teacher-card-head"><div><strong>' + escapeHtml(teacher.name || '강사 미입력') + '</strong><span>' + escapeHtml(String(teacher.confirmed || 0)) + '건 확정 · ' + escapeHtml(String(teacher.pending || 0)) + '건 미정</span></div><span class="jikbo-summary-badge ' + (teacher.isUnassigned ? 'alert' : '') + '">' + escapeHtml(String(teacher.total || 0)) + '건</span></div>',
+            '  <div class="jikbo-teacher-card-head"><div><strong>' + escapeHtml(teacher.name || '강사 미입력') + '</strong><span>' + escapeHtml(String(teacher.confirmed || 0)) + '건 확정 · ' + escapeHtml(String(teacher.pending || 0)) + '건 미정</span></div><div class="jikbo-summary-status-badges">' + teacherTimetableButton + '<span class="jikbo-summary-badge ' + (teacher.isUnassigned ? 'alert' : '') + '">' + escapeHtml(String(teacher.total || 0)) + '건</span></div></div>',
             '  <div class="jikbo-teacher-subject-strip">' + (subjectStrip || '<span class="helper-text">과목 없음</span>') + '</div>',
             '  <div class="jikbo-teacher-schedule-list">' + (previewRows || '<div class="jikbo-summary-empty">표시할 직보가 없습니다.</div>') + '</div>',
             hiddenCount ? '  <span class="helper-text">외 ' + escapeHtml(String(hiddenCount)) + '건</span>' : '',
@@ -35210,6 +36534,7 @@
                 var teacherKey = isAssigned ? normalizeSearchText(teacherName) : '__unassigned';
                 if (!teacherMap[teacherKey]) {
                   teacherMap[teacherKey] = {
+                    key: teacherKey,
                     name: isAssigned ? teacherName : '강사 미입력',
                     isUnassigned: !isAssigned,
                     total: 0,
@@ -35566,7 +36891,9 @@
 
       function renderJikboStudentLabel_(student, matchedExamCount, hasUnconfirmedJikbo, hasExamSchedule) {
         return [
-          '<div class="jikbo-student-name">' + escapeHtml(student.studentName || '-') + '</div>',
+          '<div class="jikbo-student-name"><span class="jikbo-student-title-text">' + escapeHtml(student.studentName || '-') + '</span>' +
+            (student.studentId ? '<button type="button" class="jikbo-student-timetable-button" data-jikbo-student-timetable="' + escapeAttribute(student.studentId) + '" title="직보 주간 시간표" aria-label="' + escapeAttribute((student.studentName || '학생') + ' 직보 주간 시간표 열기') + '"><span class="jikbo-timetable-button-icon" aria-hidden="true">📅</span></button>' : '') +
+          '</div>',
           '<div class="jikbo-student-meta">' + escapeHtml(student.subject || '과목 미지정') + ' · ' + escapeHtml(String(matchedExamCount || 0)) + '건</div>',
           hasExamSchedule === false ? '<div class="jikbo-student-alert">시험 일정 미등록</div>' : '',
           hasExamSchedule === false && student.studentId
@@ -41221,6 +42548,8 @@
         APP_STATE.instructors = [];
         APP_STATE.permissions = [];
         APP_STATE.permissionRequests = [];
+        APP_STATE.permissionReviewQueue = [];
+        APP_STATE.permissionReviewSavingId = '';
         APP_STATE.materials = [];
         APP_STATE.materialSettings = { examTypes: [], materialTypes: [], fileTypes: [] };
         APP_STATE.materialYearTabsBySchool = {};
