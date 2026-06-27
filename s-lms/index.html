@@ -37258,6 +37258,19 @@
           ].join('');
         }
         var payload = buildJikboTeacherTimetablePayload_(model, teacherKey, getJikboTeacherSelfAnchorDate_(model));
+        if (!APP_STATE.jikboTeacherWeekAnchorKey && payload.items.length) {
+          var weekMap = {};
+          (payload.weekDateKeys || []).forEach(function(dateKey) {
+            weekMap[dateKey] = true;
+          });
+          var hasSelectedWeekItems = payload.items.some(function(item) {
+            return Boolean(weekMap[item.scheduleDate]);
+          });
+          if (!hasSelectedWeekItems) {
+            payload = buildJikboTeacherTimetablePayload_(model, teacherKey, payload.items[0].scheduleDate);
+            APP_STATE.jikboTeacherWeekAnchorKey = payload.weekDateKeys && payload.weekDateKeys[0] || '';
+          }
+        }
         var titleName = payload.teacher.name || (APP_STATE.user && APP_STATE.user.name) || '내';
         return [
           '<section class="jikbo-exam-timeline-wrap glass-panel" aria-label="내 강사 직보 주간 시간표">',
