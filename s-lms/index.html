@@ -24088,6 +24088,31 @@
         var allowedStudentIds = {};
         var allowedSchoolGrades = {};
         var allowedSchools = {};
+        var currentTeacherNameMap = {};
+        var addCurrentTeacherName = function(value) {
+          var key = normalizeSearchText(value);
+          if (key) {
+            currentTeacherNameMap[key] = true;
+          }
+        };
+        var user = APP_STATE.user || {};
+        [
+          user.name,
+          user.displayName,
+          user.userName,
+          user.instructorName,
+          user.teacherName
+        ].forEach(addCurrentTeacherName);
+        (APP_STATE.instructors || []).forEach(function(instructor) {
+          if (
+            currentUserMatchesInstructorIdentifier_(instructor.userId) ||
+            currentUserMatchesInstructorIdentifier_(instructor.loginId) ||
+            currentUserMatchesInstructorIdentifier_(instructor.instructorId) ||
+            currentUserMatchesInstructorIdentifier_(instructor.teacherId)
+          ) {
+            addCurrentTeacherName(instructor.name || instructor.displayName || instructor.userName);
+          }
+        });
         (APP_STATE.visibleStudents || []).forEach(function(student) {
           getStudentIdAliases_(student).forEach(function(id) {
             if (id) {
@@ -24096,6 +24121,33 @@
           });
           var school = normalizeSchoolName_(student.school || student.schoolName || '');
           var grade = normalizeJikboGradeForClient_(student.grade || student.schoolGrade || '');
+          if (school) {
+            allowedSchools[school] = true;
+            allowedSchoolGrades[[school, grade].join('|')] = true;
+          }
+        });
+        var isCurrentInstructorStatusRow = function(item) {
+          item = item || {};
+          var instructorIds = [
+            item.progressInstructorId,
+            item.instructorId
+          ];
+          if (instructorIds.some(function(id) { return currentUserMatchesInstructorIdentifier_(id); })) {
+            return true;
+          }
+          return [
+            item.progressInstructorName,
+            item.instructorName
+          ].some(function(name) {
+            return Boolean(currentTeacherNameMap[normalizeSearchText(name)]);
+          });
+        };
+        (jikboData.scheduleStatuses || []).forEach(function(item) {
+          if (!isCurrentInstructorStatusRow(item)) {
+            return;
+          }
+          var school = normalizeSchoolName_(item && item.school);
+          var grade = normalizeJikboGradeForClient_(item && item.grade);
           if (school) {
             allowedSchools[school] = true;
             allowedSchoolGrades[[school, grade].join('|')] = true;
@@ -24114,7 +24166,9 @@
         };
         return Object.assign({}, jikboData || {}, {
           studentOverrides: (jikboData.studentOverrides || []).filter(isAllowedStudentRow),
-          scheduleStatuses: (jikboData.scheduleStatuses || []).filter(isAllowedStudentRow),
+          scheduleStatuses: (jikboData.scheduleStatuses || []).filter(function(item) {
+            return isAllowedStudentRow(item) || isCurrentInstructorStatusRow(item);
+          }),
           examEvents: (jikboData.examEvents || []).filter(isAllowedExamRow)
         });
       }
