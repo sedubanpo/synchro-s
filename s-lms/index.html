@@ -21832,12 +21832,14 @@
           }
           return null;
         });
-        var apiPromise = apiRequest('getEvents', { token: APP_STATE.token }).catch(function(error) {
-          if (window.console && console.warn) {
-            console.warn('Jikbo Firebase event merge skipped API source:', error);
-          }
-          return null;
-        });
+        var apiPromise = isFirebaseSessionToken_(APP_STATE.token)
+          ? Promise.resolve(null)
+          : apiRequest('getEvents', { token: APP_STATE.token }).catch(function(error) {
+              if (window.console && console.warn) {
+                console.warn('Jikbo Firebase event merge skipped API source:', error);
+              }
+              return null;
+            });
         return Promise.all([directPromise, apiPromise]).then(function(results) {
           var directEventData = results[0] || null;
           var apiEventData = results[1] || null;
@@ -25613,27 +25615,82 @@
       }
 
       function renderStudentIndexTable_(students) {
+        var rowContext = buildStudentIndexRowContext_(students);
         return [
           '<table class="student-index-table">',
           '  <thead><tr><th>학생</th><th>연결 권한</th><th>관리 상태</th><th>학교 연결</th><th>최근 업데이트</th><th>액션</th></tr></thead>',
           '  <tbody>',
-             students.map(renderStudentIndexRow_).join(''),
+             students.map(function(student) { return renderStudentIndexRow_(student, rowContext); }).join(''),
           '  </tbody>',
           '</table>'
         ].join('');
       }
 
-      function renderStudentIndexRow_(student) {
+      function buildStudentIndexRowContext_(students) {
+        var materialCountBySchool = {};
+        getScopedMaterials_().forEach(function(item) {
+          var schoolKey = normalizeSearchText(item && item.school);
+          if (!schoolKey) {
+            return;
+          }
+          materialCountBySchool[schoolKey] = (materialCountBySchool[schoolKey] || 0) + 1;
+        });
+
+        var eventCountBySchool = {};
+        var eventCountBySchoolGrade = {};
+        var today = startOfDay_(new Date()).getTime();
+        getScopedEvents_().forEach(function(item) {
+          var target = parseEventTargetForStudentConsole_(item);
+          var schoolKey = normalizeSearchText(target.school);
+          if (!schoolKey) {
+            return;
+          }
+          var parsed = parseDateFlexible_(item.isoDate || item.date || item.eventDate || '');
+          if (parsed && parsed.getTime() < today) {
+            return;
+          }
+          var gradeKey = normalizeSearchText(target.grade);
+          if (gradeKey) {
+            var key = [schoolKey, gradeKey].join('|');
+            eventCountBySchoolGrade[key] = (eventCountBySchoolGrade[key] || 0) + 1;
+            return;
+          }
+          eventCountBySchool[schoolKey] = (eventCountBySchool[schoolKey] || 0) + 1;
+        });
+
+        return {
+          jikboSummaryMap: buildStudentJikboSummaryMap_(),
+          materialCountBySchool: materialCountBySchool,
+          eventCountBySchool: eventCountBySchool,
+          eventCountBySchoolGrade: eventCountBySchoolGrade
+        };
+      }
+
+      function getStudentIndexMaterialInfo_(student, context) {
+        var schoolKey = normalizeSearchText(student && student.school);
+        var count = context && context.materialCountBySchool
+          ? Number(context.materialCountBySchool[schoolKey] || 0)
+          : getSchoolMaterialInfo_(student && student.school).available;
+        return { available: count };
+      }
+
+      function getStudentIndexEventInfo_(student, context) {
+        var schoolKey = normalizeSearchText(student && student.school);
+        var gradeKey = normalizeSearchText(student && student.grade);
+        var count = context && context.eventCountBySchool && context.eventCountBySchoolGrade
+          ? Number(context.eventCountBySchool[schoolKey] || 0) + Number(context.eventCountBySchoolGrade[[schoolKey, gradeKey].join('|')] || 0)
+          : getSchoolEventInfo_(student && student.school, student && student.grade).count;
+        return { count: count };
+      }
+
+      function renderStudentIndexRow_(student, context) {
         var permissions = getStudentPermissionInstructors_(student.studentId);
-        if (student && student.studentId && !student.isRestricted) {
-          ensureAllMonthlyReportsLoadedForStudent_(student.studentId, { silentRender: true });
-        }
         var selected = student.studentId === APP_STATE.selectedStudentId ? ' selected' : '';
         var logs = student.logs || [];
         var recent = getStudentRecentDate_(student);
-        var jikbo = buildStudentJikboSummaryMap_()[student.studentId] || { total: 0, unconfirmed: 0 };
-        var materialInfo = getSchoolMaterialInfo_(student.school);
-        var eventInfo = getSchoolEventInfo_(student.school, student.grade);
+        var jikbo = context && context.jikboSummaryMap ? (context.jikboSummaryMap[student.studentId] || { total: 0, unconfirmed: 0 }) : (buildStudentJikboSummaryMap_()[student.studentId] || { total: 0, unconfirmed: 0 });
+        var materialInfo = getStudentIndexMaterialInfo_(student, context);
+        var eventInfo = getStudentIndexEventInfo_(student, context);
         var restricted = Boolean(student.isRestricted);
         return [
           '<tr class="student-index-row' + selected + '" data-student-id="' + escapeAttribute(student.studentId || '') + '">',
