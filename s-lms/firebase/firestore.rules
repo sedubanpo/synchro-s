@@ -161,12 +161,32 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /studentIdentityMappings/{mappingId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /studentIdentityReviewQueue/{reviewId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /accountManagementRequests/{requestId} {
       allow get, list: if isAdmin();
       allow create, update, delete: if isAdmin();
     }
 
     match /accountManagementAuditLogs/{auditId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /legacySheetSyncJobs/{jobId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /legacySheetSyncErrors/{errorId} {
       allow get, list: if isAdmin();
       allow create, update, delete: if isAdmin();
     }
@@ -255,6 +275,11 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /permissionReviewQueue/{reviewId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /studentPermissions/{documentId} {
       allow get, list: if signedIn();
       allow create, update, delete: if isAdmin();
@@ -303,17 +328,17 @@ service cloud.firestore {
     }
 
     match /jikboSubjects/{subjectId} {
-      allow get, list: if isStaffOrAdmin();
+      allow get, list: if signedIn();
       allow create, update, delete: if isStaffOrAdmin();
     }
 
     match /jikboStudentOverrides/{overrideId} {
-      allow get, list: if isStaffOrAdmin();
+      allow get, list: if signedIn();
       allow create, update, delete: if isStaffOrAdmin();
     }
 
     match /jikboStatuses/{statusId} {
-      allow get, list: if isStaffOrAdmin();
+      allow get, list: if signedIn();
       allow create, update, delete: if isStaffOrAdmin();
     }
 
