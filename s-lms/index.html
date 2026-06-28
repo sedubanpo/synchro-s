@@ -7130,6 +7130,19 @@
         line-height: 1;
       }
 
+      .jikbo-student-name-inline {
+        min-width: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .jikbo-student-name-inline > span:first-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
       .jikbo-student-meta {
         margin-top: 4px;
         color: var(--text-soft);
@@ -35191,6 +35204,11 @@
       }
 
       function handleJikboConfirmedByDateModalClick_(event) {
+        var timetableButton = event.target && event.target.closest ? event.target.closest('[data-jikbo-student-timetable]') : null;
+        if (timetableButton) {
+          openJikboStudentTimetableModal_(timetableButton.getAttribute('data-jikbo-student-timetable') || '');
+          return;
+        }
         var statusButton = event.target && event.target.closest ? event.target.closest('[data-jikbo-confirmed-status-open]') : null;
         if (statusButton) {
           if (!APP_STATE.isAdmin) {
@@ -35458,7 +35476,7 @@
         var schoolGrade = [item.school || '-', formatJikboGradeLabel_(item.grade)].filter(Boolean).join(' ');
         return [
           '<' + tagName + openAttr + ' class="jikbo-confirmed-card">',
-          '  <div class="jikbo-confirmed-card-title"><span>' + escapeHtml(item.studentName || '-') + '</span><span class="jikbo-status-badge confirmed">확정</span></div>',
+          '  <div class="jikbo-confirmed-card-title"><span class="jikbo-student-name-inline"><span>' + escapeHtml(item.studentName || '-') + '</span>' + renderJikboStudentTimetableButton_(item.studentId, item.studentName, true) + '</span><span class="jikbo-status-badge confirmed">확정</span></div>',
           '  <div class="jikbo-confirmed-card-meta">',
           '    <span>' + escapeHtml(schoolGrade || '-') + '</span>',
           '    <span>' + escapeHtml([item.subjectName || '과목 미지정', item.instructorName || '강사 미배정'].filter(Boolean).join(' · ')) + '</span>',
@@ -36486,6 +36504,11 @@
           setNotice('이미 직보 표에서 숨김 처리된 학생입니다.', 'info');
           return;
         }
+        var student = findAnyStudentById_(studentId) || {};
+        var studentName = student.studentName || button.getAttribute('data-jikbo-student-name') || '이 학생';
+        if (!window.confirm(studentName + ' 학생을 직보 표에서 숨길까요? 숨김 명단 보기에서 다시 해제할 수 있습니다.')) {
+          return;
+        }
         var payload = {
           token: APP_STATE.token,
           overrideRowNumber: '',
@@ -36961,16 +36984,6 @@
           return;
         }
 
-        var summaryStatusButton = event.target.closest('[data-jikbo-summary-status-open]');
-        if (summaryStatusButton) {
-          if (!APP_STATE.isAdmin) {
-            setNotice('강사 계정에서는 직보 상태를 수정할 수 없습니다.', 'warning');
-            return;
-          }
-          openJikboStatusModal_(summaryStatusButton.getAttribute('data-jikbo-summary-status-open') || '');
-          return;
-        }
-
         var summaryItemButton = event.target.closest('[data-jikbo-summary-student]');
         if (summaryItemButton) {
           if (!APP_STATE.isAdmin) {
@@ -36984,6 +36997,22 @@
         var missingSchoolButton = event.target.closest('[data-jikbo-summary-missing-school]');
         if (missingSchoolButton) {
           openJikboMissingExamSchoolsModal_(missingSchoolButton.getAttribute('data-jikbo-summary-missing-school') || '');
+          return;
+        }
+
+        var timetableButton = event.target.closest('[data-jikbo-student-timetable]');
+        if (timetableButton) {
+          openJikboStudentTimetableModal_(timetableButton.getAttribute('data-jikbo-student-timetable') || '');
+          return;
+        }
+
+        var summaryStatusButton = event.target.closest('[data-jikbo-summary-status-open]');
+        if (summaryStatusButton) {
+          if (!APP_STATE.isAdmin) {
+            setNotice('강사 계정에서는 직보 상태를 수정할 수 없습니다.', 'warning');
+            return;
+          }
+          openJikboStatusModal_(summaryStatusButton.getAttribute('data-jikbo-summary-status-open') || '');
           return;
         }
 
@@ -37004,12 +37033,6 @@
             return;
           }
           openJikboStatusModal_(statusButton);
-          return;
-        }
-
-        var timetableButton = event.target.closest('[data-jikbo-student-timetable]');
-        if (timetableButton) {
-          openJikboStudentTimetableModal_(timetableButton.getAttribute('data-jikbo-student-timetable') || '');
           return;
         }
 
@@ -37490,22 +37513,8 @@
             };
           });
 
-          if (!rows.length && showHiddenStudents) {
-            return null;
-          }
-
           if (!rows.length) {
-            rows.push({
-              student: {
-                studentName: '활성 학생 없음',
-                subject: '-',
-                studentId: ''
-              },
-              cellMap: {},
-              matchedExamCount: 0,
-              hasExamSchedule: hasExamSchedule,
-              isExamFinished: isGroupExamFinished
-            });
+            return null;
           }
 
           if (keyword && !groupMatchesKeyword && !rows.some(function(row) { return row.matchedExamCount > 0 || normalizeSearchText(row.student.studentName).indexOf(keyword) !== -1; })) {
@@ -37974,17 +37983,27 @@
       function renderJikboSummaryDetailItem_(item, panel) {
         if (panel.panelKey === 'unresolvedStudents' && item.key) {
           APP_STATE.jikboSummaryDraftMap[item.key] = item;
-          return '<button type="button" class="jikbo-summary-detail-item clickable ' + (panel.alert ? 'alert' : '') + '" data-jikbo-summary-student="' + escapeAttribute(item.key) + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '') + '</div></button>';
+          return '<button type="button" class="jikbo-summary-detail-item clickable ' + (panel.alert ? 'alert' : '') + '" data-jikbo-summary-student="' + escapeAttribute(item.key) + '"><div class="jikbo-summary-detail-item-title">' + renderJikboSummaryItemTitle_(item, panel) + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '') + '</div></button>';
         }
         if (panel.panelKey === 'missingExamSchools' && item.key) {
-          return '<button type="button" class="jikbo-summary-detail-item clickable alert" data-jikbo-summary-missing-school="' + escapeAttribute(item.key) + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '명단 보기') + '</div></button>';
+          return '<button type="button" class="jikbo-summary-detail-item clickable alert" data-jikbo-summary-missing-school="' + escapeAttribute(item.key) + '"><div class="jikbo-summary-detail-item-title">' + renderJikboSummaryItemTitle_(item, panel) + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '명단 보기') + '</div></button>';
         }
         var statusClass = item && item.progressStatus ? getJikboSummaryStatusClass_(item.progressStatus) : '';
         if (item && item.statusKey && item.draft && APP_STATE.isAdmin) {
           APP_STATE.jikboStatusDraftMap[item.statusKey] = item.draft;
-          return '<button type="button" class="jikbo-summary-detail-item clickable ' + escapeAttribute(statusClass) + '" data-jikbo-summary-status-open="' + escapeAttribute(item.statusKey) + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '') + '</div></button>';
+          return '<button type="button" class="jikbo-summary-detail-item clickable ' + escapeAttribute(statusClass) + '" data-jikbo-summary-status-open="' + escapeAttribute(item.statusKey) + '"><div class="jikbo-summary-detail-item-title">' + renderJikboSummaryItemTitle_(item, panel) + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item.meta || '') + '</div></button>';
         }
-        return '<article class="jikbo-summary-detail-item ' + (panel.alert ? 'alert ' : '') + escapeAttribute(statusClass) + '"><div class="jikbo-summary-detail-item-title"><span>' + escapeHtml(item && item.title || '-') + '</span>' + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item && item.meta || '') + '</div></article>';
+        return '<article class="jikbo-summary-detail-item ' + (panel.alert ? 'alert ' : '') + escapeAttribute(statusClass) + '"><div class="jikbo-summary-detail-item-title">' + renderJikboSummaryItemTitle_(item, panel) + renderJikboSummaryItemBadges_(item, panel) + '</div><div class="jikbo-summary-detail-item-meta">' + escapeHtml(item && item.meta || '') + '</div></article>';
+      }
+
+      function renderJikboSummaryItemTitle_(item, panel) {
+        var title = escapeHtml(item && item.title || '-');
+        if (panel && panel.panelKey === 'todayJikbos' && item && item.studentId) {
+          var studentName = item.studentName || (item.title ? String(item.title).split(' · ')[0] : '');
+          var remainder = item.subjectName || '';
+          return '<span class="jikbo-student-name-inline"><span>' + escapeHtml(studentName || '-') + '</span>' + renderJikboStudentTimetableButton_(item.studentId, studentName, true) + (remainder ? '<span>· ' + escapeHtml(remainder) + '</span>' : '') + '</span>';
+        }
+        return '<span>' + title + '</span>';
       }
 
       function buildJikboTimelineEventKey_(eventItem) {
@@ -38736,7 +38755,7 @@
       function renderJikboStudentLabel_(student, matchedExamCount, hasUnconfirmedJikbo, hasExamSchedule, isHiddenStudent) {
         return [
           '<div class="jikbo-student-name"><span class="jikbo-student-title-text">' + escapeHtml(student.studentName || '-') + '</span>' +
-            (student.studentId ? '<button type="button" class="jikbo-student-timetable-button" data-jikbo-student-timetable="' + escapeAttribute(student.studentId) + '" title="직보 주간 시간표" aria-label="' + escapeAttribute((student.studentName || '학생') + ' 직보 주간 시간표 열기') + '"><span class="jikbo-timetable-button-icon" aria-hidden="true">📅</span></button>' : '') +
+            renderJikboStudentTimetableButton_(student.studentId, student.studentName, false) +
           '</div>',
           '<div class="jikbo-student-meta">' + escapeHtml(student.subject || '과목 미지정') + ' · ' + escapeHtml(String(matchedExamCount || 0)) + '건</div>',
           hasExamSchedule === false ? '<div class="jikbo-student-alert">시험 일정 미등록</div>' : '',
@@ -38744,10 +38763,21 @@
             ? '<button type="button" class="jikbo-summary-toggle" data-jikbo-manual-open="true" data-jikbo-manual-student-id="' + escapeAttribute(student.studentId) + '">직보 입력</button>'
             : '',
           student.studentId
-            ? '<button type="button" class="jikbo-summary-toggle" ' + (isHiddenStudent ? 'data-jikbo-student-unhide="' : 'data-jikbo-student-hide="') + escapeAttribute(student.studentId) + '">' + (isHiddenStudent ? '숨김 해제' : '명단 숨기기') + '</button>'
+            ? '<button type="button" class="jikbo-summary-toggle" ' + (isHiddenStudent ? 'data-jikbo-student-unhide="' : 'data-jikbo-student-hide="') + escapeAttribute(student.studentId) + '" data-jikbo-student-name="' + escapeAttribute(student.studentName || '') + '">' + (isHiddenStudent ? '숨김 해제' : '명단 숨기기') + '</button>'
             : '',
           hasUnconfirmedJikbo ? '<div class="jikbo-student-alert">직보 미확정</div>' : ''
         ].join('');
+      }
+
+      function renderJikboStudentTimetableButton_(studentId, studentName, asSpan) {
+        if (!studentId) {
+          return '';
+        }
+        var label = (studentName || '학생') + ' 직보 주간 시간표 열기';
+        if (asSpan) {
+          return '<span class="jikbo-student-timetable-button" role="button" tabindex="0" data-jikbo-student-timetable="' + escapeAttribute(studentId) + '" title="직보 주간 시간표" aria-label="' + escapeAttribute(label) + '"><span class="jikbo-timetable-button-icon" aria-hidden="true">📅</span></span>';
+        }
+        return '<button type="button" class="jikbo-student-timetable-button" data-jikbo-student-timetable="' + escapeAttribute(studentId) + '" title="직보 주간 시간표" aria-label="' + escapeAttribute(label) + '"><span class="jikbo-timetable-button-icon" aria-hidden="true">📅</span></button>';
       }
 
       function renderJikboExamCell_(cell) {
