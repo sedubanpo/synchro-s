@@ -7,12 +7,24 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:notion-parser": "node scripts/verify-notion-schedule-parser.mjs",
+    "verify:instructor-match": "node scripts/verify-instructor-match-guard.mjs",
+    "verify:kimnarin-source": "node scripts/verify-kimnarin-source-timetable.mjs",
+    "repair:kimnarin-instructors": "node scripts/repair-kimnarin-instructor-mismatches.mjs",
+    "verify:active-group-linkage": "node scripts/verify-active-tag-group-linkage.mjs",
+    "verify:stable-activation": "node --env-file=.env.local scripts/verify-stable-timetable-activation.mjs",
+    "audit:firebase-migration": "node scripts/synchro-firebase-migration-audit.mjs",
+    "link:firebase-accounts": "node scripts/synchro-link-existing-firebase-accounts.mjs",
+    "verify:firestore-plan": "node scripts/synchro-firestore-plan-verify.mjs",
+    "verify:student-availability": "tsx scripts/verify-student-availability.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
     "clsx": "^2.1.1",
+    "firebase": "^10.14.1",
+    "html2canvas": "^1.4.1",
     "next": "14.2.29",
     "react": "18.3.1",
     "react-dom": "18.3.1"
@@ -26,6 +38,7 @@
     "eslint-config-next": "14.2.29",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "tsx": "^4.20.3"
   }
 }

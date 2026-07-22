@@ -68,6 +68,7 @@ export async function GET(req: Request) {
 
     const profileInstructorId =
       (profile as { instructor_id?: string | null }).instructor_id ?? null;
+    const profileStudentId = (profile as { student_id?: string | null }).student_id ?? null;
 
     if (profile.role === "instructor") {
       instructorId =
@@ -80,7 +81,7 @@ export async function GET(req: Request) {
     }
 
     if (profile.role === "student") {
-      studentId = await findStudentIdByUserId(supabase, user.id);
+      studentId = profileStudentId || (await findStudentIdByUserId(supabase, user.id));
       if (!studentId) {
         return jsonError("No student profile linked to this account", 400);
       }

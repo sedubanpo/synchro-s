@@ -1,5 +1,12 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { getAuthenticatedProfile } from "@/lib/server/auth";
+import { getBearerIdToken, loadFirebaseRoster, type FirebaseInstructorRosterItem, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
+import { planMissingFirebaseInstructorInserts } from "@/lib/server/firebaseInstructorMirror";
+import {
+  planMissingFirebaseStudentInserts,
+  planRegisteredStudentReactivationIds,
+  type SupabaseStudentMirrorRow
+} from "@/lib/server/firebaseStudentMirror";
 import { NextResponse } from "next/server";
 
 const DEFAULT_SPREADSHEET_ID = "1ByPeH0bZZrZDvW_yPkCpQCIuk724_Gt7uudUj_Ue8Ho";
@@ -11,7 +18,46 @@ type InstructorRow = {
   available_time_slots?: string[] | null;
   available_time_slots_by_day?: Record<string, unknown> | null;
   is_active?: boolean | null;
+  firebase_instructor_id?: string | null;
+  firebase_uid?: string | null;
 };
+
+function parseChecked(raw: string): boolean {
+  const v = raw.trim().toLowerCase();
+  if (
+    !v ||
+    v === "false" ||
+    v === "0" ||
+    v === "n" ||
+    v === "no" ||
+    v === "unchecked" ||
+    v === "☐" ||
+    v === "미등록" ||
+    v === "퇴원" ||
+    v === "퇴사" ||
+    v === "휴직" ||
+    v === "중지" ||
+    v === "비활성"
+  ) {
+    return false;
+  }
+  return (
+    v === "true" ||
+    v === "1" ||
+    v === "y" ||
+    v === "yes" ||
+    v === "✓" ||
+    v === "☑" ||
+    v === "✅" ||
+    v === "v" ||
+    v === "checked" ||
+    v === "등록" ||
+    v === "재원" ||
+    v === "수강" ||
+    v === "재직" ||
+    v === "활성"
+  );
+}
 
 function parseCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -58,6 +104,21 @@ function normalizeName(value: string): string {
 
 function normalizeNameToken(value: string): string {
   return normalizeName(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function buildUniqueTokenMap<T>(items: T[], getName: (item: T) => string): Map<string, T> {
+  const counts = new Map<string, number>();
+  const first = new Map<string, T>();
+  for (const item of items) {
+    const token = normalizeNameToken(getName(item));
+    if (!token) continue;
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+    if (!first.has(token)) first.set(token, item);
+  }
+  for (const [token, count] of counts.entries()) {
+    if (count > 1) first.delete(token);
+  }
+  return first;
 }
 
 function findColumnIndex(headers: string[], candidates: string[]): number {
@@ -167,7 +228,7 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
     return query;
   };
 
-  const primary = await runSelect("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day,is_active");
+  const primary = await runSelect("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day,is_active,firebase_instructor_id,firebase_uid");
   if (!primary.error) {
     return { data: (primary.data ?? []) as InstructorRow[], error: null };
   }
@@ -180,7 +241,7 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
   }
 
   if (missingLegacy) {
-    const byDayFallback = await runSelect("id,instructor_name,days_off,available_time_slots_by_day,is_active");
+    const byDayFallback = await runSelect("id,instructor_name,days_off,available_time_slots_by_day,is_active,firebase_instructor_id,firebase_uid");
     if (!byDayFallback.error) {
       return {
         data: ((byDayFallback.data ?? []) as InstructorRow[]).map((row) => ({
@@ -193,7 +254,7 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
   }
 
   if (missingByDay) {
-    const legacyFallback = await runSelect("id,instructor_name,days_off,available_time_slots,is_active");
+    const legacyFallback = await runSelect("id,instructor_name,days_off,available_time_slots,is_active,firebase_instructor_id,firebase_uid");
     if (!legacyFallback.error) {
       return {
         data: ((legacyFallback.data ?? []) as InstructorRow[]).map((row) => ({
@@ -224,7 +285,7 @@ async function selectInstructorRows(supabase: any, onlyActive = false): Promise<
 }
 
 async function selectSingleInstructorWithFallback(runQuery: (selectClause: string) => any) {
-  const primary = await runQuery("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day");
+  const primary = await runQuery("id,instructor_name,days_off,available_time_slots,available_time_slots_by_day,is_active,firebase_instructor_id,firebase_uid");
   if (!primary.error) {
     return {
       data: (primary.data as InstructorRow | null) ?? null,
@@ -236,7 +297,7 @@ async function selectSingleInstructorWithFallback(runQuery: (selectClause: strin
   const missingByDay = hasMissingColumn(primary.error, "available_time_slots_by_day");
 
   if (missingLegacy) {
-    const byDayFallback = await runQuery("id,instructor_name,days_off,available_time_slots_by_day");
+    const byDayFallback = await runQuery("id,instructor_name,days_off,available_time_slots_by_day,is_active,firebase_instructor_id,firebase_uid");
     if (!byDayFallback.error) {
       return {
         data: byDayFallback.data
@@ -251,7 +312,7 @@ async function selectSingleInstructorWithFallback(runQuery: (selectClause: strin
   }
 
   if (missingByDay) {
-    const legacyFallback = await runQuery("id,instructor_name,days_off,available_time_slots");
+    const legacyFallback = await runQuery("id,instructor_name,days_off,available_time_slots,is_active,firebase_instructor_id,firebase_uid");
     if (!legacyFallback.error) {
       return {
         data: legacyFallback.data
@@ -265,7 +326,7 @@ async function selectSingleInstructorWithFallback(runQuery: (selectClause: strin
     }
   }
 
-  const fallback = await runQuery("id,instructor_name,days_off");
+  const fallback = await runQuery("id,instructor_name,days_off,is_active");
   return {
     data: fallback.data
       ? ({
@@ -278,31 +339,22 @@ async function selectSingleInstructorWithFallback(runQuery: (selectClause: strin
   };
 }
 
-async function loadSheetMetaMap(spreadsheetId: string): Promise<{
+type SheetMetaMap = {
   teacherSubjectByName: Map<string, string>;
+  activeTeacherNames: Set<string>;
+  teacherActiveColumnFound: boolean;
   studentSchoolByName: Map<string, string>;
   activeStudentNames: Set<string>;
   studentSheetLoaded: boolean;
-}> {
-  const parseRegistered = (raw: string): boolean => {
-    const v = raw.trim().toLowerCase();
-    if (!v || v === "false" || v === "0" || v === "n" || v === "no" || v === "unchecked" || v === "☐") {
-      return false;
-    }
-    return (
-      v === "true" ||
-      v === "1" ||
-      v === "y" ||
-      v === "yes" ||
-      v === "✓" ||
-      v === "☑" ||
-      v === "✅" ||
-      v === "v" ||
-      v === "checked"
-    );
-  };
+};
 
+const SHEET_META_CACHE_TTL_MS = 2 * 60 * 1000;
+const sheetMetaCache = new Map<string, { value?: SheetMetaMap; expiresAt: number; promise?: Promise<SheetMetaMap> }>();
+
+async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
   const teacherSubjectByName = new Map<string, string>();
+  const activeTeacherNames = new Set<string>();
+  let teacherActiveColumnFound = false;
   const studentSchoolByName = new Map<string, string>();
   const activeStudentNames = new Set<string>();
   let studentSheetLoaded = false;
@@ -314,6 +366,8 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<{
       const headers = teacherRows[0];
       const nameIdx = findColumnIndex(headers, ["선생님성함", "강사명", "teacher", "name"]);
       const subjectIdx = findColumnIndex(headers, ["과목", "subject"]);
+      const activeIdx = findColumnIndex(headers, ["재직", "재직상태", "is_active", "active"]);
+      teacherActiveColumnFound = activeIdx >= 0;
       const safeNameIdx = nameIdx >= 0 ? nameIdx : 1;
       for (const row of teacherRows.slice(1)) {
         const name = normalizeName(row[safeNameIdx] ?? "");
@@ -321,6 +375,9 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<{
         const subject = (row[subjectIdx] ?? "").trim();
         if (subject) {
           teacherSubjectByName.set(name, subject);
+        }
+        if (teacherActiveColumnFound && parseChecked((row[activeIdx] ?? "").toString())) {
+          activeTeacherNames.add(name);
         }
       }
     }
@@ -348,7 +405,7 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<{
         if (!name) continue;
 
         const statusRaw = (row[statusIdx] ?? "").toString();
-        if (parseRegistered(statusRaw)) {
+        if (parseChecked(statusRaw)) {
           activeStudentNames.add(name);
         }
 
@@ -365,10 +422,39 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<{
     console.error("[options] student 시트 메타 로드 실패", error);
   }
 
-  return { teacherSubjectByName, studentSchoolByName, activeStudentNames, studentSheetLoaded };
+  return { teacherSubjectByName, activeTeacherNames, teacherActiveColumnFound, studentSchoolByName, activeStudentNames, studentSheetLoaded };
 }
 
-export async function GET() {
+async function loadSheetMetaMapCached(spreadsheetId: string, forceRefresh: boolean): Promise<SheetMetaMap> {
+  const now = Date.now();
+  const cached = sheetMetaCache.get(spreadsheetId);
+
+  if (!forceRefresh && cached?.value && cached.expiresAt > now) {
+    return cached.value;
+  }
+
+  if (!forceRefresh && cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = loadSheetMetaMap(spreadsheetId).then((value) => {
+    sheetMetaCache.set(spreadsheetId, {
+      value,
+      expiresAt: Date.now() + SHEET_META_CACHE_TTL_MS
+    });
+    return value;
+  });
+
+  sheetMetaCache.set(spreadsheetId, {
+    value: cached?.value,
+    expiresAt: cached?.expiresAt ?? 0,
+    promise
+  });
+
+  return promise;
+}
+
+export async function GET(req: Request) {
   try {
     const { supabase, user, profile } = await getAuthenticatedProfile();
 
@@ -388,58 +474,186 @@ export async function GET() {
     if (subjectRes.error) throw subjectRes.error;
     if (classTypeRes.error) throw classTypeRes.error;
 
+    const { searchParams } = new URL(req.url);
+    const forceSheetRefresh = searchParams.get("refreshSheets") === "1" || searchParams.get("refreshSheets") === "true";
     const spreadsheetId = process.env.GOOGLE_SHEETS_SYNC_ID || DEFAULT_SPREADSHEET_ID;
-    const { teacherSubjectByName, studentSchoolByName, activeStudentNames, studentSheetLoaded } = await loadSheetMetaMap(
-      spreadsheetId
-    );
+    const {
+      teacherSubjectByName,
+      activeTeacherNames,
+      teacherActiveColumnFound,
+      studentSchoolByName,
+      activeStudentNames,
+      studentSheetLoaded
+    } = await loadSheetMetaMapCached(spreadsheetId, forceSheetRefresh);
+    const firebaseRoster = await loadFirebaseRoster(getBearerIdToken(req), { forceRefresh: forceSheetRefresh });
+    const firebaseInstructorById = new Map<string, FirebaseInstructorRosterItem>();
+    const firebaseStudentById = new Map<string, FirebaseStudentRosterItem>();
+    const firebaseInstructorByName = buildUniqueTokenMap(firebaseRoster.instructors, (item) => item.name);
+    const firebaseStudentByName = buildUniqueTokenMap(firebaseRoster.students, (item) => item.name);
+
+    if (firebaseRoster.available) {
+      for (const instructor of firebaseRoster.instructors) {
+        for (const key of [instructor.id, instructor.instructorId, instructor.supabaseInstructorId].filter(Boolean) as string[]) {
+          firebaseInstructorById.set(key, instructor);
+        }
+      }
+      for (const student of firebaseRoster.students) {
+        for (const key of [
+          student.id,
+          student.studentId,
+          student.canonicalStudentId,
+          student.supabaseStudentId,
+          student.firebaseUid,
+          ...(student.studentIdAliases ?? [])
+        ].filter(Boolean) as string[]) {
+          firebaseStudentById.set(key, student);
+        }
+      }
+    }
+
+    const resolveFirebaseInstructor = (row: InstructorRow) =>
+      firebaseInstructorById.get(row.id) ??
+      (row.firebase_instructor_id ? firebaseInstructorById.get(row.firebase_instructor_id) : undefined) ??
+      (row.firebase_uid ? firebaseInstructorById.get(row.firebase_uid) : undefined) ??
+      firebaseInstructorByName.get(normalizeNameToken(row.instructor_name));
+    const resolveFirebaseStudent = (row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) =>
+      firebaseStudentById.get(row.id) ??
+      (row.firebase_student_id ? firebaseStudentById.get(row.firebase_student_id) : undefined) ??
+      (row.firebase_uid ? firebaseStudentById.get(row.firebase_uid) : undefined) ??
+      firebaseStudentByName.get(normalizeNameToken(row.student_name));
 
     let instructors: {
       id: string;
       name: string;
       secondary?: string;
+      isActive?: boolean;
       daysOff?: number[];
       availableTimeSlots?: string[];
       availableTimeSlotsByDay?: Record<string, string[]>;
     }[] = [];
-    let students: { id: string; name: string; secondary?: string }[] = [];
+    let suspendedInstructors: typeof instructors = [];
+    let students: { id: string; name: string; secondary?: string; isActive?: boolean }[] = [];
+    let suspendedStudents: typeof students = [];
     const profileInstructorId = (profile as { instructor_id?: string | null }).instructor_id ?? null;
+    const profileStudentId = (profile as { student_id?: string | null }).student_id ?? null;
 
     if (profile.role === "admin" || profile.role === "coordinator") {
-      const [instructorRes, studentRes] = await Promise.all([
-        selectInstructorRows(supabase, true).then((result) => ({
+      const [instructorRes, initialStudentRes] = await Promise.all([
+        selectInstructorRows(supabase, false).then((result) => ({
           ...result,
           data: (result.data ?? []).sort((a: { instructor_name: string }, b: { instructor_name: string }) =>
             a.instructor_name.localeCompare(b.instructor_name, "ko")
           )
         })),
-        supabase.from("students").select("id,student_name,is_active").order("student_name")
+        supabase.from("students").select("id,student_name,is_active,firebase_student_id,firebase_uid").order("student_name")
       ]);
 
       if (instructorRes.error) throw instructorRes.error;
-      if (studentRes.error) throw studentRes.error;
+      if (initialStudentRes.error) throw initialStudentRes.error;
 
-      instructors = (instructorRes.data ?? []).map((row: InstructorRow) => {
+      let instructorRows = instructorRes.data ?? [];
+      let studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
+      const studentIdsToReactivate = new Set(
+        studentSheetLoaded ? planRegisteredStudentReactivationIds(studentRows, activeStudentNames) : []
+      );
+      if (firebaseRoster.available) {
+        studentRows.forEach((row) => {
+          if (row.is_active === false && resolveFirebaseStudent(row)?.active) {
+            studentIdsToReactivate.add(row.id);
+          }
+        });
+      }
+      if (firebaseRoster.available) {
+        const missingInstructors = planMissingFirebaseInstructorInserts(instructorRows, firebaseRoster.instructors);
+        const missingStudents = planMissingFirebaseStudentInserts(studentRows, firebaseRoster.students);
+        if (missingInstructors.length > 0 || missingStudents.length > 0 || studentIdsToReactivate.size > 0) {
+          const [instructorMirrorResults, studentMirrorResults, studentReactivationResults] = await Promise.all([
+            Promise.all(missingInstructors.map((instructor) => supabase.from("instructors").insert(instructor))),
+            Promise.all(missingStudents.map((student) => supabase.from("students").insert(student))),
+            Promise.all([...studentIdsToReactivate].map((studentId) => supabase.from("students").update({ is_active: true }).eq("id", studentId)))
+          ]);
+          const mirrorInsertError = [...instructorMirrorResults, ...studentMirrorResults, ...studentReactivationResults].find(
+            (result) => result.error && result.error.code !== "23505"
+          )?.error;
+          if (mirrorInsertError) throw mirrorInsertError;
+
+          const [refreshedInstructorResult, refreshedStudentResult] = await Promise.all([
+            selectInstructorRows(supabase, false),
+            supabase.from("students").select("id,student_name,is_active,firebase_student_id,firebase_uid").order("student_name")
+          ]);
+          if (refreshedInstructorResult.error) throw refreshedInstructorResult.error;
+          const { data: refreshedStudents, error: refreshedStudentsError } = refreshedStudentResult;
+          if (refreshedStudentsError) throw refreshedStudentsError;
+          instructorRows = (refreshedInstructorResult.data ?? []).sort((a, b) =>
+            a.instructor_name.localeCompare(b.instructor_name, "ko")
+          );
+          studentRows = (refreshedStudents ?? []) as SupabaseStudentMirrorRow[];
+        }
+      } else if (studentIdsToReactivate.size > 0) {
+        const studentReactivationResults = await Promise.all(
+          [...studentIdsToReactivate].map((studentId) => supabase.from("students").update({ is_active: true }).eq("id", studentId))
+        );
+        const reactivationError = studentReactivationResults.find((result) => result.error)?.error;
+        if (reactivationError) throw reactivationError;
+        studentRows = studentRows.map((row) => (studentIdsToReactivate.has(row.id) ? { ...row, is_active: true } : row));
+      }
+
+      const toInstructorOption = (row: InstructorRow, isActive: boolean) => {
         const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(row.available_time_slots_by_day);
+        const firebaseInstructor = firebaseRoster.available ? resolveFirebaseInstructor(row) : undefined;
         return {
           id: row.id,
-          name: row.instructor_name,
-          secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
+          name: firebaseInstructor?.name || row.instructor_name,
+          secondary: firebaseInstructor?.subject || teacherSubjectByName.get(normalizeName(row.instructor_name)),
+          isActive,
           daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7),
           availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, row.available_time_slots),
           availableTimeSlotsByDay
         };
-      });
-      students = (studentRes.data ?? [])
-        .filter((row: { student_name: string; is_active: boolean }) => {
-          const normalized = normalizeName(row.student_name);
-          if (studentSheetLoaded) return activeStudentNames.has(normalized);
-          return row.is_active;
-        })
-        .map((row: { id: string; student_name: string }) => ({
+      };
+      const isInstructorRosterActive = (row: InstructorRow) => {
+        const firebaseInstructor = firebaseRoster.available ? resolveFirebaseInstructor(row) : undefined;
+        if (firebaseInstructor) return firebaseInstructor.active;
+        if (row.is_active === false) return false;
+        if (teacherActiveColumnFound) return activeTeacherNames.has(normalizeName(row.instructor_name));
+        return true;
+      };
+      instructors = instructorRows
+        .filter(isInstructorRosterActive)
+        .map((row: InstructorRow) => toInstructorOption(row, true));
+      suspendedInstructors = instructorRows
+        .filter((row: InstructorRow) => !isInstructorRosterActive(row))
+        .map((row: InstructorRow) => toInstructorOption(row, false));
+
+      const isStudentRosterActive = (row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
+        const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+        if (firebaseStudent) return firebaseStudent.active;
+        const normalized = normalizeName(row.student_name);
+        if (studentSheetLoaded) return activeStudentNames.has(normalized);
+        return row.is_active !== false;
+      };
+      students = studentRows
+        .filter(isStudentRosterActive)
+        .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
+          const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+          return {
           id: row.id,
-          name: row.student_name,
-          secondary: studentSchoolByName.get(normalizeName(row.student_name))
-        }));
+          name: firebaseStudent?.name || row.student_name,
+          secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name)),
+          isActive: true
+          };
+        });
+      suspendedStudents = studentRows
+        .filter((row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => !isStudentRosterActive(row))
+        .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
+          const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+          return {
+          id: row.id,
+          name: firebaseStudent?.name || row.student_name,
+          secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name)),
+          isActive: false
+          };
+        });
     } else if (profile.role === "instructor") {
       const instructorQuery = async (selectClause: string) => {
         const query = supabase.from("instructors").select(selectClause);
@@ -454,7 +668,7 @@ export async function GET() {
           : null;
       const resolvedInstructor = ownInstructor ?? fallbackInstructor;
 
-      if (!resolvedInstructor) {
+      if (!resolvedInstructor || resolvedInstructor.is_active === false) {
         return jsonError("Instructor profile not found", 400);
       }
 
@@ -464,6 +678,7 @@ export async function GET() {
           id: resolvedInstructor.id,
           name: resolvedInstructor.instructor_name,
           secondary: teacherSubjectByName.get(normalizeName(resolvedInstructor.instructor_name)),
+          isActive: true,
           daysOff: (resolvedInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
           availableTimeSlots: flattenAvailableTimeSlots(resolvedByDay, resolvedInstructor.available_time_slots),
           availableTimeSlotsByDay: resolvedByDay
@@ -490,29 +705,34 @@ export async function GET() {
         if (studentIds.length > 0) {
           const { data: studentRows, error: studentRowsError } = await supabase
             .from("students")
-            .select("id,student_name")
+            .select("id,student_name,firebase_student_id,firebase_uid")
             .in("id", studentIds)
             .order("student_name");
 
           if (studentRowsError) throw studentRowsError;
 
           students = (studentRows ?? [])
-            .filter((row: { student_name: string }) => {
+            .filter((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
+              const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+              if (firebaseStudent) return firebaseStudent.active;
               const normalized = normalizeName(row.student_name);
               return studentSheetLoaded ? activeStudentNames.has(normalized) : true;
             })
-            .map((row: { id: string; student_name: string }) => ({
+            .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
+              const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+              return {
               id: row.id,
-              name: row.student_name,
-              secondary: studentSchoolByName.get(normalizeName(row.student_name))
-            }));
+              name: firebaseStudent?.name || row.student_name,
+              secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name))
+              };
+            });
         }
       }
     } else {
       const { data: ownStudent, error: ownStudentError } = await supabase
         .from("students")
-        .select("id,student_name,default_instructor_id")
-        .eq("user_id", user.id)
+        .select("id,student_name,default_instructor_id,firebase_student_id,firebase_uid")
+        .eq(profileStudentId ? "id" : "user_id", profileStudentId || user.id)
         .single();
 
       if (ownStudentError || !ownStudent) {
@@ -520,12 +740,14 @@ export async function GET() {
       }
 
       const ownStudentName = normalizeName(ownStudent.student_name);
-      if (activeStudentNames.size === 0 || activeStudentNames.has(ownStudentName)) {
+      const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(ownStudent) : undefined;
+      const ownStudentActive = firebaseStudent ? firebaseStudent.active : activeStudentNames.size === 0 || activeStudentNames.has(ownStudentName);
+      if (ownStudentActive) {
         students = [
           {
             id: ownStudent.id,
-            name: ownStudent.student_name,
-            secondary: studentSchoolByName.get(ownStudentName)
+            name: firebaseStudent?.name || ownStudent.student_name,
+            secondary: firebaseStudent?.secondary || studentSchoolByName.get(ownStudentName)
           }
         ];
       } else {
@@ -545,6 +767,7 @@ export async function GET() {
               id: defaultInstructor.id,
               name: defaultInstructor.instructor_name,
               secondary: teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name)),
+              isActive: defaultInstructor.is_active !== false,
               daysOff: (defaultInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
               availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, defaultInstructor.available_time_slots),
               availableTimeSlotsByDay
@@ -558,7 +781,9 @@ export async function GET() {
       viewerRole: profile.role,
       viewerName: profile.full_name ?? "",
       instructors,
+      suspendedInstructors,
       students,
+      suspendedStudents,
       subjects: (subjectRes.data ?? []).map(
         (row: { code: string; display_name: string; tailwind_bg_class: string }) => ({
           code: row.code,

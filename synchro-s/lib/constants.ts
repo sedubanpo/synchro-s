@@ -10,8 +10,10 @@ export const DAYS: { key: Weekday; label: string }[] = [
   { key: 7, label: "일" }
 ];
 
-export const TIME_SLOTS = Array.from({ length: 12 }, (_, idx) => {
-  const hour = idx + 10;
+// The grid represents each hour-long interval from 09:00 through midnight.
+// Keeping 24:00 as the end boundary lets a 23:00 class render in its own row.
+export const TIME_SLOTS = Array.from({ length: 15 }, (_, idx) => {
+  const hour = idx + 9;
   return `${String(hour).padStart(2, "0")}:00`;
 });
 

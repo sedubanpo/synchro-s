@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import { ScheduleBlock } from "@/components/schedule/ScheduleBlock";
 import { timeToMinutes } from "@/lib/time";
 import type { RoleView, ScheduleEvent, TimetableViewMode, Weekday } from "@/types/schedule";
@@ -11,12 +12,16 @@ type TimetableGridProps = {
   events: ScheduleEvent[];
   daysOff?: Weekday[];
   hideEmptyDays?: boolean;
+  hideEmptyTimes?: boolean;
   viewMode?: TimetableViewMode;
-  highlightCellTints?: Record<string, string>;
   onCellClick: (ctx: { weekday: Weekday; startTime: string }) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
+  onEventClick?: (event: ScheduleEvent) => void;
   onEventSave?: (event: ScheduleEvent) => Promise<void>;
   onEventDelete?: (event: ScheduleEvent) => Promise<void>;
+  studentSecondaryLookup?: Readonly<Record<string, string>>;
+  inactive?: boolean;
+  emptyMessage?: string;
 };
 
 function toRangeLabel(startTime: string): string {
@@ -53,8 +58,61 @@ function isStrictDotClass(event: ScheduleEvent): boolean {
     normalized.includes("twotoone") ||
     normalized.includes("21") ||
     normalized.includes("2:1") ||
-    normalized.includes("2대1")
+    normalized.includes("2대1") ||
+    normalized.includes("threetone") ||
+    normalized.includes("threetoone") ||
+    normalized.includes("31") ||
+    normalized.includes("3:1") ||
+    normalized.includes("3대1")
   );
+}
+
+const INSTRUCTOR_REGULAR_GROUP_ID_PREFIX = "instructor-regular-group:";
+const SELF_STUDY_EVENT_ID_PREFIX = "self-study:";
+const SYNC_DRAFT_EVENT_ID_PREFIX = "sync-draft:";
+const ACADEMY_LOGO_URL = "https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png";
+
+function normalizeClassToken(value: string): string {
+  return value.replace(/[^0-9a-z가-힣:]/gi, "").toLowerCase();
+}
+
+function isIndividualRegularClass(event: ScheduleEvent): boolean {
+  if (isStrictDotClass(event)) return false;
+
+  const normalized = normalizeClassToken(`${event.classTypeCode} ${event.classTypeLabel} ${event.badgeText}`);
+  return ["개별정규", "개별", "정규", "regular", "multi"].some((token) => normalized.includes(normalizeClassToken(token)));
+}
+
+function eventOverlapsHourSlot(event: ScheduleEvent, slot: string): boolean {
+  const start = timeToMinutes(event.startTime);
+  const end = timeToMinutes(event.endTime);
+  const slotStart = timeToMinutes(slot);
+  const slotEnd = slotStart + 60;
+  return start < slotEnd && end > slotStart;
+}
+
+function getInstructorDisplaySlot(event: ScheduleEvent, timeSlots: string[]): string {
+  if (!isIndividualRegularClass(event)) {
+    return timeSlots.find((slot) => eventOverlapsHourSlot(event, slot)) ?? event.startTime;
+  }
+
+  return timeSlots.find((slot) => eventOverlapsHourSlot(event, slot)) ?? event.startTime;
+}
+
+function getEventDisplaySlot(event: ScheduleEvent, timeSlots: string[]): string {
+  return timeSlots.find((slot) => eventOverlapsHourSlot(event, slot)) ?? event.startTime;
+}
+
+function isInstructorRegularGroupEvent(event: ScheduleEvent): boolean {
+  return event.id.startsWith(INSTRUCTOR_REGULAR_GROUP_ID_PREFIX);
+}
+
+function isSelfStudyEvent(event: ScheduleEvent): boolean {
+  return event.id.startsWith(SELF_STUDY_EVENT_ID_PREFIX);
+}
+
+function isDraftEvent(event: ScheduleEvent): boolean {
+  return event.id.startsWith("draft-") || event.id.startsWith(SYNC_DRAFT_EVENT_ID_PREFIX);
 }
 
 function summaryBadgeText(event: ScheduleEvent): string {
@@ -65,6 +123,93 @@ function summaryBadgeText(event: ScheduleEvent): string {
   return event.classTypeLabel;
 }
 
+function summaryClassTypeTone(event: ScheduleEvent): string {
+  const normalized = normalizeClassToken(`${event.classTypeCode} ${event.classTypeLabel} ${event.badgeText}`);
+  if (normalized.includes("3:1") || normalized.includes("3대1") || normalized.includes("threetoone")) return "border-rose-200 bg-rose-500";
+  if (normalized.includes("2:1") || normalized.includes("2대1") || normalized.includes("twotoone")) return "border-violet-200 bg-violet-500";
+  if (normalized.includes("1:1") || normalized.includes("1대1") || normalized.includes("onetoone")) return "border-blue-200 bg-blue-500";
+  if (normalized.includes("개별정규") || normalized.includes("개별") || normalized.includes("regular") || normalized.includes("multi")) return "border-amber-200 bg-amber-500";
+  return "border-slate-200 bg-slate-500";
+}
+
+function normalizeStudentName(value: string): string {
+  return value.replace(/\s+/g, "").toLowerCase().trim();
+}
+
+function normalizeChainToken(value: string): string {
+  return value.replace(/\s+/g, "").toLowerCase().trim();
+}
+
+function instructorRegularGroupKey(event: ScheduleEvent, slot: string): string {
+  return [event.weekday, slot, event.startTime, event.endTime].join("::");
+}
+
+function mergeInstructorRegularGroup(base: ScheduleEvent, next: ScheduleEvent): ScheduleEvent {
+  return {
+    ...base,
+    studentIds: [...base.studentIds, ...next.studentIds],
+    studentNames: [...base.studentNames, ...next.studentNames],
+    startTime: timeToMinutes(next.startTime) < timeToMinutes(base.startTime) ? next.startTime : base.startTime,
+    endTime: timeToMinutes(next.endTime) > timeToMinutes(base.endTime) ? next.endTime : base.endTime,
+    note: [base.note, next.note].filter(Boolean).join("\n") || undefined
+  };
+}
+
+function sortInstructorCellEntries(a: ScheduleEvent, b: ScheduleEvent): number {
+  const startDiff = timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+  if (startDiff !== 0) return startDiff;
+  const strictDiff = Number(isStrictDotClass(b)) - Number(isStrictDotClass(a));
+  if (strictDiff !== 0) return strictDiff;
+  return a.studentNames.join("").localeCompare(b.studentNames.join(""), "ko");
+}
+
+function dedupeInstructorCellEntries(entries: ScheduleEvent[], slot: string): ScheduleEvent[] {
+  const seenStudents = new Set<string>();
+  const regularGroups = new Map<string, ScheduleEvent>();
+  const cleaned: ScheduleEvent[] = [];
+
+  for (const event of [...entries].sort(sortInstructorCellEntries)) {
+    const studentIds: string[] = [];
+    const studentNames: string[] = [];
+    const maxLength = Math.max(event.studentIds.length, event.studentNames.length);
+
+    for (let index = 0; index < maxLength; index += 1) {
+      const id = (event.studentIds[index] ?? "").trim();
+      const name = (event.studentNames[index] ?? "").trim();
+      const studentKey = normalizeStudentName(name) || id;
+      if (!studentKey || seenStudents.has(studentKey)) continue;
+
+      seenStudents.add(studentKey);
+      studentIds.push(id);
+      studentNames.push(name || id);
+    }
+
+    if (studentNames.length === 0) continue;
+
+    const normalizedEvent = { ...event, studentIds, studentNames };
+    if (isIndividualRegularClass(normalizedEvent)) {
+      const groupKey = instructorRegularGroupKey(normalizedEvent, slot);
+      const existing = regularGroups.get(groupKey);
+
+      regularGroups.set(
+        groupKey,
+        existing
+          ? mergeInstructorRegularGroup(existing, normalizedEvent)
+          : {
+              ...normalizedEvent,
+              id: `${INSTRUCTOR_REGULAR_GROUP_ID_PREFIX}${groupKey}`,
+              startTime: timeToMinutes(normalizedEvent.startTime) < timeToMinutes(slot) + 60 ? normalizedEvent.startTime : slot
+            }
+      );
+      continue;
+    }
+
+    cleaned.push(normalizedEvent);
+  }
+
+  return [...regularGroups.values(), ...cleaned].sort(sortInstructorCellEntries);
+}
+
 export function TimetableGrid({
   roleView,
   days,
@@ -72,15 +217,21 @@ export function TimetableGrid({
   events,
   daysOff = [],
   hideEmptyDays = false,
+  hideEmptyTimes = false,
   viewMode = "detailed",
-  highlightCellTints,
   onCellClick,
   onEventMove,
+  onEventClick,
   onEventSave,
-  onEventDelete
+  onEventDelete,
+  studentSecondaryLookup = {},
+  inactive = false,
+  emptyMessage
 }: TimetableGridProps) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
+  const [highlightedStudentName, setHighlightedStudentName] = useState<string | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
   const progressByEventKey = new Map<string, { index: number; total: number }>();
@@ -90,7 +241,8 @@ export function TimetableGrid({
   const canMoveEvents = Boolean(onEventMove && viewMode === "detailed");
 
   for (const event of events) {
-    const key = `${event.weekday}-${event.startTime}`;
+    const displaySlot = roleView === "instructor" ? getInstructorDisplaySlot(event, timeSlots) : getEventDisplaySlot(event, timeSlots);
+    const key = `${event.weekday}-${displaySlot}`;
     const bucket = eventMap.get(key) ?? [];
     bucket.push(event);
     eventMap.set(key, bucket);
@@ -101,10 +253,10 @@ export function TimetableGrid({
     const studentsKey = [...event.studentNames].sort().join("|");
     return [
       event.weekday,
-      event.subjectCode,
-      event.classTypeCode,
-      event.instructorId || event.instructorName,
-      studentsKey
+      normalizeChainToken(event.subjectName) || normalizeChainToken(event.subjectCode),
+      normalizeChainToken(event.classTypeLabel) || normalizeChainToken(event.classTypeCode),
+      normalizeChainToken(event.instructorName) || normalizeChainToken(event.instructorId),
+      normalizeChainToken(studentsKey)
     ].join("::");
   };
 
@@ -141,15 +293,21 @@ export function TimetableGrid({
 
   const visibleDays = hideEmptyDays ? days.filter((day) => activeDaySet.has(day.key)) : days;
   const renderDays = visibleDays.length > 0 ? visibleDays : days;
+  const visibleTimeSlots = hideEmptyTimes
+    ? timeSlots.filter((slot) => renderDays.some((day) => (eventMap.get(`${day.key}-${slot}`) ?? []).length > 0))
+    : timeSlots;
+  const renderTimeSlots = visibleTimeSlots.length > 0 ? visibleTimeSlots : timeSlots;
 
   const moveByPayload = async (payload: { classId: string; durationMinutes: number }, weekday: Weekday, startTime: string) => {
     if (!canMoveEvents || !onEventMove) return;
     if (!payload.classId || Number.isNaN(payload.durationMinutes)) return;
+    const endTime = addMinutes(startTime, payload.durationMinutes);
+    if (timeToMinutes(endTime) > 24 * 60) return;
     await onEventMove({
       classId: payload.classId,
       weekday,
       startTime,
-      endTime: addMinutes(startTime, payload.durationMinutes)
+      endTime
     });
   };
 
@@ -169,6 +327,22 @@ export function TimetableGrid({
       window.removeEventListener("mouseup", clearDragState);
     };
   }, []);
+
+  useEffect(() => {
+    if (roleView !== "instructor" || !highlightedStudentName) return;
+    const selectedKey = normalizeStudentName(highlightedStudentName);
+    const stillVisible = events.some((event) => event.studentNames.some((name) => normalizeStudentName(name) === selectedKey));
+    if (!stillVisible) setHighlightedStudentName(null);
+  }, [events, highlightedStudentName, roleView]);
+
+  useEffect(() => {
+    if (!highlightedStudentName) return;
+    const clearOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHighlightedStudentName(null);
+    };
+    window.addEventListener("keydown", clearOnEscape);
+    return () => window.removeEventListener("keydown", clearOnEscape);
+  }, [highlightedStudentName]);
 
   const handleDrop = async (event: DragEvent<HTMLElement>, weekday: Weekday, startTime: string) => {
     if (!canMoveEvents || !onEventMove) return;
@@ -193,28 +367,49 @@ export function TimetableGrid({
   };
 
   return (
-    <div className="grid-scrollbar overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <table className="min-w-[1380px] table-fixed border-collapse text-xs 2xl:min-w-[1500px]">
+    <div
+      data-timetable-grid="true"
+      className={`sync-surface grid-scrollbar relative w-fit max-w-full overflow-auto rounded-xl ${inactive ? "bg-slate-200" : "bg-white"}`}
+    >
+      <img
+        aria-hidden="true"
+        src={ACADEMY_LOGO_URL}
+        crossOrigin="anonymous"
+        alt=""
+        data-timetable-watermark="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 z-20 h-auto w-[min(36%,360px)] -translate-x-1/2 -translate-y-1/2 select-none opacity-[0.055] grayscale"
+      />
+      {emptyMessage ? (
+        <div className="pointer-events-none absolute bottom-0 left-20 right-0 top-[49px] z-30 flex items-center justify-center px-8">
+          <p className="sync-copy max-w-md rounded-xl border border-slate-200 bg-white/95 px-5 py-4 text-center text-sm font-bold leading-6 text-slate-600 shadow-[0_14px_32px_-20px_rgba(15,23,42,0.4)] backdrop-blur-sm">
+            {emptyMessage}
+          </p>
+        </div>
+      ) : null}
+      <table
+        data-timetable-table="true"
+        className={`sync-tabular relative z-10 min-w-[1032px] table-fixed border-collapse text-xs 2xl:min-w-[1180px] ${inactive ? "opacity-75 grayscale-[0.15]" : ""}`}
+      >
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 w-28 border-b border-r border-slate-200 bg-slate-50 px-2 py-3 text-center font-extrabold text-slate-600">
+            <th className="sticky left-0 top-0 z-30 w-20 border-b border-r border-slate-200 bg-white px-1.5 py-3 text-center font-extrabold text-slate-700 shadow-[0_1px_0_rgba(148,163,184,0.24)]">
               시간
             </th>
             {renderDays.map((day) => (
               <th
                 key={day.key}
-                className={`sticky top-0 z-20 w-[158px] border-b border-r px-3 py-3 text-center text-sm font-bold transition ${
+                className={`sticky top-0 z-20 w-[136px] border-b border-r px-2 py-3 text-center text-sm font-bold transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
                   daysOffSet.has(day.key)
-                    ? "border-slate-300 bg-[linear-gradient(180deg,rgba(203,213,225,0.86)_0%,rgba(241,245,249,0.96)_100%)] text-slate-600 shadow-[inset_0_-1px_0_rgba(100,116,139,0.4),inset_0_1px_0_rgba(255,255,255,0.65)]"
+                    ? "border-slate-300 bg-slate-100 text-slate-600 shadow-[inset_0_-1px_0_rgba(100,116,139,0.28)]"
                     : activeDaySet.has(day.key)
-                    ? "border-sky-300 bg-[linear-gradient(180deg,rgba(191,219,254,0.75)_0%,rgba(239,246,255,0.95)_42%,rgba(255,255,255,1)_100%)] text-sky-800 shadow-[inset_0_-2px_0_rgba(59,130,246,0.62),inset_0_1px_0_rgba(255,255,255,0.8),0_0_24px_rgba(59,130,246,0.34)]"
-                    : "border-slate-200 bg-slate-50 text-slate-700"
+                    ? "border-blue-200 bg-blue-50 text-blue-800 shadow-[inset_0_-2px_0_rgba(37,99,235,0.5)]"
+                    : "border-slate-200 bg-white text-slate-700 shadow-[0_1px_0_rgba(148,163,184,0.18)]"
                 }`}
                 style={
                   daysOffSet.has(day.key)
                     ? {
                         backgroundImage:
-                          "repeating-linear-gradient(135deg, rgba(148,163,184,0.14) 0px, rgba(148,163,184,0.14) 10px, rgba(255,255,255,0) 10px, rgba(255,255,255,0) 20px), linear-gradient(180deg, rgba(203,213,225,0.86) 0%, rgba(241,245,249,0.96) 100%)"
+                          "repeating-linear-gradient(135deg, rgba(148,163,184,0.12) 0px, rgba(148,163,184,0.12) 10px, rgba(255,255,255,0) 10px, rgba(255,255,255,0) 20px)"
                       }
                     : undefined
                 }
@@ -225,7 +420,7 @@ export function TimetableGrid({
                       daysOffSet.has(day.key)
                         ? "font-extrabold tracking-wide"
                         : activeDaySet.has(day.key)
-                          ? "font-extrabold tracking-wide drop-shadow-[0_1px_1px_rgba(37,99,235,0.25)]"
+                          ? "font-extrabold tracking-wide"
                           : ""
                     }
                   >
@@ -242,95 +437,117 @@ export function TimetableGrid({
           </tr>
         </thead>
         <tbody>
-          {timeSlots.map((slot) => (
-            <tr key={slot}>
-              <td className="sticky left-0 z-10 border-b border-r border-slate-200 bg-slate-50 px-2 py-2 text-center text-xs font-bold text-slate-600">
-                {toRangeLabel(slot)}
-              </td>
+          {renderTimeSlots.map((slot) => {
+            const isSelectedRow = selectedTimeSlot === slot;
 
-              {renderDays.map((day) => {
-                const cellKey = `${day.key}-${slot}`;
-                const entries = eventMap.get(cellKey) ?? [];
-                const isEmpty = entries.length === 0;
-                const isDropTarget = dragOverCell === cellKey;
-                const isActiveDay = activeDaySet.has(day.key);
-
-                return (
-                  <td
-                    key={cellKey}
-                    className={`w-[158px] border-b border-r align-top transition ${
-                      isDropTarget
-                        ? "border-sky-300 bg-sky-100/80"
-                        : daysOffSet.has(day.key)
-                          ? "border-slate-200 bg-[linear-gradient(180deg,rgba(226,232,240,0.34)_0%,rgba(248,250,252,0.88)_100%)]"
-                          : isActiveDay
-                          ? "border-sky-100 bg-[linear-gradient(180deg,rgba(239,246,255,0.95)_0%,rgba(248,250,252,0.98)_100%)]"
-                          : "border-slate-100 bg-white"
+            return (
+              <tr key={slot}>
+                <td
+                  className={`sticky left-0 z-10 border-b border-r px-2 py-2 text-center text-xs font-bold transition-[background-color,border-color] duration-150 ease-out ${
+                    isSelectedRow ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-slate-50"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={isSelectedRow}
+                    data-timetable-time-button="true"
+                    onClick={() => setSelectedTimeSlot((prev) => (prev === slot ? null : slot))}
+                    className={`sync-pressable sync-focus w-full rounded-md border px-1.5 py-1.5 text-[11px] font-bold ${
+                      isSelectedRow
+                        ? "border-blue-600 bg-blue-600 text-white shadow-sm ring-2 ring-blue-200 hover:bg-blue-600"
+                        : "border-transparent bg-white/70 text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                     }`}
-                    style={
-                      daysOffSet.has(day.key)
-                        ? {
-                            backgroundImage:
-                              "repeating-linear-gradient(135deg, rgba(148,163,184,0.12) 0px, rgba(148,163,184,0.12) 11px, rgba(255,255,255,0) 11px, rgba(255,255,255,0) 22px), linear-gradient(180deg, rgba(203,213,225,0.38) 0%, rgba(248,250,252,0.95) 100%)"
-                          }
-                        : undefined
-                    }
-                    onClick={() => {
-                      if (isEmpty && viewMode === "detailed") {
-                        onCellClick({ weekday: day.key, startTime: slot });
-                      }
-                    }}
-                    onDragOver={(event) => {
-                      if (!canMoveEvents) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      if (dragOverCell !== cellKey) {
-                        setDragOverCell(cellKey);
-                      }
-                    }}
-                    onDragEnter={(event) => {
-                      if (!canMoveEvents) return;
-                      event.preventDefault();
-                      setDragOverCell(cellKey);
-                    }}
-                    onDragLeave={(event) => {
-                      if (!canMoveEvents) return;
-                      const nextTarget = event.relatedTarget as Node | null;
-                      if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-                      if (dragOverCell === cellKey) {
-                        setDragOverCell(null);
-                      }
-                    }}
-                    onDrop={(event) => {
-                      event.stopPropagation();
-                      void handleDrop(event, day.key, slot);
-                    }}
                   >
-                    <div className="p-1">
-                      {isEmpty ? (
-                        <div
-                          className={`min-h-[46px] rounded-md border border-dashed transition ${
-                            isDropTarget
-                              ? "border-sky-400 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]"
-                              : daysOffSet.has(day.key)
-                                ? "border-transparent bg-transparent hover:border-slate-200 hover:bg-slate-200/20"
-                                : isActiveDay
-                                ? "border-transparent bg-transparent hover:border-sky-200 hover:bg-white/55"
-                                : "border-transparent hover:border-slate-200 hover:bg-slate-50"
-                          }`}
-                        />
-                      ) : (
-                        viewMode === "summary" ? (
+                    {toRangeLabel(slot)}
+                  </button>
+                </td>
+
+                {renderDays.map((day) => {
+                  const cellKey = `${day.key}-${slot}`;
+                  const entries = eventMap.get(cellKey) ?? [];
+                  const cellEntries = roleView === "instructor" ? dedupeInstructorCellEntries(entries, slot) : entries;
+                  const isEmpty = cellEntries.length === 0;
+                  const isDropTarget = dragOverCell === cellKey;
+                  const isActiveDay = activeDaySet.has(day.key);
+
+                  return (
+                    <td
+                      key={cellKey}
+                      className={`w-[136px] border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
+                        isDropTarget
+                          ? "border-sky-300 bg-sky-100/80"
+                          : isSelectedRow
+                            ? daysOffSet.has(day.key)
+                              ? "border-blue-200 bg-blue-50/80 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]"
+                              : "border-blue-200 bg-blue-50/70 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]"
+                          : daysOffSet.has(day.key)
+                            ? "border-slate-200 bg-slate-50"
+                            : isActiveDay
+                              ? "border-blue-100 bg-blue-50/40"
+                              : "border-slate-100 bg-white"
+                      }`}
+                      style={
+                        daysOffSet.has(day.key)
+                          ? {
+                              backgroundImage: isSelectedRow
+                                ? "linear-gradient(rgba(239,246,255,0.82), rgba(239,246,255,0.82)), repeating-linear-gradient(135deg, rgba(148,163,184,0.12) 0px, rgba(148,163,184,0.12) 11px, rgba(255,255,255,0) 11px, rgba(255,255,255,0) 22px)"
+                                : "repeating-linear-gradient(135deg, rgba(148,163,184,0.12) 0px, rgba(148,163,184,0.12) 11px, rgba(255,255,255,0) 11px, rgba(255,255,255,0) 22px)"
+                            }
+                          : undefined
+                      }
+                      onClick={() => {
+                        if (isEmpty && viewMode === "detailed") {
+                          onCellClick({ weekday: day.key, startTime: slot });
+                        }
+                      }}
+                      onDragOver={(event) => {
+                        if (!canMoveEvents) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        if (dragOverCell !== cellKey) {
+                          setDragOverCell(cellKey);
+                        }
+                      }}
+                      onDragEnter={(event) => {
+                        if (!canMoveEvents) return;
+                        event.preventDefault();
+                        setDragOverCell(cellKey);
+                      }}
+                      onDragLeave={(event) => {
+                        if (!canMoveEvents) return;
+                        const nextTarget = event.relatedTarget as Node | null;
+                        if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                        if (dragOverCell === cellKey) {
+                          setDragOverCell(null);
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.stopPropagation();
+                        void handleDrop(event, day.key, slot);
+                      }}
+                    >
+                      <div className="p-1">
+                        {isEmpty ? (
+                          <div
+                            className={`min-h-[46px] rounded-md border border-dashed transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
+                              isDropTarget
+                                ? "border-sky-400 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]"
+                                : isSelectedRow
+                                  ? "border-blue-200 bg-white/35"
+                                  : daysOffSet.has(day.key)
+                                    ? "border-transparent bg-transparent hover:border-slate-200 hover:bg-slate-200/20"
+                                    : isActiveDay
+                                      ? "border-transparent bg-transparent hover:border-sky-200 hover:bg-white/55"
+                                      : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                            }`}
+                          />
+                        ) : viewMode === "summary" ? (
                           <div className="flex min-h-[46px] flex-wrap items-center justify-center gap-1.5 px-1 py-2">
-                            {entries.map((event) => (
+                            {cellEntries.map((event) => (
                               <span
                                 key={`${event.id}-${event.classDate}`}
                                 title={`${event.instructorName} · ${event.classTypeLabel} · ${event.studentNames.join(", ")}`}
-                                className={`inline-flex min-h-[28px] items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.02em] text-white shadow-[0_6px_18px_rgba(148,163,184,0.18)] ${
-                                  isStrictDotClass(event)
-                                    ? "border-green-200/70 bg-green-500/80"
-                                    : "border-blue-200/70 bg-blue-500/80"
-                                }`}
+                                className={`inline-flex min-h-[28px] items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.02em] text-white shadow-[0_6px_18px_rgba(148,163,184,0.18)] ${summaryClassTypeTone(event)}`}
                               >
                                 {summaryBadgeText(event)}
                               </span>
@@ -338,70 +555,81 @@ export function TimetableGrid({
                           </div>
                         ) : (
                           <div className="flex min-h-[46px] flex-col gap-1">
-                            {entries.map((event) => (
-                              <div
-                                key={`${event.id}-${event.classDate}`}
-                                draggable={canMoveEvents}
-                                onDragStart={(dragEvent) => {
-                                  if (!canMoveEvents || !onEventMove) return;
-                                  const eventKey = `${event.id}-${event.classDate}-${event.startTime}`;
-                                  setDraggingKey(eventKey);
-                                  dropHandledRef.current = false;
-                                  const payload = JSON.stringify({
-                                    classId: event.id,
-                                    durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
-                                  });
-                                  dragPayloadRef.current = {
-                                    classId: event.id,
-                                    durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
-                                  };
-                                  dragEvent.dataTransfer.setData("application/json", payload);
-                                  dragEvent.dataTransfer.setData("text/plain", payload);
-                                  dragEvent.dataTransfer.effectAllowed = "move";
-                                }}
-                                onDragEnd={() => {
-                                  if (!canMoveEvents || !onEventMove) return;
-                                  const hovered = dragOverCell;
-                                  const payload = dragPayloadRef.current;
-                                  if (!dropHandledRef.current && hovered && payload) {
-                                    const [weekdayRaw, startTime] = hovered.split("-");
-                                    const weekday = Number(weekdayRaw) as Weekday;
-                                    if (weekday >= 1 && weekday <= 7 && startTime) {
-                                      void moveByPayload(payload, weekday, startTime);
-                                    }
-                                  }
-                                  dragPayloadRef.current = null;
-                                  setDragOverCell(null);
-                                  setDraggingKey(null);
-                                }}
-                                className={draggingKey === `${event.id}-${event.classDate}-${event.startTime}` ? "opacity-60" : ""}
-                                style={
-                                  highlightCellTints?.[cellKey]
-                                    ? {
-                                        filter: `drop-shadow(0 0 14px ${highlightCellTints[cellKey]}) drop-shadow(0 0 24px ${highlightCellTints[cellKey]})`
+                            {cellEntries.map((event) => {
+                              const eventKey = `${event.id}-${event.classDate}-${event.startTime}`;
+                              const isGroupedRegular = isInstructorRegularGroupEvent(event);
+                              const isSyntheticSelfStudy = isSelfStudyEvent(event);
+                              const canDragEvent = canMoveEvents && !isGroupedRegular && !isSyntheticSelfStudy;
+
+                              return (
+                                <div
+                                  key={`${event.id}-${event.classDate}-${event.startTime}`}
+                                  draggable={canDragEvent}
+                                  onDragStart={(dragEvent) => {
+                                    if (!canDragEvent || !onEventMove) return;
+                                    setDraggingKey(eventKey);
+                                    dropHandledRef.current = false;
+                                    const payload = JSON.stringify({
+                                      classId: event.id,
+                                      durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
+                                    });
+                                    dragPayloadRef.current = {
+                                      classId: event.id,
+                                      durationMinutes: timeToMinutes(event.endTime) - timeToMinutes(event.startTime)
+                                    };
+                                    dragEvent.dataTransfer.setData("application/json", payload);
+                                    dragEvent.dataTransfer.setData("text/plain", payload);
+                                    dragEvent.dataTransfer.effectAllowed = "move";
+                                  }}
+                                  onDragEnd={() => {
+                                    if (!canDragEvent || !onEventMove) return;
+                                    const hovered = dragOverCell;
+                                    const payload = dragPayloadRef.current;
+                                    if (!dropHandledRef.current && hovered && payload) {
+                                      const [weekdayRaw, startTime] = hovered.split("-");
+                                      const weekday = Number(weekdayRaw) as Weekday;
+                                      if (weekday >= 1 && weekday <= 7 && startTime) {
+                                        void moveByPayload(payload, weekday, startTime);
                                       }
-                                    : undefined
-                                }
-                              >
-                                <ScheduleBlock
-                                  event={event}
-                                  roleView={roleView}
-                                  chainProgress={progressByEventKey.get(`${event.id}-${event.classDate}-${event.startTime}`)}
-                                  showSaveAction={event.id.startsWith("draft-")}
-                                  onSave={onEventSave ? (item) => void onEventSave(item) : undefined}
-                                  onDelete={onEventDelete ? (item) => void onEventDelete(item) : undefined}
-                                />
-                              </div>
-                            ))}
+                                    }
+                                    dragPayloadRef.current = null;
+                                    setDragOverCell(null);
+                                    setDraggingKey(null);
+                                  }}
+                                  className={draggingKey === eventKey ? "opacity-60" : ""}
+                                  onClick={(clickEvent) => {
+                                    if (!onEventClick || isGroupedRegular || isDraftEvent(event)) return;
+                                    clickEvent.stopPropagation();
+                                    onEventClick(event);
+                                  }}
+                                >
+                                  <ScheduleBlock
+                                    event={event}
+                                    roleView={roleView}
+                                    chainProgress={isGroupedRegular ? undefined : progressByEventKey.get(eventKey)}
+                                    showSaveAction={!isGroupedRegular && event.id.startsWith("draft-")}
+                                    onSave={!isGroupedRegular && !isSyntheticSelfStudy && onEventSave ? (item) => void onEventSave(item) : undefined}
+                                    onDelete={!isGroupedRegular && !isSyntheticSelfStudy && onEventDelete ? (item) => void onEventDelete(item) : undefined}
+                                    highlightedStudentName={roleView === "instructor" ? highlightedStudentName : null}
+                                    onStudentHighlight={roleView === "instructor" ? (studentName) => {
+                                      setHighlightedStudentName((current) =>
+                                        current && normalizeStudentName(current) === normalizeStudentName(studentName) ? null : studentName
+                                      );
+                                    } : undefined}
+                                    studentSecondaryLookup={studentSecondaryLookup}
+                                  />
+                                </div>
+                              );
+                            })}
                           </div>
-                        )
-                      )}
-                    </div>
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -1,5 +1,6 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
+import { getBearerIdToken, loadFirebaseRoster, type FirebaseInstructorRosterItem, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
 import { NextResponse } from "next/server";
 
 const DEFAULT_SPREADSHEET_ID = "1ByPeH0bZZrZDvW_yPkCpQCIuk724_Gt7uudUj_Ue8Ho";
@@ -28,7 +29,11 @@ function parseRegistered(raw: string): boolean {
     v === "☑" ||
     v === "✅" ||
     v === "v" ||
-    v === "checked"
+    v === "checked" ||
+    v === "등록" ||
+    v === "재원" ||
+    v === "수강" ||
+    v === "활성"
   );
 }
 
@@ -78,6 +83,25 @@ function normalizeHeader(value: string): string {
 
 function normalizeName(value: string): string {
   return value.replace(/^\/+/, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeMatchKey(value: string): string {
+  return normalizeName(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function buildUniqueNameMap<T>(rows: T[], getName: (row: T) => string): Map<string, T> {
+  const counts = new Map<string, number>();
+  const first = new Map<string, T>();
+  for (const row of rows) {
+    const key = normalizeMatchKey(getName(row));
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!first.has(key)) first.set(key, row);
+  }
+  for (const [key, count] of counts.entries()) {
+    if (count > 1) first.delete(key);
+  }
+  return first;
 }
 
 function findColumnIndex(headers: string[], candidates: string[]): number {
@@ -146,6 +170,131 @@ function extractStudents(csv: string): StudentRow[] {
   return Array.from(dedupMap.entries()).map(([name, registered]) => ({ name, registered }));
 }
 
+async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
+  const roster = await loadFirebaseRoster(idToken);
+  if (!roster.available) {
+    return { available: false, error: roster.error };
+  }
+
+  const [{ data: existingInstructors, error: instructorReadError }, { data: existingStudents, error: studentReadError }] =
+    await Promise.all([
+      supabase.from("instructors").select("id,instructor_name,is_active,firebase_instructor_id,firebase_uid"),
+      supabase.from("students").select("id,student_name,is_active,firebase_student_id,firebase_uid")
+    ]);
+
+  if (instructorReadError) throw instructorReadError;
+  if (studentReadError) throw studentReadError;
+
+  type ExistingInstructor = {
+    id: string;
+    instructor_name: string;
+    is_active: boolean | null;
+    firebase_instructor_id?: string | null;
+    firebase_uid?: string | null;
+  };
+  type ExistingStudent = {
+    id: string;
+    student_name: string;
+    is_active: boolean | null;
+    firebase_student_id?: string | null;
+    firebase_uid?: string | null;
+  };
+
+  const instructorRows = ((existingInstructors ?? []) as ExistingInstructor[]);
+  const studentRows = ((existingStudents ?? []) as ExistingStudent[]);
+  const instructorsById = new Map(instructorRows.map((row) => [row.id, row]));
+  const studentsById = new Map(studentRows.map((row) => [row.id, row]));
+  const instructorsByFirebaseId = new Map(instructorRows.filter((row) => row.firebase_instructor_id).map((row) => [row.firebase_instructor_id as string, row]));
+  const studentsByFirebaseId = new Map(studentRows.filter((row) => row.firebase_student_id).map((row) => [row.firebase_student_id as string, row]));
+  const instructorsByName = buildUniqueNameMap(instructorRows, (row) => row.instructor_name);
+  const studentsByName = buildUniqueNameMap(studentRows, (row) => row.student_name);
+  const syncedAt = new Date().toISOString();
+
+  let teachersInserted = 0;
+  let teachersUpdated = 0;
+  let studentsInserted = 0;
+  let studentsUpdated = 0;
+
+  const resolveInstructor = (item: FirebaseInstructorRosterItem) =>
+    (item.supabaseInstructorId ? instructorsById.get(item.supabaseInstructorId) : undefined) ??
+    instructorsById.get(item.instructorId) ??
+    instructorsById.get(item.id) ??
+    instructorsByFirebaseId.get(item.instructorId) ??
+    instructorsByFirebaseId.get(item.id) ??
+    instructorsByName.get(normalizeMatchKey(item.name));
+
+  const resolveStudent = (item: FirebaseStudentRosterItem) => {
+    const identityIds = Array.from(new Set([
+      item.supabaseStudentId,
+      item.canonicalStudentId,
+      item.studentId,
+      item.id,
+      ...(item.studentIdAliases ?? [])
+    ].filter((value): value is string => Boolean(value))));
+    for (const identityId of identityIds) {
+      const existing = studentsById.get(identityId) ?? studentsByFirebaseId.get(identityId);
+      if (existing) return existing;
+    }
+    return studentsByName.get(normalizeMatchKey(item.name));
+  };
+
+  for (const item of roster.instructors) {
+    const existing = resolveInstructor(item);
+    const firebaseInstructorId = item.instructorId || item.id;
+    const payload = {
+      instructor_name: item.name,
+      is_active: item.active,
+      firebase_instructor_id: firebaseInstructorId,
+      firebase_uid: item.firebaseUid || null,
+      firebase_match_key: normalizeMatchKey(item.name),
+      firebase_sync_status: "matched",
+      firebase_synced_at: syncedAt
+    };
+    if (existing) {
+      const { error } = await supabase.from("instructors").update(payload).eq("id", existing.id);
+      if (error) throw error;
+      teachersUpdated += 1;
+    } else {
+      const { error } = await supabase.from("instructors").insert(payload);
+      if (error) throw error;
+      teachersInserted += 1;
+    }
+  }
+
+  for (const item of roster.students) {
+    const existing = resolveStudent(item);
+    const firebaseStudentId = item.canonicalStudentId || item.studentId || item.id;
+    const payload = {
+      student_name: item.name,
+      is_active: item.active,
+      firebase_student_id: firebaseStudentId,
+      firebase_uid: item.firebaseUid || null,
+      firebase_match_key: [normalizeMatchKey(item.name), normalizeMatchKey(item.school), item.grade.replace(/[^0-9]/g, "")].filter(Boolean).join("|"),
+      firebase_sync_status: "matched",
+      firebase_synced_at: syncedAt
+    };
+    if (existing) {
+      const { error } = await supabase.from("students").update(payload).eq("id", existing.id);
+      if (error) throw error;
+      studentsUpdated += 1;
+    } else {
+      const { error } = await supabase.from("students").insert(payload);
+      if (error) throw error;
+      studentsInserted += 1;
+    }
+  }
+
+  return {
+    available: true,
+    teachersFetched: roster.instructors.length,
+    studentsFetched: roster.students.length,
+    teachersInserted,
+    teachersUpdated,
+    studentsInserted,
+    studentsUpdated
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const { supabase, user, profile } = await getAuthenticatedProfile();
@@ -163,6 +312,17 @@ export async function POST(req: Request) {
     }
 
     const payload = ((await req.json().catch(() => ({}))) as SyncPayload) ?? {};
+    const idToken = getBearerIdToken(req);
+    if (idToken) {
+      const firebaseSync = await syncFirebaseRosterToSupabase(supabase, idToken);
+      if (firebaseSync.available) {
+        return NextResponse.json({
+          source: "firebase",
+          ...firebaseSync
+        });
+      }
+    }
+
     const spreadsheetId = payload.spreadsheetId?.trim() || process.env.GOOGLE_SHEETS_SYNC_ID || DEFAULT_SPREADSHEET_ID;
 
     const [teachersCsv, studentsCsv] = await Promise.all([

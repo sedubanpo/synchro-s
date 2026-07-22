@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 type MovePayload = {
   weekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   startTime: string;
+  endTime?: string;
   weekStart: string;
   studentId?: string;
 };

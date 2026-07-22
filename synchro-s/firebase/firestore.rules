@@ -1,0 +1,162 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function profileDoc() {
+      return get(/databases/$(database)/documents/userProfiles/$(request.auth.uid));
+    }
+
+    function accessDoc() {
+      return get(/databases/$(database)/documents/userAppAccess/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return (signedIn() && userDoc().data.role is string) ? userDoc().data.role : '';
+    }
+
+    function profileRole() {
+      return (signedIn() && profileDoc().data.role is string) ? profileDoc().data.role : '';
+    }
+
+    function isAdminOrCoordinator() {
+      return signedIn() &&
+        (
+          userRole() in ['ADMIN', 'COORDINATOR'] ||
+          profileRole() in ['ADMIN', 'COORDINATOR']
+        );
+    }
+
+    function hasSynchroAccess() {
+      return isAdminOrCoordinator() ||
+        (
+          signedIn() &&
+          accessDoc().data.apps.synchroS == true
+        );
+    }
+
+    function profileHasStudentId(studentId) {
+      return signedIn() &&
+        (
+          profileDoc().data.studentId == studentId ||
+          profileDoc().data.supabaseStudentId == studentId
+        );
+    }
+
+    function profileInstructorId() {
+      return signedIn() && profileDoc().data.instructorId is string
+        ? profileDoc().data.instructorId
+        : '';
+    }
+
+    function profileSupabaseInstructorId() {
+      return signedIn() && profileDoc().data.supabaseInstructorId is string
+        ? profileDoc().data.supabaseInstructorId
+        : '';
+    }
+
+    function hasStudentPermission(studentId) {
+      return signedIn() &&
+        (
+          exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + request.auth.uid)) ||
+          (
+            profileInstructorId() != '' &&
+            exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + profileInstructorId()))
+          ) ||
+          (
+            profileSupabaseInstructorId() != '' &&
+            exists(/databases/$(database)/documents/studentPermissions/$(studentId + '__' + profileSupabaseInstructorId()))
+          )
+        );
+    }
+
+    function canReadStudent(studentId) {
+      return hasSynchroAccess() &&
+        (
+          isAdminOrCoordinator() ||
+          profileHasStudentId(studentId) ||
+          hasStudentPermission(studentId)
+        );
+    }
+
+    function canReadInstructor(instructorId) {
+      return hasSynchroAccess() &&
+        (
+          isAdminOrCoordinator() ||
+          profileDoc().data.instructorId == instructorId ||
+          profileDoc().data.supabaseInstructorId == instructorId
+        );
+    }
+
+    match /loginAliases/{aliasHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /users/{uid} {
+      allow get: if isAdminOrCoordinator() || (signedIn() && request.auth.uid == uid);
+      allow list: if isAdminOrCoordinator();
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /userProfiles/{uid} {
+      allow get: if isAdminOrCoordinator() || (signedIn() && request.auth.uid == uid);
+      allow list: if isAdminOrCoordinator();
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /userAppAccess/{uid} {
+      allow get: if isAdminOrCoordinator() || (signedIn() && request.auth.uid == uid);
+      allow list: if isAdminOrCoordinator();
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /students/{studentId} {
+      allow get: if canReadStudent(studentId);
+      allow list: if isAdminOrCoordinator();
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /instructors/{instructorId} {
+      allow get: if canReadInstructor(instructorId);
+      allow list: if isAdminOrCoordinator();
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /studentPermissions/{permissionId} {
+      allow get: if isAdminOrCoordinator() ||
+        (
+          hasSynchroAccess() &&
+          (
+            resource.data.instructorUid == request.auth.uid ||
+            resource.data.uid == request.auth.uid ||
+            resource.data.instructorId == profileInstructorId() ||
+            resource.data.instructorId == profileSupabaseInstructorId() ||
+            profileHasStudentId(resource.data.studentId)
+          )
+        );
+      allow list: if isAdminOrCoordinator();
+      allow create, update, delete: if isAdminOrCoordinator();
+    }
+
+    match /synchroMigrationReports/{reportId} {
+      allow read, write: if isAdminOrCoordinator();
+    }
+
+    match /synchroAuditLogs/{logId} {
+      allow read, write: if isAdminOrCoordinator();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

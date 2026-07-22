@@ -5,7 +5,8 @@ import type {
   RoleView,
   ScheduleEvent,
   ScheduleStatus,
-  ScheduleWeekResponse
+  ScheduleWeekResponse,
+  Weekday
 } from "@/types/schedule";
 import { addDays, dateToWeekday, fromSqlTime, rangesOverlap, timeToMinutes, toSqlTime, weekRange } from "@/lib/time";
 import { validateSchedulePayload } from "@/lib/validators";
@@ -50,7 +51,7 @@ type ClassRow = {
   active_to: string | null;
   progress_status: ScheduleStatus;
   created_at: string;
-  instructors: { id: string; instructor_name: string } | null;
+  instructors: { id: string; instructor_name: string; is_active?: boolean | null } | null;
   subjects: { code: string; display_name: string; tailwind_bg_class: string } | null;
   class_types: { code: string; display_name: string; badge_text: string; max_students: number } | null;
 };
@@ -64,20 +65,42 @@ type EnrollmentRow = {
 type EnrollmentStudentStatusRow = {
   class_id: string;
   student_id: string;
-  students: { id: string; is_active: boolean | null } | null;
+  students: { id: string; student_name?: string | null; is_active: boolean | null } | null;
 };
 
 type ActiveStudentTimetableGroupRow = {
   target_id: string;
+  week_start: string;
+  expires_on: string | null;
+  tag_id: string | null;
+  is_active: boolean | null;
+  created_at: string;
   class_ids: string[] | null;
   snapshot_events: Array<{ id?: string | null }> | null;
 };
 
+type ProspectScheduleItemRow = {
+  id: string;
+  prospect_id: string;
+  instructor_id: string | null;
+  subject_code: string | null;
+  class_type_code: string | null;
+  weekday: Weekday;
+  start_time: string;
+  end_time: string;
+  note: string | null;
+  is_self_study: boolean;
+  schedule_prospects: { name: string } | null;
+  instructors: { instructor_name: string; is_active?: boolean | null } | null;
+  subjects: { display_name: string } | null;
+  class_types: { display_name: string; badge_text: string } | null;
+};
+
 const CLASS_SELECT =
-  "id,schedule_mode,instructor_id,subject_code,class_type_code,weekday,class_date,start_time,end_time,active_from,active_to,progress_status,created_at,instructors(id,instructor_name),subjects(code,display_name,tailwind_bg_class),class_types(code,display_name,badge_text,max_students)";
+  "id,schedule_mode,instructor_id,subject_code,class_type_code,weekday,class_date,start_time,end_time,active_from,active_to,progress_status,created_at,instructors(id,instructor_name,is_active),subjects(code,display_name,tailwind_bg_class),class_types(code,display_name,badge_text,max_students)";
 
 export const INSTRUCTOR_DAY_OFF_MESSAGE = "해당 강사의 휴무일입니다.";
-export const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
+export const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1/2:1/3:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 
 function normalizeAuditUserId(value: string | null | undefined): string | null {
   if (!value) {
@@ -123,43 +146,110 @@ function buildOverrideKey(classId: string, date: string): string {
 function extractClassIdsFromSnapshot(snapshotEvents: Array<{ id?: string | null }> | null | undefined): string[] {
   return (snapshotEvents ?? [])
     .map((event) => event?.id?.trim())
-    .filter((id): id is string => typeof id === "string" && id.length > 0 && !id.startsWith("draft-"));
+    .filter((id): id is string => typeof id === "string" && id.length > 0 && !id.startsWith("draft-") && !id.startsWith("self-study:"));
 }
 
-async function loadActiveStudentTimetableGroupClassIds(
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  const message = error instanceof Error ? error.message : String((error as { message?: unknown } | null)?.message ?? "");
+  return code === "42703" || message.includes(columnName);
+}
+
+function formatDateISOInKST(date: Date): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(date);
+}
+
+function getGroupExpirationReferenceDate(weekStart?: string): string | undefined {
+  if (!weekStart) {
+    return undefined;
+  }
+  const today = formatDateISOInKST(new Date());
+  const weekEnd = addDays(weekStart, 6);
+  return today >= weekStart && today <= weekEnd ? today : weekStart;
+}
+
+function compareEffectiveStudentGroup(a: ActiveStudentTimetableGroupRow, b: ActiveStudentTimetableGroupRow): number {
+  if (a.week_start !== b.week_start) return b.week_start.localeCompare(a.week_start);
+  if ((a.is_active === true) !== (b.is_active === true)) return a.is_active === true ? -1 : 1;
+  return b.created_at.localeCompare(a.created_at);
+}
+
+function isStudentTimetableGroupExpired(
+  row: ActiveStudentTimetableGroupRow,
+  expirationReferenceDate: string | undefined
+): boolean {
+  return Boolean(expirationReferenceDate && row.expires_on && row.expires_on <= expirationReferenceDate);
+}
+
+async function loadEffectiveStudentTimetableGroupClassIds(
   supabase: SupabaseLike,
-  studentIds: string[]
+  studentIds: string[],
+  weekStart?: string,
+  scheduleTagId?: string
 ): Promise<Map<string, Set<string>>> {
   const uniqueStudentIds = Array.from(new Set(studentIds.filter(Boolean)));
   if (uniqueStudentIds.length === 0) {
     return new Map();
   }
 
-  const { data, error } = await supabase
-    .from("timetable_groups")
-    .select("target_id,class_ids,snapshot_events")
-    .eq("role_view", "student")
-    .eq("is_active", true)
-    .in("target_id", uniqueStudentIds);
+  const createQuery = (includeExpiration: boolean) => {
+    const query = supabase
+      .from("timetable_groups")
+      .select(
+        includeExpiration
+          ? "target_id,week_start,expires_on,tag_id,is_active,class_ids,snapshot_events,created_at"
+          : "target_id,week_start,tag_id,is_active,class_ids,snapshot_events,created_at"
+      )
+      .eq("role_view", "student")
+      .in("target_id", uniqueStudentIds)
+      .lte("week_start", weekStart ?? "9999-12-31");
+    return scheduleTagId ? query.eq("tag_id", scheduleTagId) : query;
+  };
+
+  let { data, error } = await createQuery(true);
+  if (error && isMissingColumnError(error, "expires_on")) {
+    const fallback = await createQuery(false);
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   if (error) {
     throw error;
   }
 
-  const map = new Map<string, Set<string>>();
+  const expirationReferenceDate = getGroupExpirationReferenceDate(weekStart);
+  const studentsWithAnyGroup = new Set<string>();
+  const rowsByStudent = new Map<string, ActiveStudentTimetableGroupRow[]>();
   for (const row of (data ?? []) as ActiveStudentTimetableGroupRow[]) {
+    studentsWithAnyGroup.add(row.target_id);
+    const bucket = rowsByStudent.get(row.target_id) ?? [];
+    bucket.push(row);
+    rowsByStudent.set(row.target_id, bucket);
+  }
+
+  const map = new Map<string, Set<string>>();
+  for (const [studentId, rows] of rowsByStudent) {
+    const availableRows = rows.filter((row) => !isStudentTimetableGroupExpired(row, expirationReferenceDate));
+    const activeRow = availableRows.filter((row) => row.is_active === true).sort(compareEffectiveStudentGroup)[0];
+    if (!activeRow) continue;
     const classIds = new Set<string>([
-      ...((Array.isArray(row.class_ids) ? row.class_ids : []).filter(Boolean)),
-      ...extractClassIdsFromSnapshot(Array.isArray(row.snapshot_events) ? row.snapshot_events : [])
+      ...((Array.isArray(activeRow.class_ids) ? activeRow.class_ids : []).filter(Boolean)),
+      ...extractClassIdsFromSnapshot(Array.isArray(activeRow.snapshot_events) ? activeRow.snapshot_events : [])
     ]);
-    map.set(row.target_id, classIds);
+    map.set(studentId, classIds);
+  }
+  for (const studentId of studentsWithAnyGroup) {
+    if (!map.has(studentId)) {
+      map.set(studentId, new Set());
+    }
   }
   return map;
 }
 
 function collectEffectiveClassIds(
   enrollmentRows: EnrollmentStudentStatusRow[],
-  activeGroupClassIdsByStudent: Map<string, Set<string>>
+  activeGroupClassIdsByStudent: Map<string, Set<string>>,
+  strictTagScope = false
 ): Set<string> {
   const effectiveClassIds = new Set<string>();
 
@@ -168,7 +258,7 @@ function collectEffectiveClassIds(
 
     const activeGroupClassIds = activeGroupClassIdsByStudent.get(row.student_id);
     if (!activeGroupClassIds) {
-      effectiveClassIds.add(row.class_id);
+      if (!strictTagScope) effectiveClassIds.add(row.class_id);
       continue;
     }
 
@@ -180,13 +270,35 @@ function collectEffectiveClassIds(
   return effectiveClassIds;
 }
 
+function isEffectiveEnrollment(
+  enrollment: { class_id: string; student_id: string; students: { is_active?: boolean | null } | null },
+  activeGroupClassIdsByStudent: Map<string, Set<string>>
+): boolean {
+  if (enrollment.students?.is_active === false) return false;
+  const activeGroupClassIds = activeGroupClassIdsByStudent.get(enrollment.student_id);
+  return activeGroupClassIds ? activeGroupClassIds.has(enrollment.class_id) : true;
+}
+
 async function findExistingOverlaps(
   supabase: SupabaseLike,
   payload: CreateScheduleRequest,
   excludeClassId?: string
-): Promise<{ id: string; class_type_code: string }[]> {
+): Promise<{
+  id: string;
+  class_type_code: string;
+  weekday: Weekday;
+  start_time: string;
+  end_time: string;
+  student_names: string[];
+  source: "student_timetable" | "prospect_timetable";
+}[]> {
+  const referenceDate =
+    payload.scheduleMode === "recurring"
+      ? payload.activeFrom ?? new Date().toISOString().slice(0, 10)
+      : (payload.classDate as string);
+  const prospectOverlapsPromise = findActiveProspectOverlaps(supabase, payload, referenceDate);
+
   if (payload.scheduleMode === "recurring") {
-    const referenceDate = payload.activeFrom ?? new Date().toISOString().slice(0, 10);
     const { data, error } = await supabase
       .from("classes")
       .select("id,class_type_code,start_time,end_time,active_from,active_to")
@@ -207,24 +319,43 @@ async function findExistingOverlaps(
 
     const { data: enrollmentData, error: enrollmentError } = await supabase
       .from("class_enrollments")
-      .select("class_id,student_id,students(id,is_active)")
+      .select("class_id,student_id,students(id,student_name,is_active)")
       .in("class_id", rows.map((row) => row.id));
 
     if (enrollmentError) throw enrollmentError;
 
     const enrollmentRows = (enrollmentData ?? []) as EnrollmentStudentStatusRow[];
-    const activeGroupClassIdsByStudent = await loadActiveStudentTimetableGroupClassIds(
+    const activeGroupClassIdsByStudent = await loadEffectiveStudentTimetableGroupClassIds(
       supabase,
-      enrollmentRows.map((row) => row.student_id)
+      enrollmentRows.map((row) => row.student_id),
+      referenceDate,
+      payload.scheduleTagId
     );
-    const effectiveClassIds = collectEffectiveClassIds(enrollmentRows, activeGroupClassIdsByStudent);
+    const effectiveClassIds = collectEffectiveClassIds(enrollmentRows, activeGroupClassIdsByStudent, Boolean(payload.scheduleTagId));
+    const studentNamesByClassId = new Map<string, string[]>();
+    for (const enrollment of enrollmentRows) {
+      const name = enrollment.students?.student_name?.trim();
+      if (!name) continue;
+      const names = studentNamesByClassId.get(enrollment.class_id) ?? [];
+      if (!names.includes(name)) names.push(name);
+      studentNamesByClassId.set(enrollment.class_id, names);
+    }
 
-    return rows
+    const classOverlaps = rows
       .filter((row) => (excludeClassId ? row.id !== excludeClassId : true))
       .filter((row) => effectiveClassIds.has(row.id))
       .filter((row) => row.active_from <= referenceDate && (!row.active_to || row.active_to >= referenceDate))
       .filter((row) => rangesOverlap(payload.startTime, payload.endTime, fromSqlTime(row.start_time), fromSqlTime(row.end_time)))
-      .map((row) => ({ id: row.id, class_type_code: row.class_type_code }));
+      .map((row) => ({
+        id: row.id,
+        class_type_code: row.class_type_code,
+        weekday: payload.weekday as Weekday,
+        start_time: fromSqlTime(row.start_time),
+        end_time: fromSqlTime(row.end_time),
+        student_names: studentNamesByClassId.get(row.id) ?? [],
+        source: "student_timetable" as const
+      }));
+    return [...classOverlaps, ...(await prospectOverlapsPromise)];
   }
 
   const targetDate = payload.classDate as string;
@@ -257,23 +388,80 @@ async function findExistingOverlaps(
 
   const { data: enrollmentData, error: enrollmentError } = await supabase
     .from("class_enrollments")
-    .select("class_id,student_id,students(id,is_active)")
+    .select("class_id,student_id,students(id,student_name,is_active)")
     .in("class_id", rows.map((row) => row.id));
 
   if (enrollmentError) throw enrollmentError;
 
   const enrollmentRows = (enrollmentData ?? []) as EnrollmentStudentStatusRow[];
-  const activeGroupClassIdsByStudent = await loadActiveStudentTimetableGroupClassIds(
+  const activeGroupClassIdsByStudent = await loadEffectiveStudentTimetableGroupClassIds(
     supabase,
-    enrollmentRows.map((row) => row.student_id)
+    enrollmentRows.map((row) => row.student_id),
+    targetDate,
+    payload.scheduleTagId
   );
-  const effectiveClassIds = collectEffectiveClassIds(enrollmentRows, activeGroupClassIdsByStudent);
+  const effectiveClassIds = collectEffectiveClassIds(enrollmentRows, activeGroupClassIdsByStudent, Boolean(payload.scheduleTagId));
+  const studentNamesByClassId = new Map<string, string[]>();
+  for (const enrollment of enrollmentRows) {
+    const name = enrollment.students?.student_name?.trim();
+    if (!name) continue;
+    const names = studentNamesByClassId.get(enrollment.class_id) ?? [];
+    if (!names.includes(name)) names.push(name);
+    studentNamesByClassId.set(enrollment.class_id, names);
+  }
 
-  return rows
+  const classOverlaps = rows
     .filter((row) => (excludeClassId ? row.id !== excludeClassId : true))
     .filter((row) => effectiveClassIds.has(row.id))
     .filter((row) => rangesOverlap(payload.startTime, payload.endTime, fromSqlTime(row.start_time), fromSqlTime(row.end_time)))
-    .map((row) => ({ id: row.id, class_type_code: row.class_type_code }));
+    .map((row) => ({
+      id: row.id,
+      class_type_code: row.class_type_code,
+      weekday: targetWeekday as Weekday,
+      start_time: fromSqlTime(row.start_time),
+      end_time: fromSqlTime(row.end_time),
+      student_names: studentNamesByClassId.get(row.id) ?? [],
+      source: "student_timetable" as const
+    }));
+  return [...classOverlaps, ...(await prospectOverlapsPromise)];
+}
+
+async function findActiveProspectOverlaps(
+  supabase: SupabaseLike,
+  payload: CreateScheduleRequest,
+  referenceDate: string
+): Promise<{
+  id: string;
+  class_type_code: string;
+  weekday: Weekday;
+  start_time: string;
+  end_time: string;
+  student_names: string[];
+  source: "prospect_timetable";
+}[]> {
+  const targetWeekday = resolveTargetWeekday(payload);
+  const weekStart = addDays(referenceDate, -(dateToWeekday(referenceDate) - 1));
+  const { data, error } = await supabase
+    .from("prospect_schedule_items")
+    .select("id,class_type_code,start_time,end_time,prospect_timetable_groups!inner(week_start,is_active)")
+    .eq("instructor_id", payload.instructorId)
+    .eq("weekday", targetWeekday)
+    .eq("is_self_study", false)
+    .eq("prospect_timetable_groups.week_start", weekStart)
+    .eq("prospect_timetable_groups.is_active", true);
+
+  if (error) throw error;
+  return ((data ?? []) as { id: string; class_type_code: string; start_time: string; end_time: string }[])
+    .filter((row) => rangesOverlap(payload.startTime, payload.endTime, fromSqlTime(row.start_time), fromSqlTime(row.end_time)))
+    .map((row) => ({
+      id: `prospect:${row.id}`,
+      class_type_code: row.class_type_code,
+      weekday: targetWeekday as Weekday,
+      start_time: fromSqlTime(row.start_time),
+      end_time: fromSqlTime(row.end_time),
+      student_names: [],
+      source: "prospect_timetable" as const
+    }));
 }
 
 async function loadCompatibilityMap(
@@ -318,11 +506,27 @@ function resolveCompatibility(
   candidateType: string,
   existingType: string
 ): { isCompatible: boolean; reason: string } {
-  const isStrictType = (code: string) => code === "ONE_TO_ONE" || code === "TWO_TO_ONE";
+  const isStrictType = (code: string) => {
+    const normalized = code.replace(/[^0-9a-z가-힣:]/gi, "").toLowerCase();
+    return (
+      code === "ONE_TO_ONE" ||
+      code === "TWO_TO_ONE" ||
+      code === "THREE_TO_ONE" ||
+      normalized.includes("onetoone") ||
+      normalized.includes("onetone") ||
+      normalized.includes("twotoone") ||
+      normalized.includes("twotone") ||
+      normalized.includes("threetoone") ||
+      normalized.includes("threetone") ||
+      normalized.includes("11") ||
+      normalized.includes("21") ||
+      normalized.includes("31")
+    );
+  };
   const candidateIsStrict = isStrictType(candidateType);
   const existingIsStrict = isStrictType(existingType);
   // Business rule: 다대일(개별/개별정규/특강 등)은 시간 중복 허용.
-  // 단, 1:1 / 2:1 과 다대일 수업은 같은 시간에 혼합 배정할 수 없다.
+  // 단, 1:1 / 2:1 / 3:1 과 다대일 수업은 같은 시간에 혼합 배정할 수 없다.
   if (candidateIsStrict !== existingIsStrict) {
     return {
       isCompatible: false,
@@ -400,11 +604,22 @@ async function checkMoveConflictForWeek(
   const existingTypes = Array.from(new Set(overlaps.map((event) => event.classTypeCode)));
   const compatibilityMap = await loadCompatibilityMap(supabase, params.classTypeCode, existingTypes);
 
-  const conflicts: { classId: string; reason: string }[] = [];
+  const conflicts: ConflictResult["conflicts"] = [];
   for (const overlap of overlaps) {
     const check = resolveCompatibility(compatibilityMap, params.classTypeCode, overlap.classTypeCode);
     if (!check.isCompatible) {
-      conflicts.push({ classId: overlap.id, reason: check.reason });
+      conflicts.push({
+        classId: overlap.id,
+        reason: check.reason,
+        existingSchedule: {
+          studentNames: overlap.studentNames,
+          classTypeCode: overlap.classTypeCode,
+          weekday: overlap.weekday,
+          startTime: overlap.startTime,
+          endTime: overlap.endTime,
+          source: "student_timetable"
+        }
+      });
     }
   }
 
@@ -434,12 +649,23 @@ export async function checkScheduleConflict(
   const existingTypes = Array.from(new Set(overlaps.map((row) => row.class_type_code)));
   const compatibilityMap = await loadCompatibilityMap(supabase, payload.classTypeCode, existingTypes);
 
-  const conflicts: { classId: string; reason: string }[] = [];
+  const conflicts: ConflictResult["conflicts"] = [];
 
   for (const overlap of overlaps) {
     const check = resolveCompatibility(compatibilityMap, payload.classTypeCode, overlap.class_type_code);
     if (!check.isCompatible) {
-      conflicts.push({ classId: overlap.id, reason: check.reason });
+      conflicts.push({
+        classId: overlap.id,
+        reason: check.reason,
+        existingSchedule: {
+          studentNames: overlap.student_names,
+          classTypeCode: overlap.class_type_code,
+          weekday: overlap.weekday,
+          startTime: overlap.start_time,
+          endTime: overlap.end_time,
+          source: overlap.source
+        }
+      });
     }
   }
 
@@ -577,14 +803,19 @@ export async function importScheduleRow(
 
   if (exactClassRows.length > 0) {
     const exactClassIds = exactClassRows.map((row) => row.id);
-    const { data: linkedEnrollment, error: enrollmentReadError } = await supabase
+    const { data: exactEnrollments, error: enrollmentReadError } = await supabase
       .from("class_enrollments")
-      .select("id,class_id")
-      .in("class_id", exactClassIds)
-      .eq("student_id", studentId)
-      .limit(1)
-      .maybeSingle();
+      .select("id,class_id,student_id,students(id,is_active)")
+      .in("class_id", exactClassIds);
     if (enrollmentReadError) throw enrollmentReadError;
+
+    const enrollmentRows = (exactEnrollments ?? []) as {
+      id: string;
+      class_id: string;
+      student_id: string;
+      students: { id: string; is_active: boolean | null } | null;
+    }[];
+    const linkedEnrollment = enrollmentRows.find((row) => row.student_id === studentId);
 
     if (linkedEnrollment?.class_id) {
       const existingClass = exactClassRows.find((row) => row.id === linkedEnrollment.class_id);
@@ -612,6 +843,45 @@ export async function importScheduleRow(
 
       return { status: "existing", classId: linkedEnrollment.class_id, conflict: { hasConflict: false, conflicts: [] } };
     }
+
+    const classType = await getClassType(supabase, payload.classTypeCode);
+    const enrollmentCountByClassId = new Map<string, number>();
+    for (const enrollment of enrollmentRows) {
+      if (enrollment.students?.is_active === false) continue;
+      enrollmentCountByClassId.set(enrollment.class_id, (enrollmentCountByClassId.get(enrollment.class_id) ?? 0) + 1);
+    }
+
+    const targetClass =
+      exactClassRows.find((row) => (enrollmentCountByClassId.get(row.id) ?? 0) < classType.maxStudents) ?? null;
+
+    if (targetClass) {
+      const { error: insertEnrollmentError } = await supabase.from("class_enrollments").insert({
+        class_id: targetClass.id,
+        student_id: studentId
+      });
+      if (insertEnrollmentError) throw insertEnrollmentError;
+
+      const normalizeActiveFrom = payload.scheduleMode === "recurring" && payload.activeFrom ? payload.activeFrom : null;
+      if (payload.scheduleMode === "recurring" && normalizeActiveFrom) {
+        const updatePayload: { active_from?: string; active_to?: string | null; updated_at?: string } = {};
+        if (!targetClass.active_from || targetClass.active_from > normalizeActiveFrom) {
+          updatePayload.active_from = normalizeActiveFrom;
+        }
+        if (targetClass.active_to && targetClass.active_to < normalizeActiveFrom) {
+          updatePayload.active_to = null;
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          updatePayload.updated_at = new Date().toISOString();
+          const { error: activeUpdateError } = await supabase
+            .from("classes")
+            .update(updatePayload)
+            .eq("id", targetClass.id);
+          if (activeUpdateError) throw activeUpdateError;
+        }
+      }
+
+      return { status: "enrolled", classId: targetClass.id, conflict: { hasConflict: false, conflicts: [] } };
+    }
   }
 
   const created = await createScheduleWithEnrollments(supabase, payload, actorUserId);
@@ -637,7 +907,7 @@ function classToEvent(
   instructorNameMap: Map<string, string>,
   override?: OverrideRow
 ): ScheduleEvent {
-  const enrollments = enrollmentMap.get(row.id) ?? [];
+  const enrollments = (enrollmentMap.get(row.id) ?? []).filter((enrollment) => enrollment.students?.is_active !== false);
   const effectiveInstructorId = override?.override_instructor_id ?? row.instructor_id;
 
   return {
@@ -662,11 +932,73 @@ function classToEvent(
   };
 }
 
+function hasActiveEnrollment(rowId: string, enrollmentMap: Map<string, EnrollmentRow[]>): boolean {
+  return (enrollmentMap.get(rowId) ?? []).some((enrollment) => enrollment.students?.is_active !== false);
+}
+
+async function fetchActiveProspectScheduleEvents(
+  supabase: SupabaseLike,
+  params: WeeklyQuery
+): Promise<ScheduleEvent[]> {
+  if (params.view === "student" && params.studentId) return [];
+
+  const { data: groupRows, error: groupError } = await supabase
+    .from("prospect_timetable_groups")
+    .select("id")
+    .eq("week_start", params.weekStart)
+    .eq("is_active", true);
+  if (groupError) throw groupError;
+
+  const groupIds = (groupRows ?? []).map((row: { id: string }) => row.id);
+  if (groupIds.length === 0) return [];
+
+  let itemQuery = supabase
+    .from("prospect_schedule_items")
+    .select(
+      "id,prospect_id,instructor_id,subject_code,class_type_code,weekday,start_time,end_time,note,is_self_study,schedule_prospects(name),instructors(instructor_name,is_active),subjects(display_name),class_types(display_name,badge_text)"
+    )
+    .in("group_id", groupIds);
+  if (params.view === "instructor" && params.instructorId) {
+    itemQuery = itemQuery.eq("instructor_id", params.instructorId);
+  }
+
+  const { data, error } = await itemQuery;
+  if (error) throw error;
+
+  return ((data ?? []) as ProspectScheduleItemRow[])
+    .filter((row) => (row.is_self_study ? params.view === "student" : row.instructors?.is_active !== false))
+    .map((row) => {
+      const prospectName = row.schedule_prospects?.name ?? "신규문의";
+      const isSelfStudy = row.is_self_study === true;
+      return {
+        id: `prospect:${row.id}`,
+        scheduleMode: "recurring" as const,
+        instructorId: row.instructor_id ?? "",
+        instructorName: row.instructors?.instructor_name ?? "",
+        studentIds: [`prospect:${row.prospect_id}`],
+        studentNames: [`[가안] ${prospectName}`],
+        subjectCode: isSelfStudy ? "SELF_STUDY" : row.subject_code ?? "",
+        subjectName: isSelfStudy ? "자기주도학습" : row.subjects?.display_name ?? row.subject_code ?? "",
+        classTypeCode: isSelfStudy ? "SELF_STUDY" : row.class_type_code ?? "",
+        classTypeLabel: isSelfStudy ? "자기주도학습" : row.class_types?.display_name ?? row.class_type_code ?? "",
+        badgeText: isSelfStudy ? "[자습]" : row.class_types?.badge_text ?? "[가안]",
+        weekday: row.weekday,
+        classDate: addDays(params.weekStart, row.weekday - 1),
+        startTime: fromSqlTime(row.start_time),
+        endTime: fromSqlTime(row.end_time),
+        progressStatus: "planned" as const,
+        createdAt: new Date().toISOString(),
+        note: row.note ?? "신규문의 가안"
+      };
+    });
+}
+
 export async function fetchWeeklySchedule(
   supabase: SupabaseLike,
   params: WeeklyQuery
 ): Promise<ScheduleWeekResponse> {
   const { weekStart, weekEnd } = weekRange(params.weekStart);
+  const prospectEventsPromise = fetchActiveProspectScheduleEvents(supabase, params);
 
   let studentClassIds: string[] | null = null;
 
@@ -712,7 +1044,7 @@ export async function fetchWeeklySchedule(
   ];
 
   if (classRows.length === 0) {
-    return { weekStart, weekEnd, events: [] };
+    return { weekStart, weekEnd, events: await prospectEventsPromise };
   }
 
   const classIds = classRows.map((row) => row.id);
@@ -737,9 +1069,10 @@ export async function fetchWeeklySchedule(
 
   const enrollments = (enrollmentRes.data ?? []) as EnrollmentRow[];
   const overrides = (overrideRes.data ?? []) as OverrideRow[];
-  const activeGroupClassIdsByStudent = await loadActiveStudentTimetableGroupClassIds(
+  const activeGroupClassIdsByStudent = await loadEffectiveStudentTimetableGroupClassIds(
     supabase,
-    enrollments.map((row) => row.student_id)
+    enrollments.map((row) => row.student_id),
+    weekStart
   );
   const effectiveClassIds = collectEffectiveClassIds(
     enrollments.map((row) => ({
@@ -751,7 +1084,7 @@ export async function fetchWeeklySchedule(
   );
 
   const enrollmentMap = new Map<string, EnrollmentRow[]>();
-  for (const enrollment of enrollments) {
+  for (const enrollment of enrollments.filter((row) => isEffectiveEnrollment(row, activeGroupClassIdsByStudent))) {
     const bucket = enrollmentMap.get(enrollment.class_id) ?? [];
     bucket.push(enrollment);
     enrollmentMap.set(enrollment.class_id, bucket);
@@ -763,9 +1096,11 @@ export async function fetchWeeklySchedule(
   }
 
   const instructorNameMap = new Map<string, string>();
+  const instructorActiveMap = new Map<string, boolean>();
   for (const row of classRows) {
     if (row.instructors?.id && row.instructors.instructor_name) {
       instructorNameMap.set(row.instructors.id, row.instructors.instructor_name);
+      instructorActiveMap.set(row.instructors.id, row.instructors.is_active !== false);
     }
   }
 
@@ -780,11 +1115,12 @@ export async function fetchWeeklySchedule(
   if (missingInstructorIds.length > 0) {
     const { data: extraInstructors } = await supabase
       .from("instructors")
-      .select("id,instructor_name")
+      .select("id,instructor_name,is_active")
       .in("id", missingInstructorIds);
 
     for (const instructor of extraInstructors ?? []) {
       instructorNameMap.set(instructor.id, instructor.instructor_name);
+      instructorActiveMap.set(instructor.id, instructor.is_active !== false);
     }
   }
 
@@ -804,6 +1140,9 @@ export async function fetchWeeklySchedule(
       if (override?.action === "cancel") continue;
 
       const effectiveInstructorId = override?.override_instructor_id ?? row.instructor_id;
+      if (instructorActiveMap.get(effectiveInstructorId) === false || !hasActiveEnrollment(row.id, enrollmentMap)) {
+        continue;
+      }
       if (params.view === "instructor" && params.instructorId && effectiveInstructorId !== params.instructorId) {
         continue;
       }
@@ -818,6 +1157,9 @@ export async function fetchWeeklySchedule(
     if (override?.action === "cancel") continue;
 
     const effectiveInstructorId = override?.override_instructor_id ?? row.instructor_id;
+    if (instructorActiveMap.get(effectiveInstructorId) === false || !hasActiveEnrollment(row.id, enrollmentMap)) {
+      continue;
+    }
     if (params.view === "instructor" && params.instructorId && effectiveInstructorId !== params.instructorId) {
       continue;
     }
@@ -827,6 +1169,7 @@ export async function fetchWeeklySchedule(
     );
   }
 
+  events.push(...(await prospectEventsPromise));
   events.sort((a, b) => {
     if (a.classDate !== b.classDate) return a.classDate.localeCompare(b.classDate);
     return a.startTime.localeCompare(b.startTime);
@@ -884,18 +1227,7 @@ export async function fetchEventsForClassIdsInWeek(
 
   const enrollments = (enrollmentRes.data ?? []) as EnrollmentRow[];
   const overrides = (overrideRes.data ?? []) as OverrideRow[];
-  const activeGroupClassIdsByStudent = await loadActiveStudentTimetableGroupClassIds(
-    supabase,
-    enrollments.map((row) => row.student_id)
-  );
-  const effectiveClassIds = collectEffectiveClassIds(
-    enrollments.map((row) => ({
-      class_id: row.class_id,
-      student_id: row.student_id,
-      students: row.students ? { id: row.students.id, is_active: row.students.is_active ?? null } : null
-    })),
-    activeGroupClassIdsByStudent
-  );
+  const explicitClassIds = new Set(classIds);
 
   const enrollmentMap = new Map<string, EnrollmentRow[]>();
   for (const enrollment of enrollments) {
@@ -910,9 +1242,11 @@ export async function fetchEventsForClassIdsInWeek(
   }
 
   const instructorNameMap = new Map<string, string>();
+  const instructorActiveMap = new Map<string, boolean>();
   for (const row of rows) {
     if (row.instructors?.id && row.instructors.instructor_name) {
       instructorNameMap.set(row.instructors.id, row.instructors.instructor_name);
+      instructorActiveMap.set(row.instructors.id, row.instructors.is_active !== false);
     }
   }
 
@@ -927,18 +1261,19 @@ export async function fetchEventsForClassIdsInWeek(
   if (missingInstructorIds.length > 0) {
     const { data: extraInstructors } = await supabase
       .from("instructors")
-      .select("id,instructor_name")
+      .select("id,instructor_name,is_active")
       .in("id", missingInstructorIds);
 
     for (const instructor of extraInstructors ?? []) {
       instructorNameMap.set(instructor.id, instructor.instructor_name);
+      instructorActiveMap.set(instructor.id, instructor.is_active !== false);
     }
   }
 
   const events: ScheduleEvent[] = [];
 
   for (const row of rows) {
-    if (!effectiveClassIds.has(row.id)) continue;
+    if (!explicitClassIds.has(row.id)) continue;
 
     if (row.schedule_mode === "recurring") {
       if (!row.weekday) continue;
@@ -950,6 +1285,11 @@ export async function fetchEventsForClassIdsInWeek(
       const override = overrideMap.get(buildOverrideKey(row.id, classDate));
       if (override?.action === "cancel") continue;
 
+      const effectiveInstructorId = override?.override_instructor_id ?? row.instructor_id;
+      if (instructorActiveMap.get(effectiveInstructorId) === false || !hasActiveEnrollment(row.id, enrollmentMap)) {
+        continue;
+      }
+
       events.push(classToEvent(row, classDate, row.weekday, enrollmentMap, instructorNameMap, override));
       continue;
     }
@@ -959,6 +1299,11 @@ export async function fetchEventsForClassIdsInWeek(
 
     const override = overrideMap.get(buildOverrideKey(row.id, row.class_date));
     if (override?.action === "cancel") continue;
+
+    const effectiveInstructorId = override?.override_instructor_id ?? row.instructor_id;
+    if (instructorActiveMap.get(effectiveInstructorId) === false || !hasActiveEnrollment(row.id, enrollmentMap)) {
+      continue;
+    }
 
     events.push(
       classToEvent(row, row.class_date, dateToWeekday(row.class_date), enrollmentMap, instructorNameMap, override)
@@ -1009,7 +1354,7 @@ export async function updateScheduleStatus(
 export async function moveScheduleSlot(
   supabase: SupabaseLike,
   classId: string,
-  target: { weekday: number; weekStart: string; startTime: string },
+  target: { weekday: number; weekStart: string; startTime: string; endTime?: string },
   actorUserId: string,
   options?: { studentId?: string }
 ) {
@@ -1027,7 +1372,10 @@ export async function moveScheduleSlot(
   const sourceStart = fromSqlTime(classRow.start_time);
   const sourceEnd = fromSqlTime(classRow.end_time);
   const durationMinutes = Math.max(30, timeToMinutes(sourceEnd) - timeToMinutes(sourceStart));
-  const endTime = addMinutes(target.startTime, durationMinutes);
+  const endTime = target.endTime ?? addMinutes(target.startTime, durationMinutes);
+  if (timeToMinutes(endTime) <= timeToMinutes(target.startTime)) {
+    throw new Error("종료 시간은 시작 시간보다 늦어야 합니다.");
+  }
 
   const conflict = await checkMoveConflictForWeek(supabase, {
     classId,

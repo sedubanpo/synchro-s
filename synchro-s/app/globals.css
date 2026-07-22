@@ -4,10 +4,40 @@
 
 :root {
   color-scheme: light;
+  --sync-bg: #f8fafc;
+  --sync-surface: #ffffff;
+  --sync-surface-muted: #f1f5f9;
+  --sync-ink: #0f172a;
+  --sync-ink-muted: #64748b;
+  --sync-line: rgba(15, 23, 42, 0.09);
+  --sync-line-strong: rgba(37, 99, 235, 0.22);
+  --sync-accent: #2563eb;
+  --sync-accent-soft: #eff6ff;
+  --sync-success: #059669;
+  --sync-warning: #d97706;
+  --sync-danger: #e11d48;
+  --sync-danger-soft: #fff1f2;
+  --sync-scroll-thumb: #cbd5e1;
+  --sync-shadow-surface:
+    0 0 0 1px var(--sync-line),
+    0 1px 2px -1px rgba(15, 23, 42, 0.08),
+    0 10px 24px -18px rgba(15, 23, 42, 0.28);
+  --sync-shadow-hover:
+    0 0 0 1px rgba(15, 23, 42, 0.12),
+    0 3px 8px -4px rgba(15, 23, 42, 0.18),
+    0 18px 34px -24px rgba(15, 23, 42, 0.32);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+  background: var(--sync-bg);
+  color: var(--sync-ink);
+  text-rendering: optimizeLegibility;
 }
 
 .grid-scrollbar::-webkit-scrollbar {
@@ -16,6 +46,116 @@ body {
 }
 
 .grid-scrollbar::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--sync-scroll-thumb);
   border-radius: 9999px;
+}
+
+@layer components {
+  .sync-surface {
+    background: var(--sync-surface);
+    box-shadow: var(--sync-shadow-surface);
+    transition-property: box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  .sync-surface-hover:hover {
+    box-shadow: var(--sync-shadow-hover);
+  }
+
+  .sync-pressable {
+    transform: translateZ(0);
+    transition-property: background-color, border-color, box-shadow, color, opacity, transform;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  .sync-pressable:active {
+    transform: scale(0.96);
+  }
+
+  .sync-focus {
+    outline: none;
+  }
+
+  .sync-focus:focus-visible {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  }
+
+  .sync-heading {
+    text-wrap: balance;
+  }
+
+  .sync-copy {
+    text-wrap: pretty;
+  }
+
+  .sync-tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sync-schedule-block {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.62) inset,
+      0 1px 2px rgba(15, 23, 42, 0.04),
+      0 10px 22px -18px rgba(15, 23, 42, 0.26);
+    transition-property: box-shadow, transform, border-color;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  .sync-schedule-block:hover {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.72) inset,
+      0 2px 7px rgba(15, 23, 42, 0.07),
+      0 16px 30px -22px rgba(15, 23, 42, 0.34);
+  }
+
+  .sync-input {
+    transition-property: border-color, box-shadow, background-color;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  .sync-state-confirm {
+    animation: sync-state-confirm 300ms cubic-bezier(0.2, 0, 0, 1);
+  }
+}
+
+@keyframes sync-state-confirm {
+  0% {
+    opacity: 0.82;
+    transform: scale(0.985);
+    filter: saturate(0.7);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: saturate(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-pressable,
+  .sync-surface,
+  .sync-schedule-block,
+  .sync-input {
+    transition-duration: 0.01ms;
+  }
+
+  .sync-state-confirm {
+    animation: none;
+  }
+
+  .sync-state-icon {
+    transition-duration: 0.01ms;
+  }
+
+  .sync-state-spinner {
+    animation: none;
+  }
+
+  .sync-pressable:active {
+    transform: none;
+  }
 }

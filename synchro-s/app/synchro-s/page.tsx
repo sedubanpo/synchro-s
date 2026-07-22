@@ -1,11 +1,19 @@
 "use client";
 
+import { InstructorAvailabilityWorkspace } from "@/components/schedule/InstructorAvailabilityWorkspace";
+import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
+import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
+import { StudentAvailabilityWorkspace } from "@/components/schedule/StudentAvailabilityWorkspace";
 import { ScheduleModal } from "@/components/schedule/ScheduleModal";
+import { ScheduleTagManager, SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
+import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
-import { setSubjectColor } from "@/lib/subjectColors";
+import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
+import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { timeToMinutes } from "@/lib/time";
+import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
+import { normalizeInstructorAlias, parseNotionClassCell } from "@/lib/notionScheduleParser";
 import type {
   AvailableTimeSlotsByDay,
   ClassTypeOption,
@@ -20,8 +28,9 @@ import type {
   TimetableViewMode,
   Weekday
 } from "@/types/schedule";
+import { getIdToken, onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type SubjectOptionWithColor = SubjectOption & { tailwindClass?: string };
 
@@ -29,7 +38,9 @@ type OptionsResponse = {
   viewerRole?: "admin" | "coordinator" | "instructor" | "student";
   viewerName?: string;
   instructors: SelectOption[];
+  suspendedInstructors?: SelectOption[];
   students: SelectOption[];
+  suspendedStudents?: SelectOption[];
   subjects: SubjectOptionWithColor[];
   classTypes: ClassTypeOption[];
 };
@@ -57,16 +68,48 @@ type ParsedNotionItem = {
   rawText: string;
 };
 
+type StudentScheduleInputTab = "sync" | "notion" | "availability";
+type InstructorWorkspaceTab = "schedule" | "availability";
+
+type SyncScheduleDraftItem = {
+  id: string;
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+  subjectLabel: string;
+  instructorId: string;
+  instructorName: string;
+  classTypeCode: string;
+  classTypeLabel: string;
+  badgeText: string;
+  note: string;
+  isSelfStudy: boolean;
+  rawText: string;
+};
+
 type TimetableGroup = {
   id: string;
   name: string;
   roleView: RoleView;
   targetId: string;
   weekStart: string;
+  expiresOn?: string | null;
+  tagId?: string | null;
   classIds: string[];
   snapshotEvents?: ScheduleEvent[];
   isActive: boolean;
   createdAt: string;
+};
+
+type TimetableGroupMonthSection = {
+  sectionKey: string;
+  monthKey: string;
+  label: string;
+  tagId: string | null;
+  tagName: string;
+  tagColorKey: ScheduleTag["colorKey"];
+  isCurrentMonth: boolean;
+  groups: TimetableGroup[];
 };
 
 type ImportProgress = {
@@ -76,7 +119,7 @@ type ImportProgress = {
   label: string;
 };
 
-type MainTab = "overview" | "new" | "issues" | RoleView;
+type MainTab = "overview" | "review" | "new" | "issues" | RoleView;
 
 type ConflictDialogState = {
   open: boolean;
@@ -90,6 +133,66 @@ type DeleteGroupDialogState = {
   groupName: string;
   submitting: boolean;
 };
+
+type SelfStudyDraft = {
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+};
+
+const TIME_EDIT_OPTIONS = Array.from({ length: 31 }, (_, index) => {
+  const totalMinutes = 9 * 60 + index * 30;
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+});
+
+const SELF_STUDY_EVENT_ID_PREFIX = "self-study:";
+const SYNC_DRAFT_EVENT_ID_PREFIX = "sync-draft:";
+
+function isSelfStudyEventId(id: string): boolean {
+  return id.startsWith(SELF_STUDY_EVENT_ID_PREFIX);
+}
+
+function isSyncDraftEventId(id: string): boolean {
+  return id.startsWith(SYNC_DRAFT_EVENT_ID_PREFIX);
+}
+
+async function getFirebaseIdTokenForApi(): Promise<string | null> {
+  const auth = getSynchroFirebaseAuth();
+  const user =
+    auth.currentUser ??
+    (await new Promise<FirebaseUser | null>((resolve) => {
+      let unsubscribe = () => {};
+      const timer = window.setTimeout(() => {
+        unsubscribe();
+        resolve(null);
+      }, 1200);
+      unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+        window.clearTimeout(timer);
+        unsubscribe();
+        resolve(nextUser);
+      });
+    }));
+
+  return user ? getIdToken(user) : null;
+}
+
+async function getFirebaseAuthHeaders(extra?: HeadersInit): Promise<HeadersInit> {
+  const token = await getFirebaseIdTokenForApi();
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+}
+
+function minutesToTime(totalMinutes: number): string {
+  const safeMinutes = Math.max(0, totalMinutes);
+  const hour = Math.floor(safeMinutes / 60);
+  const minute = safeMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function addMinutesToTime(time: string, minutes: number): string {
+  return minutesToTime(timeToMinutes(time) + minutes);
+}
 
 type SubjectSettingItem = {
   code: string;
@@ -119,7 +222,10 @@ type SaveHistoryEntry = {
   timestampLabel: string;
   targetType: "학생" | "강사";
   targetName: string;
+  targetId?: string | null;
   targetLabel: string;
+  tagId?: string | null;
+  tagLabel: string;
 };
 
 type SaveHistoryResponse = {
@@ -128,6 +234,9 @@ type SaveHistoryResponse = {
     created_at: string;
     target_type: "학생" | "강사";
     target_name: string;
+    target_id?: string | null;
+    tag_id?: string | null;
+    tag_name?: string | null;
   }[];
 };
 
@@ -138,6 +247,8 @@ type TimetableGroupApiItem = {
   roleView: RoleView;
   targetId: string;
   weekStart: string;
+  expiresOn?: string | null;
+  tagId?: string | null;
   name: string;
   classIds: string[];
   snapshotEvents?: ScheduleEvent[];
@@ -146,12 +257,14 @@ type TimetableGroupApiItem = {
 
 type TimetableGroupsResponse = {
   items?: TimetableGroupApiItem[];
+  supportsExpiration?: boolean;
 };
 
 type SpecialNoteItem = {
   id: string;
   createdAt: string;
   content: string;
+  groupId: string | null;
 };
 
 type SpecialNotesResponse = {
@@ -161,11 +274,33 @@ type SpecialNotesResponse = {
     target_type: "학생" | "강사";
     target_id: string;
     content: string;
+    group_id?: string | null;
   }[];
 };
 
 type ConflictLogsResponse = {
   items?: ConflictLogEntry[];
+};
+
+type ReviewStatus = "normal" | "needs_check" | "issue";
+
+type ScheduleReviewItem = {
+  id: string;
+  studentId: string;
+  studentName?: string;
+  weekStart: string;
+  sourceWeekStart?: string;
+  tagId?: string | null;
+  isLegacyFallback?: boolean;
+  isCarryForward?: boolean;
+  status: ReviewStatus;
+  memo: string;
+  reviewedByName?: string;
+  reviewedAt?: string;
+};
+
+type ScheduleReviewsResponse = {
+  items?: ScheduleReviewItem[];
 };
 
 type OverviewEntity = RoleView;
@@ -195,8 +330,201 @@ type RecommendationItem = {
   existingStudentNames: string[];
 };
 
-const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
+type HomePersonSummary = {
+  id: string;
+  name: string;
+  secondary?: string;
+  events: ScheduleEvent[];
+};
+
+const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1/2:1/3:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 const EXCLUDED_OVERVIEW_INSTRUCTORS = new Set(["홍성우", "안종성", "김용찬", "에스에듀"]);
+const REVIEW_STATUS_META: Record<ReviewStatus, { label: string; shortLabel: string; tone: string; button: string }> = {
+  normal: {
+    label: "정상",
+    shortLabel: "정상",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    button: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+  },
+  needs_check: {
+    label: "확인필요",
+    shortLabel: "확인",
+    tone: "border-amber-200 bg-amber-50 text-amber-700",
+    button: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+  },
+  issue: {
+    label: "문제발생",
+    shortLabel: "문제",
+    tone: "border-rose-200 bg-rose-50 text-rose-700",
+    button: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+  }
+};
+
+type ReviewSubjectTone = "blue" | "violet" | "amber" | "emerald" | "rose" | "slate";
+
+const REVIEW_SUBJECT_TONE_CLASSES: Record<
+  ReviewSubjectTone,
+  { card: string; selected: string; badge: string; label: string; time: string; segmentOn: string; segmentOff: string }
+> = {
+  blue: {
+    card: "border-blue-200 bg-blue-50 text-blue-950 hover:border-blue-300 hover:bg-blue-100/70",
+    selected: "border-blue-500 bg-blue-100 text-blue-950 ring-2 ring-blue-300",
+    badge: "border-blue-200 bg-blue-100 text-blue-700",
+    label: "text-blue-700",
+    time: "bg-white/75 text-blue-900 ring-1 ring-blue-100",
+    segmentOn: "bg-blue-500",
+    segmentOff: "bg-blue-200"
+  },
+  violet: {
+    card: "border-violet-200 bg-violet-50 text-violet-950 hover:border-violet-300 hover:bg-violet-100/70",
+    selected: "border-violet-500 bg-violet-100 text-violet-950 ring-2 ring-violet-300",
+    badge: "border-violet-200 bg-violet-100 text-violet-700",
+    label: "text-violet-700",
+    time: "bg-white/75 text-violet-900 ring-1 ring-violet-100",
+    segmentOn: "bg-violet-500",
+    segmentOff: "bg-violet-200"
+  },
+  amber: {
+    card: "border-amber-200 bg-amber-50 text-amber-950 hover:border-amber-300 hover:bg-amber-100/70",
+    selected: "border-amber-500 bg-amber-100 text-amber-950 ring-2 ring-amber-300",
+    badge: "border-amber-200 bg-amber-100 text-amber-700",
+    label: "text-amber-700",
+    time: "bg-white/75 text-amber-900 ring-1 ring-amber-100",
+    segmentOn: "bg-amber-500",
+    segmentOff: "bg-amber-200"
+  },
+  emerald: {
+    card: "border-emerald-200 bg-emerald-50 text-emerald-950 hover:border-emerald-300 hover:bg-emerald-100/70",
+    selected: "border-emerald-500 bg-emerald-100 text-emerald-950 ring-2 ring-emerald-300",
+    badge: "border-emerald-200 bg-emerald-100 text-emerald-700",
+    label: "text-emerald-700",
+    time: "bg-white/75 text-emerald-900 ring-1 ring-emerald-100",
+    segmentOn: "bg-emerald-500",
+    segmentOff: "bg-emerald-200"
+  },
+  rose: {
+    card: "border-rose-200 bg-rose-50 text-rose-950 hover:border-rose-300 hover:bg-rose-100/70",
+    selected: "border-rose-500 bg-rose-100 text-rose-950 ring-2 ring-rose-300",
+    badge: "border-rose-200 bg-rose-100 text-rose-700",
+    label: "text-rose-700",
+    time: "bg-white/75 text-rose-900 ring-1 ring-rose-100",
+    segmentOn: "bg-rose-500",
+    segmentOff: "bg-rose-200"
+  },
+  slate: {
+    card: "border-slate-200 bg-slate-50 text-slate-950 hover:border-slate-300 hover:bg-slate-100/70",
+    selected: "border-slate-500 bg-slate-100 text-slate-950 ring-2 ring-slate-300",
+    badge: "border-slate-200 bg-slate-100 text-slate-700",
+    label: "text-slate-600",
+    time: "bg-white/75 text-slate-800 ring-1 ring-slate-100",
+    segmentOn: "bg-slate-500",
+    segmentOff: "bg-slate-200"
+  }
+};
+
+function getReviewSubjectTone(event: ScheduleEvent): ReviewSubjectTone {
+  const subjectColorClass = getSubjectColorClass(event.subjectCode, event.subjectName).toLowerCase();
+  const subjectCode = event.subjectCode.toLowerCase();
+  const subjectName = event.subjectName.replace(/\s+/g, "").toLowerCase();
+
+  if (subjectCode.includes("math") || subjectName.includes("수학")) {
+    return "blue";
+  }
+  if (
+    subjectCode.includes("english") ||
+    subjectName.includes("영어")
+  ) {
+    return "violet";
+  }
+  if (
+    subjectCode.includes("social") ||
+    subjectName.includes("사회") ||
+    subjectName.includes("사탐")
+  ) {
+    return "amber";
+  }
+  if (
+    subjectCode.includes("science") ||
+    subjectName.includes("과학") ||
+    subjectName.includes("생명") ||
+    subjectName.includes("물리") ||
+    subjectName.includes("화학") ||
+    subjectName.includes("지구")
+  ) {
+    return "emerald";
+  }
+  if (
+    subjectCode.includes("korean") ||
+    subjectName.includes("국어")
+  ) {
+    return "rose";
+  }
+  if (subjectColorClass.includes("blue") || subjectColorClass.includes("sky") || subjectColorClass.includes("cyan")) {
+    return "blue";
+  }
+  if (
+    subjectColorClass.includes("purple") ||
+    subjectColorClass.includes("violet") ||
+    subjectColorClass.includes("fuchsia") ||
+    subjectColorClass.includes("indigo")
+  ) {
+    return "violet";
+  }
+  if (subjectColorClass.includes("amber") || subjectColorClass.includes("yellow") || subjectColorClass.includes("orange")) {
+    return "amber";
+  }
+  if (
+    subjectColorClass.includes("green") ||
+    subjectColorClass.includes("emerald") ||
+    subjectColorClass.includes("teal") ||
+    subjectColorClass.includes("lime")
+  ) {
+    return "emerald";
+  }
+  if (subjectColorClass.includes("red") || subjectColorClass.includes("rose") || subjectColorClass.includes("pink")) {
+    return "rose";
+  }
+  return "slate";
+}
+
+function getReviewSubjectKey(event: ScheduleEvent): string {
+  return normalizeLookupToken(event.subjectName) || normalizeLookupToken(event.subjectCode);
+}
+
+function getReviewClassKey(event: ScheduleEvent): string {
+  return event.id || [
+    normalizePersonName(event.instructorName),
+    normalizeLookupToken(event.subjectCode),
+    normalizeLookupToken(event.classTypeCode),
+    ...event.studentNames.map(normalizePersonName).sort()
+  ].join("::");
+}
+
+function getReviewClassBadge(event: ScheduleEvent): string | null {
+  const badgeText = event.badgeText.replace(/^\[|\]$/g, "").trim();
+  const normalized = normalizeLookupToken([event.classTypeCode, event.classTypeLabel, badgeText].join(" "));
+  if (normalized.includes("11") || normalized.includes("1:1") || normalized.includes("1대1") || normalized.includes("onetoone")) {
+    return badgeText || "1:1";
+  }
+  if (normalized.includes("21") || normalized.includes("2:1") || normalized.includes("2대1") || normalized.includes("twotoone")) {
+    return badgeText || "2:1";
+  }
+  return null;
+}
+
+function getReviewEventKey(event: ScheduleEvent): string {
+  return `${event.id}-${event.classDate}-${event.startTime}`;
+}
+
+function getReviewStudentKey(student: SelectOption): string {
+  const name = normalizePersonName(student.name);
+  const secondary = normalizeLookupToken(student.secondary ?? "");
+  return name ? `${name}|${secondary}` : student.id;
+}
+
+function getReviewEventDedupeKey(event: ScheduleEvent): string {
+  return getScheduleEventMergeKey(event);
+}
 
 function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
   return items.map((item) => ({
@@ -225,6 +553,8 @@ function mapApiGroupToState(item: TimetableGroupApiItem): TimetableGroup {
     roleView: item.roleView,
     targetId: item.targetId,
     weekStart: item.weekStart,
+    expiresOn: item.expiresOn ?? null,
+    tagId: item.tagId ?? null,
     classIds: Array.isArray(item.classIds) ? item.classIds : [],
     snapshotEvents: Array.isArray(item.snapshotEvents) ? cloneEvents(item.snapshotEvents) : [],
     isActive: item.isActive === true,
@@ -238,21 +568,143 @@ function formatDateISOInKST(date: Date): string {
 
 function mondayOfCurrentWeek(): string {
   const today = formatDateISOInKST(new Date());
-  const date = new Date(`${today}T00:00:00+09:00`);
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() - (day - 1));
-  return date.toISOString().slice(0, 10);
+  return mondayOfDate(today);
+}
+
+function mondayOfDate(dateISO: string): string {
+  return addDays(dateISO, -(dateToWeekday(dateISO) - 1));
 }
 
 function shiftDate(dateISO: string, days: number): string {
-  const date = new Date(`${dateISO}T00:00:00+09:00`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
+  return addDays(dateISO, days);
+}
+
+function getGroupExpirationReferenceDate(targetWeekStart: string): string {
+  const today = formatDateISOInKST(new Date());
+  const targetWeekEnd = shiftDate(targetWeekStart, 6);
+  return today >= targetWeekStart && today <= targetWeekEnd ? today : targetWeekStart;
+}
+
+function isGroupEffectiveForWeek(group: TimetableGroup, targetWeekStart: string): boolean {
+  const referenceDate = getGroupExpirationReferenceDate(targetWeekStart);
+  return group.weekStart <= targetWeekStart && (!group.expiresOn || group.expiresOn > referenceDate);
+}
+
+function compareEffectiveTimetableGroup(a: TimetableGroup, b: TimetableGroup): number {
+  if (a.weekStart !== b.weekStart) return b.weekStart.localeCompare(a.weekStart);
+  if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+  return b.createdAt.localeCompare(a.createdAt);
+}
+
+function getEffectiveStudentGroupMap(groups: TimetableGroup[], targetWeekStart: string, tagId: string | null): Map<string, TimetableGroup> {
+  const grouped = new Map<string, TimetableGroup[]>();
+  for (const group of groups) {
+    if (group.roleView !== "student" || group.weekStart > targetWeekStart || (group.tagId ?? null) !== tagId) continue;
+    const bucket = grouped.get(group.targetId) ?? [];
+    bucket.push(group);
+    grouped.set(group.targetId, bucket);
+  }
+
+  const effective = new Map<string, TimetableGroup>();
+  for (const [targetId, bucket] of grouped) {
+    const availableGroups = bucket.filter((group) => isGroupEffectiveForWeek(group, targetWeekStart));
+    const activeGroup = availableGroups.filter((group) => group.isActive).sort(compareEffectiveTimetableGroup)[0];
+    if (activeGroup) effective.set(targetId, activeGroup);
+  }
+  return effective;
+}
+
+function getStudentGroupTargetSetForWeek(groups: TimetableGroup[], targetWeekStart: string, tagId: string | null): Set<string> {
+  const targets = new Set<string>();
+  for (const group of groups) {
+    if (group.roleView !== "student" || group.weekStart > targetWeekStart || (group.tagId ?? null) !== tagId) continue;
+    targets.add(group.targetId);
+  }
+  return targets;
+}
+
+function getLatestActiveStudentGroup(
+  groups: TimetableGroup[],
+  targetId: string,
+  tagId: string | null,
+  latestWeekStart: string
+): TimetableGroup | null {
+  return (
+    groups
+      .filter(
+        (group) =>
+          group.roleView === "student" &&
+          group.targetId === targetId &&
+          (group.tagId ?? null) === tagId &&
+          group.weekStart <= latestWeekStart &&
+          group.isActive
+      )
+      .sort(compareEffectiveTimetableGroup)[0] ?? null
+  );
+}
+
+function getLatestActiveStudentGroupForInstructor(
+  groups: TimetableGroup[],
+  instructorId: string,
+  instructorName: string,
+  tagId: string | null
+): TimetableGroup | null {
+  const normalizedInstructorName = normalizePersonName(instructorName);
+  return (
+    groups
+      .filter(
+        (group) =>
+          group.roleView === "student" &&
+          (group.tagId ?? null) === tagId &&
+          group.isActive &&
+          (group.snapshotEvents ?? []).some(
+            (event) =>
+              event.instructorId === instructorId ||
+              (normalizedInstructorName && normalizePersonName(event.instructorName) === normalizedInstructorName)
+          )
+      )
+      .sort(compareEffectiveTimetableGroup)[0] ?? null
+  );
+}
+
+function getGroupExpirationLabel(group: TimetableGroup): string {
+  return group.expiresOn ? `${group.expiresOn}부터 만료` : "만료일 없음";
+}
+
+function getTimetableGroupMonthKey(group: TimetableGroup): string {
+  return (group.weekStart || group.createdAt || "").slice(0, 7);
+}
+
+function formatTimetableGroupMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split("-").map(Number);
+  if (!year || !month) return "날짜 미지정";
+  return `${year}년 ${month}월`;
+}
+
+function normalizeConflictReasonText(reason: string): string {
+  return Array.from(
+    new Set(
+      reason
+        .split(/\s*,\s*|\s*\|\s*/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ).join(" · ");
 }
 
 function getConflictMessage(conflict: ConflictResult): string {
   if (!conflict.hasConflict) return "";
-  return conflict.conflicts.map((item) => `- ${item.reason} (class: ${item.classId})`).join("\n");
+  const lines = conflict.conflicts.map((item) => {
+    const existing = item.existingSchedule;
+    const owner = existing?.studentNames?.filter(Boolean).join(", ") || (existing?.source === "prospect_timetable" ? "임시 시간표" : "기존 학생 수업");
+    const slot =
+      existing?.weekday && existing.startTime && existing.endTime
+        ? `${weekdayLabel(existing.weekday)}요일 ${existing.startTime}-${existing.endTime}`
+        : "같은 시간대";
+    const type = existing?.classTypeLabel || existing?.classTypeCode || "기존 수업";
+    return `충돌 이유: ${normalizeConflictReasonText(item.reason)}\n겹치는 기존 수업: ${owner} · ${type} · ${slot}`;
+  });
+  return Array.from(new Set(lines)).join("\n\n");
 }
 
 function getConflictMessageForDisplay(
@@ -263,27 +715,65 @@ function getConflictMessageForDisplay(
   if (!conflict.hasConflict) return "";
 
   const ownerByClassId = new Map<string, string>();
+  const eventByClassId = new Map<string, ScheduleEvent>();
   for (const group of activeStudentGroups) {
     const ownerName = students.find((item) => item.id === group.targetId)?.name;
     if (!ownerName) continue;
     for (const event of group.snapshotEvents ?? []) {
       ownerByClassId.set(event.id, ownerName);
+      eventByClassId.set(event.id, event);
     }
   }
 
-  return conflict.conflicts
+  const lines = conflict.conflicts
     .map((item) => {
-      const owner = ownerByClassId.get(item.classId);
-      const prefix = owner ? `${owner} 활성 시간표와 충돌: ` : "";
-      return `- ${prefix}${item.reason}`;
-    })
+      const event = eventByClassId.get(item.classId);
+      const existing = item.existingSchedule;
+      const owner =
+        ownerByClassId.get(item.classId) ||
+        existing?.studentNames?.filter(Boolean).join(", ") ||
+        (existing?.source === "prospect_timetable" ? "임시 시간표" : "기존 학생 수업");
+      const classType = event?.classTypeLabel || existing?.classTypeLabel || existing?.classTypeCode || "기존 수업";
+      const weekday = event?.weekday || existing?.weekday;
+      const startTime = event?.startTime || existing?.startTime;
+      const endTime = event?.endTime || existing?.endTime;
+      const slot = weekday && startTime && endTime ? `${weekdayLabel(weekday)}요일 ${startTime}-${endTime}` : "같은 시간대";
+      return `충돌 이유: ${normalizeConflictReasonText(item.reason)}\n겹치는 기존 수업: ${owner} · ${classType} · ${slot}`;
+    });
+  return Array.from(new Set(lines)).join("\n\n");
+}
+
+function formatStoredConflictDetails(details?: string | null): string {
+  if (!details) return "";
+  const lines = details
+    .split("\n")
+    .map((line) => line.replace(/\s*\(class:\s*[^)]+\)\s*$/i, "").replace(/^[-•]\s*/, "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(lines)).join("\n");
+}
+
+function buildConflictAttemptDetails(input: {
+  studentName: string;
+  instructorName: string;
+  classTypeLabel: string;
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+  scheduleTagLabel: string;
+  conflictMessage: string;
+}): string {
+  return [
+    `입력 시도: ${input.studentName} · ${input.instructorName} · ${input.classTypeLabel} · ${weekdayLabel(input.weekday)}요일 ${input.startTime}-${input.endTime}`,
+    `적용 분류: #${input.scheduleTagLabel}`,
+    input.conflictMessage,
+    "확인 방법: 같은 분류의 활성 시간표에서 위 학생과 시간대를 확인해 주세요. 미분류 및 다른 분류의 수업은 충돌 검사에서 제외됩니다."
+  ]
+    .filter(Boolean)
     .join("\n");
 }
 
 function dayOf(dateISO: string): Weekday {
-  const d = new Date(`${dateISO}T00:00:00+09:00`);
-  const jsDay = d.getUTCDay();
-  return (jsDay === 0 ? 7 : jsDay) as Weekday;
+  return dateToWeekday(dateISO);
 }
 
 function normalizeDaysOff(daysOff?: Weekday[]): Weekday[] {
@@ -361,30 +851,104 @@ function eventMatchesInstructorOption(event: ScheduleEvent, instructor: SelectOp
   return Boolean(eventName && instructorName && eventName === instructorName);
 }
 
+function eventHasInstructorInSet(event: ScheduleEvent, activeInstructorIds: Set<string>, activeInstructorNames: Set<string>): boolean {
+  if (isSelfStudyEventId(event.id)) return true;
+  return activeInstructorIds.has(event.instructorId) || activeInstructorNames.has(normalizePersonName(event.instructorName));
+}
+
+function eventHasStudentInSet(event: ScheduleEvent, activeStudentIds: Set<string>, activeStudentNames: Set<string>): boolean {
+  return (
+    event.studentIds.some((studentId) => activeStudentIds.has(studentId)) ||
+    event.studentNames.some((studentName) => activeStudentNames.has(normalizePersonName(studentName)))
+  );
+}
+
+function eventHasProspectStudent(event: ScheduleEvent): boolean {
+  return event.studentIds.some((studentId) => studentId.startsWith("prospect:"));
+}
+
+function getScheduleEventMergeKey(event: ScheduleEvent): string {
+  const subjectKey = normalizeLookupToken(event.subjectName) || normalizeLookupToken(event.subjectCode);
+  const classTypeKey = normalizeLookupToken(event.classTypeLabel) || normalizeLookupToken(event.classTypeCode);
+  return [
+    event.classDate,
+    event.weekday,
+    event.startTime,
+    event.endTime,
+    subjectKey,
+    classTypeKey,
+    event.instructorId || normalizePersonName(event.instructorName)
+  ].join("::");
+}
+
+function getInstructorScheduleMergeKey(event: ScheduleEvent): string {
+  const subjectKey = normalizeLookupToken(event.subjectName) || normalizeLookupToken(event.subjectCode);
+  const classTypeKey = normalizeLookupToken(event.classTypeLabel) || normalizeLookupToken(event.classTypeCode);
+  return [
+    event.weekday,
+    event.startTime,
+    event.endTime,
+    subjectKey,
+    classTypeKey
+  ].join("::");
+}
+
+function scopeScheduleEventToStudent(event: ScheduleEvent, studentId: string): ScheduleEvent | null {
+  const studentIndex = event.studentIds.findIndex((value) => value === studentId);
+  if (studentIndex < 0) return null;
+  return {
+    ...event,
+    studentIds: [studentId],
+    studentNames: [event.studentNames[studentIndex] ?? studentId]
+  };
+}
+
+function mergeStudentRosters(a: ScheduleEvent, b: ScheduleEvent): Pick<ScheduleEvent, "studentIds" | "studentNames"> {
+  const studentIds: string[] = [];
+  const studentNames: string[] = [];
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+
+  const append = (ids: string[], names: string[]) => {
+    const maxLength = Math.max(ids.length, names.length);
+    for (let index = 0; index < maxLength; index += 1) {
+      const id = (ids[index] ?? "").trim();
+      const name = (names[index] ?? "").trim();
+      const nameKey = normalizePersonName(name);
+      if (id && seenIds.has(id)) continue;
+      if (nameKey && seenNames.has(nameKey)) continue;
+      if (!id && !nameKey) continue;
+
+      studentIds.push(id);
+      studentNames.push(name || id);
+      if (id) seenIds.add(id);
+      if (nameKey) seenNames.add(nameKey);
+    }
+  };
+
+  append(a.studentIds ?? [], a.studentNames ?? []);
+  append(b.studentIds ?? [], b.studentNames ?? []);
+
+  return { studentIds, studentNames };
+}
+
 function mergeScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
   const dedup = new Map<string, ScheduleEvent>();
 
   for (const event of events) {
-    const key = [
-      event.classDate,
-      event.weekday,
-      event.startTime,
-      event.endTime,
-      normalizeLookupToken(event.subjectCode),
-      normalizeLookupToken(event.classTypeCode),
-      normalizePersonName(event.instructorName)
-    ].join("::");
+    const key = getScheduleEventMergeKey(event);
 
     const existing = dedup.get(key);
     if (!existing) {
-      dedup.set(key, event);
+      const mergedRoster = mergeStudentRosters(event, event);
+      dedup.set(key, { ...event, ...mergedRoster });
       continue;
     }
 
+    const mergedRoster = mergeStudentRosters(existing, event);
     dedup.set(key, {
       ...existing,
-      studentIds: Array.from(new Set([...(existing.studentIds ?? []), ...(event.studentIds ?? [])])),
-      studentNames: Array.from(new Set([...(existing.studentNames ?? []), ...(event.studentNames ?? [])]))
+      ...mergedRoster
     });
   }
 
@@ -393,6 +957,41 @@ function mergeScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
     if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
     return a.instructorName.localeCompare(b.instructorName, "ko");
   });
+}
+
+function dedupeInstructorStudentTimeSlots(events: ScheduleEvent[]): ScheduleEvent[] {
+  const seenBySlot = new Map<string, Set<string>>();
+  const cleaned: ScheduleEvent[] = [];
+
+  for (const event of events) {
+    const slotKey = [
+      event.weekday,
+      event.startTime,
+      event.endTime
+    ].join("::");
+    const seenStudents = seenBySlot.get(slotKey) ?? new Set<string>();
+    const studentIds: string[] = [];
+    const studentNames: string[] = [];
+    const maxLength = Math.max(event.studentIds.length, event.studentNames.length);
+
+    for (let index = 0; index < maxLength; index += 1) {
+      const id = (event.studentIds[index] ?? "").trim();
+      const name = (event.studentNames[index] ?? "").trim();
+      const studentKey = normalizePersonName(name) || id;
+      if (!studentKey || seenStudents.has(studentKey)) continue;
+
+      seenStudents.add(studentKey);
+      studentIds.push(id);
+      studentNames.push(name || id);
+    }
+
+    seenBySlot.set(slotKey, seenStudents);
+    if (studentNames.length > 0) {
+      cleaned.push({ ...event, studentIds, studentNames });
+    }
+  }
+
+  return cleaned;
 }
 
 function isTransientGatewayErrorMessage(message: string): boolean {
@@ -467,7 +1066,7 @@ function summarizeConflictReason(conflict: ConflictResult): string {
     return "시간표 충돌";
   }
 
-  return Array.from(new Set(conflict.conflicts.map((item) => item.reason.trim()).filter(Boolean))).join(" | ") || "시간표 충돌";
+  return normalizeConflictReasonText(conflict.conflicts.map((item) => item.reason.trim()).filter(Boolean).join(" | ")) || "시간표 충돌";
 }
 
 function findOptionByName(items: SelectOption[], targetName: string): SelectOption | null {
@@ -554,19 +1153,7 @@ function parseCellClassText(cell: string): {
   instructorName: string;
   rawText: string;
 } {
-  const trimmed = cell.trim();
-  const matched = trimmed.match(/^(.+?)-(.+?)\((.+?)\)$/);
-  if (!matched) {
-    return { subjectLabel: trimmed, classTypeLabel: "개별정규", instructorName: "", rawText: trimmed };
-  }
-  const instructorName = matched[3].trim().replace(/T$/i, "");
-
-  return {
-    subjectLabel: matched[1].trim(),
-    classTypeLabel: matched[2].trim(),
-    instructorName,
-    rawText: trimmed
-  };
+  return parseNotionClassCell(cell);
 }
 
 function normalizePersonName(value: string): string {
@@ -580,14 +1167,6 @@ function normalizePersonName(value: string): string {
 
 function normalizeLookupToken(value: string): string {
   return value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase().trim();
-}
-
-function normalizeInstructorAlias(value: string): string {
-  const token = normalizeLookupToken(value);
-  if (token === "원장님" || token === "원장" || token === "원장님t" || token === "원장t") {
-    return "안준성";
-  }
-  return value;
 }
 
 function resolveSubjectOption(rawLabel: string, subjects: SubjectOptionWithColor[]): SubjectOptionWithColor | undefined {
@@ -745,18 +1324,6 @@ function parseNotionTextToItems(text: string): ParsedNotionItem[] {
   return items;
 }
 
-function subjectTint(subjectCode: string, strong: boolean): string {
-  const alpha = strong ? 0.34 : 0.18;
-  const palette: Record<string, string> = {
-    MATH: `rgba(59,130,246,${alpha})`,
-    ENGLISH: `rgba(139,92,246,${alpha})`,
-    KOREAN: `rgba(249,115,22,${alpha})`,
-    SCIENCE: `rgba(16,185,129,${alpha})`,
-    SOCIAL: `rgba(14,165,233,${alpha})`
-  };
-  return palette[subjectCode] ?? `rgba(56,189,248,${alpha})`;
-}
-
 function monthStart(dateISO: string): string {
   const [year, month] = dateISO.split("-").map(Number);
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
@@ -815,6 +1382,24 @@ function moveEventInList(
   );
 }
 
+function extractSnapshotClassIds(source: ScheduleEvent[]): string[] {
+  return Array.from(
+    new Set(
+      source
+        .map((event) => event.id)
+        .filter((id) => id && !id.startsWith("draft-") && !isSelfStudyEventId(id))
+    )
+  );
+}
+
+function replaceClassId(source: string[], previousId: string, nextId: string): string[] {
+  return Array.from(new Set(source.map((id) => (id === previousId ? nextId : id)).filter(Boolean)));
+}
+
+function replaceEventIdInList(source: ScheduleEvent[], previousId: string, nextId: string): ScheduleEvent[] {
+  return source.map((event) => (event.id === previousId ? { ...event, id: nextId } : event));
+}
+
 function hasTimeOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
   return timeToMinutes(aStart) < timeToMinutes(bEnd) && timeToMinutes(aEnd) > timeToMinutes(bStart);
 }
@@ -824,11 +1409,14 @@ function isStrictConflictClassType(code: string, label?: string): boolean {
   const normalizedLabel = normalizeLookupToken(label ?? "");
   if (normalizedCode.includes("onetone") || normalizedCode.includes("onetoone") || normalizedCode.includes("11")) return true;
   if (normalizedCode.includes("twotone") || normalizedCode.includes("twotoone") || normalizedCode.includes("21")) return true;
+  if (normalizedCode.includes("threetone") || normalizedCode.includes("threetoone") || normalizedCode.includes("31")) return true;
   return (
     normalizedLabel.includes(normalizeLookupToken("1:1")) ||
     normalizedLabel.includes(normalizeLookupToken("1대1")) ||
     normalizedLabel.includes(normalizeLookupToken("2:1")) ||
-    normalizedLabel.includes(normalizeLookupToken("2대1"))
+    normalizedLabel.includes(normalizeLookupToken("2대1")) ||
+    normalizedLabel.includes(normalizeLookupToken("3:1")) ||
+    normalizedLabel.includes(normalizeLookupToken("3대1"))
   );
 }
 
@@ -853,10 +1441,25 @@ export default function SynchroSPage() {
   const [weekStart, setWeekStart] = useState<string>(mondayOfCurrentWeek);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [viewerRole, setViewerRole] = useState<"admin" | "coordinator" | "instructor" | "student">("admin");
+  const [viewerRoleResolved, setViewerRoleResolved] = useState(false);
   const [overviewEvents, setOverviewEvents] = useState<ScheduleEvent[]>([]);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [reviewEvents, setReviewEvents] = useState<ScheduleEvent[]>([]);
+  const [scheduleReviews, setScheduleReviews] = useState<ScheduleReviewItem[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewSavingId, setReviewSavingId] = useState<string | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<ReviewStatus | "all" | "unreviewed" | "memo">("all");
+  const [reviewSearchKeyword, setReviewSearchKeyword] = useState("");
+  const [reviewSortMode, setReviewSortMode] = useState<"needs_first" | "class_desc" | "class_asc" | "name">("needs_first");
+  const [selectedReviewStudentId, setSelectedReviewStudentId] = useState("");
+  const [selectedReviewClassKey, setSelectedReviewClassKey] = useState<string | null>(null);
+  const [reviewMemoDraft, setReviewMemoDraft] = useState("");
+  const [homeDashboardDayOffset, setHomeDashboardDayOffset] = useState<-1 | 0 | 1>(0);
 
   const [instructors, setInstructors] = useState<SelectOption[]>([]);
+  const [suspendedInstructors, setSuspendedInstructors] = useState<SelectOption[]>([]);
   const [students, setStudents] = useState<SelectOption[]>([]);
+  const [suspendedStudents, setSuspendedStudents] = useState<SelectOption[]>([]);
   const [subjects, setSubjects] = useState<SubjectOptionWithColor[]>([]);
   const [classTypes, setClassTypes] = useState<ClassTypeOption[]>([]);
 
@@ -865,6 +1468,17 @@ export default function SynchroSPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [initialCell, setInitialCell] = useState<{ weekday: Weekday; startTime: string } | undefined>();
+  const [studentScheduleInputTab, setStudentScheduleInputTab] = useState<StudentScheduleInputTab>("sync");
+  const [instructorWorkspaceTab, setInstructorWorkspaceTab] = useState<InstructorWorkspaceTab>("schedule");
+  const [syncDraftModalOpen, setSyncDraftModalOpen] = useState(false);
+  const [syncDraftInitialCell, setSyncDraftInitialCell] = useState<{ weekday: Weekday; startTime: string } | undefined>();
+  const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
+  const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
+  const [timeEditEvent, setTimeEditEvent] = useState<ScheduleEvent | null>(null);
+  const [timeEditForm, setTimeEditForm] = useState({ startTime: "10:00", endTime: "11:00" });
+  const [timeEditSaving, setTimeEditSaving] = useState(false);
+  const [selfStudyDraft, setSelfStudyDraft] = useState<SelfStudyDraft | null>(null);
+  const [selfStudySaving, setSelfStudySaving] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -877,10 +1491,10 @@ export default function SynchroSPage() {
   const [refreshingData, setRefreshingData] = useState(false);
   const [showStudentPicker, setShowStudentPicker] = useState(false);
   const [showInstructorPicker, setShowInstructorPicker] = useState(false);
+  const [instructorStudentSearchKeyword, setInstructorStudentSearchKeyword] = useState("");
   const [savingInstructorDaysOff, setSavingInstructorDaysOff] = useState(false);
-  const [savingInstructorAvailability, setSavingInstructorAvailability] = useState(false);
-  const [availabilityEditorWeekday, setAvailabilityEditorWeekday] = useState<Weekday>(1);
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
+  const [hideEmptyTimes, setHideEmptyTimes] = useState(false);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
   const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
@@ -916,10 +1530,22 @@ export default function SynchroSPage() {
   });
   const [memoByEventId, setMemoByEventId] = useState<Record<string, string>>({});
   const [timetableGroups, setTimetableGroups] = useState<TimetableGroup[]>([]);
-  const [groupPage, setGroupPage] = useState(1);
+  const [scheduleTags, setScheduleTags] = useState<ScheduleTag[]>([]);
+  const [selectedScheduleTagId, setSelectedScheduleTagId] = useState<string | null>(null);
+  const [scheduleTagManagerOpen, setScheduleTagManagerOpen] = useState(false);
+  const [scheduleTagsBusy, setScheduleTagsBusy] = useState(false);
+  const [timetableGroupsLoading, setTimetableGroupsLoading] = useState(false);
+  const [timetableGroupExpirationSupported, setTimetableGroupExpirationSupported] = useState(true);
+  const [expandedGroupMonths, setExpandedGroupMonths] = useState<Record<string, boolean>>({});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [capturingTimetable, setCapturingTimetable] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
+  const [groupActivationPendingId, setGroupActivationPendingId] = useState<string | null>(null);
+  const [groupActivationPulseId, setGroupActivationPulseId] = useState<string | null>(null);
+  const [showSuspendedRoster, setShowSuspendedRoster] = useState(false);
+  const [showRosterActions, setShowRosterActions] = useState(false);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [conflictDialog, setConflictDialog] = useState<ConflictDialogState>({
     open: false,
     title: "",
@@ -934,15 +1560,32 @@ export default function SynchroSPage() {
   const movingLockRef = useRef(false);
   const importingNotionRef = useRef(false);
   const pendingRealtimeReloadRef = useRef(false);
+  const weekLoadRequestRef = useRef(0);
+  const timetableGroupsLoadRequestRef = useRef(0);
+  const scheduleTagSelectionInitializedRef = useRef(false);
+  const autoSelectedGroupScopeRef = useRef<string | null>(null);
+  const timetableCaptureRef = useRef<HTMLDivElement | null>(null);
   const notionTextValue = notionInput !== "" ? notionInput : notionPreview;
 
   const weekEnd = useMemo(() => shiftDate(weekStart, 6), [weekStart]);
+  const [todayISO, setTodayISO] = useState(() => formatDateISOInKST(new Date()));
+  const todayWeekday = useMemo(() => dayOf(todayISO), [todayISO]);
+  const todayLabel = useMemo(() => DAYS.find((day) => day.key === todayWeekday)?.label ?? "오늘", [todayWeekday]);
+  const homeDashboardDateISO = useMemo(() => shiftDate(todayISO, homeDashboardDayOffset), [homeDashboardDayOffset, todayISO]);
+  const homeDashboardWeekday = useMemo(() => dayOf(homeDashboardDateISO), [homeDashboardDateISO]);
+  const homeDashboardWeekdayLabel = useMemo(
+    () => DAYS.find((day) => day.key === homeDashboardWeekday)?.label ?? "선택 날짜",
+    [homeDashboardWeekday]
+  );
+  const homeDashboardRelativeLabel = homeDashboardDayOffset === -1 ? "어제" : homeDashboardDayOffset === 1 ? "내일" : "오늘";
   const monthLabel = useMemo(() => {
     const [year, month] = calendarMonth.split("-").map(Number);
     return `${year}년 ${month}월`;
   }, [calendarMonth]);
   const monthCells = useMemo(() => buildMonthCells(calendarMonth), [calendarMonth]);
   const keyword = searchKeyword.trim().toLowerCase();
+  const instructorStudentKeyword = instructorStudentSearchKeyword.trim().toLowerCase();
+  const instructorStudentKeywordToken = normalizeLookupToken(instructorStudentSearchKeyword);
   const isWorkspaceTab = mainTab === "student" || mainTab === "instructor";
   const eventsWithMemo = useMemo(
     () =>
@@ -962,42 +1605,83 @@ export default function SynchroSPage() {
           }),
     [eventsWithMemo, keyword]
   );
-  const selectedStudentLabel = useMemo(
-    () => students.find((item) => item.id === selectedStudentId)?.name ?? "학생 선택",
-    [selectedStudentId, students]
+  const selectedStudentOption = useMemo<SelectOption | null>(() => {
+    const activeOption = students.find((item) => item.id === selectedStudentId);
+    if (activeOption) return activeOption;
+
+    const historyOption = saveHistory.find((item) => item.targetType === "학생" && item.targetId === selectedStudentId);
+    return historyOption?.targetId ? { id: historyOption.targetId, name: historyOption.targetName } : null;
+  }, [saveHistory, selectedStudentId, students]);
+  const selectedStudentLabel = selectedStudentOption?.name ?? "학생 선택";
+  const selectedStudentSecondary = selectedStudentOption?.secondary ?? "";
+  const selectedInstructorOption = useMemo<SelectOption | null>(() => {
+    const activeOption = instructors.find((item) => item.id === selectedInstructorId);
+    if (activeOption) return activeOption;
+
+    const historyOption = saveHistory.find((item) => item.targetType === "강사" && item.targetId === selectedInstructorId);
+    return historyOption?.targetId ? { id: historyOption.targetId, name: historyOption.targetName } : null;
+  }, [instructors, saveHistory, selectedInstructorId]);
+  const selectedInstructorLabel = selectedInstructorOption?.name ?? "강사 선택";
+  const selectedInstructorSecondary = selectedInstructorOption?.secondary ?? "";
+  const selectedScheduleTag = useMemo(
+    () => scheduleTags.find((tag) => tag.id === selectedScheduleTagId) ?? null,
+    [scheduleTags, selectedScheduleTagId]
   );
-  const selectedStudentSecondary = useMemo(
-    () => students.find((item) => item.id === selectedStudentId)?.secondary ?? "",
-    [selectedStudentId, students]
-  );
-  const selectedInstructorLabel = useMemo(
-    () => instructors.find((item) => item.id === selectedInstructorId)?.name ?? "강사 선택",
-    [selectedInstructorId, instructors]
-  );
-  const selectedInstructorSecondary = useMemo(
-    () => instructors.find((item) => item.id === selectedInstructorId)?.secondary ?? "",
-    [selectedInstructorId, instructors]
-  );
-  const selectedInstructorOption = useMemo(
-    () => instructors.find((item) => item.id === selectedInstructorId) ?? null,
-    [instructors, selectedInstructorId]
-  );
+  const selectedScheduleTagLabel = selectedScheduleTag?.name ?? "미분류";
   const selectedInstructorDaysOff = useMemo(
     () => normalizeDaysOff(selectedInstructorOption?.daysOff),
     [selectedInstructorOption]
   );
-  const selectedInstructorAvailableTimeSlotsByDay = useMemo(
+  const selectedInstructorAvailabilityByDay = useMemo(
     () => normalizeAvailableTimeSlotsByDay(selectedInstructorOption?.availableTimeSlotsByDay),
     [selectedInstructorOption]
   );
-  const selectedInstructorAvailableTimeSlots = useMemo(
-    () => getInstructorAvailableTimeSlotsForWeekday(selectedInstructorOption, availabilityEditorWeekday),
-    [availabilityEditorWeekday, selectedInstructorOption]
+  const activeStudentIdSet = useMemo(() => new Set(students.map((item) => item.id)), [students]);
+  const activeStudentNameSet = useMemo(
+    () => new Set(students.map((item) => normalizePersonName(item.name)).filter(Boolean)),
+    [students]
+  );
+  const activeInstructorIdSet = useMemo(() => new Set(instructors.map((item) => item.id)), [instructors]);
+  const activeInstructorNameSet = useMemo(
+    () => new Set(instructors.map((item) => normalizePersonName(item.name)).filter(Boolean)),
+    [instructors]
+  );
+  const studentSecondaryLookup = useMemo(() => {
+    const lookup: Record<string, string> = {};
+    for (const student of [...students, ...suspendedStudents]) {
+      const secondary = student.secondary?.trim();
+      if (!secondary) continue;
+      lookup[`id:${student.id}`] = secondary;
+      lookup[`name:${normalizePersonName(student.name)}`] = secondary;
+    }
+    return lookup;
+  }, [students, suspendedStudents]);
+  const overviewStudents = useMemo(() => {
+    const byId = new Map(students.map((student) => [student.id, student]));
+    for (const event of overviewEvents) {
+      event.studentIds.forEach((studentId, index) => {
+        if (!studentId.startsWith("prospect:") || byId.has(studentId)) return;
+        byId.set(studentId, {
+          id: studentId,
+          name: event.studentNames[index] ?? event.studentNames[0] ?? "[가안] 신규문의",
+          secondary: "신규문의 가안",
+          isActive: true
+        });
+      });
+    }
+    return [...byId.values()];
+  }, [overviewEvents, students]);
+  const effectiveStudentGroupByTargetId = useMemo(
+    () => getEffectiveStudentGroupMap(timetableGroups, weekStart, selectedScheduleTagId),
+    [selectedScheduleTagId, timetableGroups, weekStart]
+  );
+  const studentGroupTargetIdsForWeek = useMemo(
+    () => getStudentGroupTargetSetForWeek(timetableGroups, weekStart, selectedScheduleTagId),
+    [selectedScheduleTagId, timetableGroups, weekStart]
   );
   const overviewUniverseEvents = useMemo(() => {
-    const collected = [...overviewEvents];
-    const relevantGroups = timetableGroups
-      .filter((group) => group.roleView === "instructor" || (group.roleView === "student" && group.isActive))
+    const collected: ScheduleEvent[] = [];
+    const relevantGroups = [...effectiveStudentGroupByTargetId.values()]
       .sort((a, b) => {
         if (a.isActive !== b.isActive) {
           return a.isActive ? -1 : 1;
@@ -1020,10 +1704,21 @@ export default function SynchroSPage() {
       }
     }
 
-    return mergeScheduleEvents(collected);
-  }, [overviewEvents, timetableGroups]);
+    return mergeScheduleEvents(collected).filter(
+      (event) =>
+        eventHasInstructorInSet(event, activeInstructorIdSet, activeInstructorNameSet) &&
+        (eventHasStudentInSet(event, activeStudentIdSet, activeStudentNameSet) || eventHasProspectStudent(event))
+    );
+  }, [
+    activeInstructorIdSet,
+    activeInstructorNameSet,
+    activeStudentIdSet,
+    activeStudentNameSet,
+    effectiveStudentGroupByTargetId,
+    overviewEvents
+  ]);
   const overviewVisibleInstructors = useMemo(
-    () => instructors.filter((item) => !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
+    () => instructors.filter((item) => item.isActive !== false && !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
     [instructors]
   );
   const overviewInstructorGroups = useMemo(() => {
@@ -1079,7 +1774,6 @@ export default function SynchroSPage() {
     const schoolLabel = (secondary?: string) => secondary?.split("·")[0]?.trim() || "학교 정보 없음";
     const weekdayOrder = ["월", "화", "수", "목", "금", "토", "일", "수업 없음"];
     const eventsByStudent = new Map<string, ScheduleEvent[]>();
-    const groupsByStudent = new Map<string, TimetableGroup[]>();
 
     for (const event of overviewEvents) {
       for (const studentId of event.studentIds) {
@@ -1089,33 +1783,19 @@ export default function SynchroSPage() {
       }
     }
 
-    const studentScopedGroups = timetableGroups.filter((group) => group.roleView === "student");
-    for (const group of studentScopedGroups) {
-      const bucket = groupsByStudent.get(group.targetId) ?? [];
-      bucket.push(group);
-      groupsByStudent.set(group.targetId, bucket);
-    }
-
-    for (const student of students) {
+    for (const student of overviewStudents) {
       const studentWeekEvents = eventsByStudent.get(student.id) ?? [];
-      const studentGroups = [...(groupsByStudent.get(student.id) ?? [])].sort((a, b) => {
-        if (a.isActive !== b.isActive) {
-          return a.isActive ? -1 : 1;
-        }
-        return b.createdAt.localeCompare(a.createdAt);
-      });
-      const preferredGroup = studentGroups[0] ?? null;
-      const snapshotPool = studentGroups.flatMap((group) => group.snapshotEvents ?? []);
+      const preferredGroup = effectiveStudentGroupByTargetId.get(student.id) ?? null;
       const preferredSnapshot = preferredGroup?.snapshotEvents ?? [];
-      const groupedClassIds = Array.from(new Set(studentGroups.flatMap((group) => group.classIds ?? []).filter(Boolean)));
+      const groupedClassIds = Array.from(new Set((preferredGroup?.classIds ?? []).filter(Boolean)));
       const groupLinkedEvents = groupedClassIds.length > 0 ? studentWeekEvents.filter((event) => groupedClassIds.includes(event.id)) : [];
       const linkedEvents =
         preferredSnapshot.length > 0
           ? preferredSnapshot
-          : snapshotPool.length > 0
-            ? snapshotPool
-            : groupLinkedEvents.length > 0
-              ? groupLinkedEvents
+          : preferredGroup
+            ? groupLinkedEvents
+            : studentGroupTargetIdsForWeek.has(student.id)
+              ? []
               : studentWeekEvents;
       let keys: string[] = [];
 
@@ -1173,7 +1853,7 @@ export default function SynchroSPage() {
                 "border-violet-100/80 bg-[linear-gradient(135deg,rgba(245,243,255,0.82),rgba(237,233,254,0.68))]"
               ][index % 4]
       }));
-  }, [overviewEvents, studentOverviewMode, students, timetableGroups]);
+  }, [effectiveStudentGroupByTargetId, overviewEvents, overviewStudents, studentGroupTargetIdsForWeek, studentOverviewMode]);
   const overviewDisplayGroups = useMemo(
     () =>
       overviewEntity === "instructor"
@@ -1190,9 +1870,64 @@ export default function SynchroSPage() {
         : overviewStudentGroups.map((group) => ({ label: group.label, items: group.items, toneClass: group.toneClass })),
     [overviewEntity, overviewInstructorGroups, overviewStudentGroups]
   );
+  const homeTodayEvents = useMemo(
+    () =>
+      overviewUniverseEvents
+        .filter((event) => event.weekday === homeDashboardWeekday)
+        .sort((a, b) => {
+          if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+          return a.instructorName.localeCompare(b.instructorName, "ko");
+        }),
+    [homeDashboardWeekday, overviewUniverseEvents]
+  );
+  const homeTodayInstructorSummaries = useMemo<HomePersonSummary[]>(() => {
+    const byInstructor = new Map<string, HomePersonSummary>();
+    for (const event of homeTodayEvents) {
+      const option = instructors.find((item) => eventMatchesInstructorOption(event, item));
+      const id = option?.id ?? event.instructorId ?? event.instructorName;
+      const existing = byInstructor.get(id);
+      if (existing) {
+        existing.events.push(event);
+        continue;
+      }
+      byInstructor.set(id, {
+        id,
+        name: option?.name ?? event.instructorName,
+        secondary: option?.secondary,
+        events: [event]
+      });
+    }
+    return [...byInstructor.values()].sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
+  }, [homeTodayEvents, instructors]);
+  const homeTodayStudentSummaries = useMemo<HomePersonSummary[]>(() => {
+    const byStudent = new Map<string, HomePersonSummary>();
+    for (const event of homeTodayEvents) {
+      event.studentNames.forEach((name, index) => {
+        const id = event.studentIds[index] ?? name;
+        const option = students.find((item) => item.id === id || normalizePersonName(item.name) === normalizePersonName(name));
+        const key = option?.id ?? id;
+        const existing = byStudent.get(key);
+        if (existing) {
+          existing.events.push(event);
+          return;
+        }
+        byStudent.set(key, {
+          id: key,
+          name: option?.name ?? name,
+          secondary: option?.secondary,
+          events: [event]
+        });
+      });
+    }
+    return [...byStudent.values()].sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
+  }, [homeTodayEvents, students]);
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;
   const isInstructorReadOnly = viewerRole === "instructor";
+  const isHomeDashboardLoading =
+    showIntroPage &&
+    !isInstructorReadOnly &&
+    (overviewLoading || timetableGroupsLoading);
   const selectedSubjectForPlacement = useMemo(
     () => subjects.find((subject) => subject.code === newPlacementDraft.subjectCode) ?? null,
     [newPlacementDraft.subjectCode, subjects]
@@ -1203,8 +1938,7 @@ export default function SynchroSPage() {
   );
   const groupedUniverseEvents = useMemo(() => {
     const eventMap = new Map<string, ScheduleEvent>();
-    for (const group of timetableGroups) {
-      if (!group.isActive || group.roleView !== "student") continue;
+    for (const group of effectiveStudentGroupByTargetId.values()) {
       for (const event of group.snapshotEvents ?? []) {
         eventMap.set(event.id, event);
       }
@@ -1213,7 +1947,7 @@ export default function SynchroSPage() {
       eventMap.set(event.id, event);
     }
     return [...eventMap.values()];
-  }, [events, timetableGroups]);
+  }, [effectiveStudentGroupByTargetId, events]);
   const placementRecommendations = useMemo(() => {
     if (!selectedSubjectForPlacement || !selectedClassTypeForPlacement) return [] as RecommendationItem[];
     if (newPlacementDraft.preferredWeekdays.length === 0 || newPlacementDraft.preferredTimes.length === 0) return [] as RecommendationItem[];
@@ -1323,33 +2057,33 @@ export default function SynchroSPage() {
     }
 
     const studentWeekEvents = overviewEvents.filter((event) => event.studentIds.includes(selectedStudentId));
-    const studentGroups = timetableGroups
-      .filter((group) => group.roleView === "student" && group.targetId === selectedStudentId)
-      .sort((a, b) => {
-        if (a.isActive !== b.isActive) {
-          return a.isActive ? -1 : 1;
-        }
-        return b.createdAt.localeCompare(a.createdAt);
-      });
-
-    const preferredGroup = studentGroups[0] ?? null;
-    const snapshotPool = studentGroups.flatMap((group) => group.snapshotEvents ?? []);
+    const preferredGroup = effectiveStudentGroupByTargetId.get(selectedStudentId) ?? null;
     const preferredSnapshot = preferredGroup?.snapshotEvents ?? [];
-    const groupedClassIds = Array.from(new Set(studentGroups.flatMap((group) => group.classIds ?? []).filter(Boolean)));
+    const groupedClassIds = Array.from(new Set((preferredGroup?.classIds ?? []).filter(Boolean)));
     const groupLinkedEvents =
       groupedClassIds.length > 0 ? studentWeekEvents.filter((event) => groupedClassIds.includes(event.id)) : [];
 
     return preferredSnapshot.length > 0
       ? preferredSnapshot
-      : snapshotPool.length > 0
-        ? snapshotPool
-        : groupLinkedEvents.length > 0
-          ? groupLinkedEvents
+      : preferredGroup
+        ? groupLinkedEvents
+        : studentGroupTargetIdsForWeek.has(selectedStudentId)
+          ? []
           : studentWeekEvents;
-  }, [overviewEntity, overviewEvents, overviewUniverseEvents, selectedInstructorOption, selectedStudentId, timetableGroups]);
+  }, [
+    effectiveStudentGroupByTargetId,
+    overviewEntity,
+    overviewEvents,
+    overviewUniverseEvents,
+    selectedInstructorOption,
+    selectedStudentId,
+    studentGroupTargetIdsForWeek
+  ]);
   const profileTitle =
     mainTab === "new"
-      ? "신규 배정 추천"
+      ? "시간표 생성"
+      : mainTab === "review"
+        ? "시간표 검토"
       : mainTab === "issues"
         ? "오류 기록"
         : roleView === "student"
@@ -1357,7 +2091,9 @@ export default function SynchroSPage() {
           : "강사 프로필";
   const profileName =
     mainTab === "new"
-      ? "신규 시간표 추천"
+      ? "학생 시간표 생성"
+      : mainTab === "review"
+        ? "주차별 학생 시간표 검토"
       : mainTab === "issues"
         ? "시간표 오류/충돌 기록"
         : roleView === "student"
@@ -1365,22 +2101,18 @@ export default function SynchroSPage() {
           : selectedInstructorLabel;
   const profileSecondary =
     mainTab === "new"
-      ? "등원 희망 요일/시간과 과목을 기준으로 배치 가능한 시간표를 추천합니다."
+      ? "재원생과 신규문의 가안을 구성하고 저장한 뒤 활성 시간표를 운영 화면에 반영합니다."
+      : mainTab === "review"
+        ? "학생별 주간 시간표를 정상, 확인필요, 문제발생으로 빠르게 처리합니다."
       : mainTab === "issues"
         ? "저장된 충돌과 입력 오류를 학생명, 요일, 시간, 사유 기준으로 다시 확인합니다."
       : roleView === "student"
         ? selectedStudentSecondary
         : selectedInstructorSecondary;
-  const profileAccentClass =
-    mainTab === "new"
-      ? "from-fuchsia-300/18 via-white/30 to-cyan-300/12 text-fuchsia-700"
-      : mainTab === "issues"
-        ? "from-amber-300/18 via-white/30 to-rose-300/12 text-amber-700"
-      : roleView === "student"
-        ? "from-emerald-400/18 via-white/30 to-teal-300/12 text-emerald-700"
-        : "from-sky-400/18 via-white/30 to-indigo-300/12 text-sky-700";
   const profileInitial = (mainTab === "new"
     ? "신"
+    : mainTab === "review"
+      ? "검"
     : mainTab === "issues"
       ? "오"
     : profileName === "학생 선택" || profileName === "강사 선택"
@@ -1396,30 +2128,48 @@ export default function SynchroSPage() {
     [instructors]
   );
   const activeGroup = useMemo(
-    () =>
-      timetableGroups.find(
-        (group) => group.roleView === roleView && group.targetId === currentTargetId && group.isActive
-      ) ?? null,
-    [currentTargetId, roleView, timetableGroups]
+    () => {
+      if (roleView === "student" && currentTargetId) {
+        return effectiveStudentGroupByTargetId.get(currentTargetId) ?? null;
+      }
+
+      return (
+        [...timetableGroups]
+          .filter(
+            (group) =>
+              group.roleView === roleView &&
+              group.targetId === currentTargetId &&
+              (group.tagId ?? null) === selectedScheduleTagId &&
+              group.isActive &&
+              isGroupEffectiveForWeek(group, weekStart)
+          )
+          .sort((a, b) => {
+            if (a.weekStart !== b.weekStart) return b.weekStart.localeCompare(a.weekStart);
+            return b.createdAt.localeCompare(a.createdAt);
+          })[0] ?? null
+      );
+    },
+    [currentTargetId, effectiveStudentGroupByTargetId, roleView, selectedScheduleTagId, timetableGroups, weekStart]
   );
   const selectedGroup = useMemo(
     () =>
       (selectedGroupId
         ? timetableGroups.find(
-            (group) => group.id === selectedGroupId && group.roleView === roleView && group.targetId === currentTargetId
+            (group) =>
+              group.id === selectedGroupId &&
+              group.roleView === roleView &&
+              group.targetId === currentTargetId &&
+              (group.tagId ?? null) === selectedScheduleTagId
           )
         : null) ?? null,
-    [currentTargetId, roleView, selectedGroupId, timetableGroups]
+    [currentTargetId, roleView, selectedGroupId, selectedScheduleTagId, timetableGroups]
   );
-  const activeStudentIdSet = useMemo(() => new Set(students.map((item) => item.id)), [students]);
-  const activeStudentNameSet = useMemo(
-    () => new Set(students.map((item) => normalizePersonName(item.name)).filter(Boolean)),
-    [students]
-  );
+  const displayedGroup = selectedGroup ?? activeGroup;
+  const isDisplayedGroupInactive = Boolean(displayedGroup && !displayedGroup.isActive);
   const activeStudentEventsForInstructor = useMemo(() => {
     if (roleView !== "instructor" || !selectedInstructorId) return [];
     const selectedInstructorKey = normalizePersonName(selectedInstructorLabel);
-    const activeStudentGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
+    const activeStudentGroups = [...effectiveStudentGroupByTargetId.values()];
     const isForSelectedInstructor = (event: ScheduleEvent) => {
       if (event.instructorId === selectedInstructorId) return true;
       if (!selectedInstructorKey) return false;
@@ -1432,46 +2182,47 @@ export default function SynchroSPage() {
     const liveInstructorEvents = filteredEvents.filter(
       (event) => isForSelectedInstructor(event) && isForActiveStudent(event)
     );
-    if (activeStudentGroups.length === 0) return liveInstructorEvents;
+    if (activeStudentGroups.length === 0) return selectedScheduleTagId ? [] : liveInstructorEvents;
 
     const merged = activeStudentGroups.flatMap((group) => {
-      const snapshot = (group.snapshotEvents ?? []).filter(
-        (event) => isForSelectedInstructor(event) && isForActiveStudent(event)
-      );
+      const snapshot = (group.snapshotEvents ?? []).flatMap((event) => {
+        if (!isForSelectedInstructor(event)) return [];
+        const scopedEvent = scopeScheduleEventToStudent(event, group.targetId);
+        return scopedEvent && isForActiveStudent(scopedEvent) ? [scopedEvent] : [];
+      });
       const snapshotKeys = new Set(snapshot.map((event) => `${event.id}:${event.classDate}`));
-      const liveLinked = liveInstructorEvents.filter(
-        (event) => group.classIds.includes(event.id) && !snapshotKeys.has(`${event.id}:${event.classDate}`)
-      );
+      const liveLinked = liveInstructorEvents.flatMap((event) => {
+        if (!group.classIds.includes(event.id) || snapshotKeys.has(`${event.id}:${event.classDate}`)) return [];
+        const scopedEvent = scopeScheduleEventToStudent(event, group.targetId);
+        return scopedEvent ? [scopedEvent] : [];
+      });
       return [...snapshot, ...liveLinked];
     });
-    const mergedWithLiveFallback = [...merged, ...liveInstructorEvents];
+    const mergedWithLiveFallback = selectedScheduleTagId ? merged : [...merged, ...liveInstructorEvents];
 
     const dedup = new Map<string, ScheduleEvent>();
     for (const event of mergedWithLiveFallback) {
-      const key = [
-        event.classDate,
-        event.weekday,
-        event.startTime,
-        event.endTime,
-        normalizeLookupToken(event.subjectCode),
-        normalizeLookupToken(event.classTypeCode),
-        normalizePersonName(event.instructorName)
-      ].join("::");
+      const key = getInstructorScheduleMergeKey(event);
       const existing = dedup.get(key);
       if (!existing) {
-        dedup.set(key, event);
+        const mergedRoster = mergeStudentRosters(event, event);
+        dedup.set(key, { ...event, ...mergedRoster });
         continue;
       }
 
-      const mergedStudentIds = Array.from(new Set([...(existing.studentIds ?? []), ...(event.studentIds ?? [])]));
-      const mergedStudentNames = Array.from(new Set([...(existing.studentNames ?? []), ...(event.studentNames ?? [])]));
+      const mergedRoster = mergeStudentRosters(existing, event);
       dedup.set(key, {
         ...existing,
-        studentIds: mergedStudentIds,
-        studentNames: mergedStudentNames
+        ...mergedRoster
       });
     }
-    return [...dedup.values()];
+    return dedupeInstructorStudentTimeSlots(
+      [...dedup.values()].sort((a, b) => {
+        if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+        if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+        return a.subjectName.localeCompare(b.subjectName, "ko");
+      })
+    );
   }, [
     activeStudentIdSet,
     activeStudentNameSet,
@@ -1479,16 +2230,22 @@ export default function SynchroSPage() {
     roleView,
     selectedInstructorId,
     selectedInstructorLabel,
-    timetableGroups
+    selectedScheduleTagId,
+    effectiveStudentGroupByTargetId
   ]);
-  const draftEvents = useMemo<ScheduleEvent[]>(() => {
+  const notionDraftEvents = useMemo<ScheduleEvent[]>(() => {
     if (parsedNotionItems.length === 0) return [];
     return parsedNotionItems.map((item, index) => {
       const subjectMatch = resolveSubjectOption(item.subjectLabel, subjects);
       const classTypeMatch = resolveClassTypeOption(item.classTypeLabel, classTypes);
       const resolvedInstructorName = item.instructorName ? normalizeInstructorAlias(item.instructorName) : "";
       const instructorName =
-        resolvedInstructorName || (selectedInstructorLabel === "강사 선택" ? "미지정 강사" : selectedInstructorLabel);
+        resolvedInstructorName ||
+        (roleView === "student"
+          ? "강사 확인 필요"
+          : selectedInstructorLabel === "강사 선택"
+            ? "미지정 강사"
+            : selectedInstructorLabel);
       const studentNames =
         selectedStudentLabel !== "학생 선택"
           ? [selectedStudentLabel]
@@ -1528,13 +2285,57 @@ export default function SynchroSPage() {
     subjects,
     weekStart
   ]);
+  const syncDraftEvents = useMemo<ScheduleEvent[]>(
+    () =>
+      syncDraftItems.map((item) => ({
+        id: item.id,
+        scheduleMode: "recurring",
+        instructorId: item.instructorId,
+        instructorName: item.instructorName,
+        studentIds: selectedStudentId ? [selectedStudentId] : [],
+        studentNames: selectedStudentLabel !== "학생 선택" ? [selectedStudentLabel] : ["학생 미지정"],
+        subjectCode: item.isSelfStudy ? "SELF_STUDY" : `SYNC_DRAFT:${normalizeLookupToken(item.subjectLabel) || "unknown"}`,
+        subjectName: item.subjectLabel,
+        classTypeCode: item.classTypeCode,
+        classTypeLabel: item.classTypeLabel,
+        badgeText: item.badgeText,
+        weekday: item.weekday,
+        classDate: shiftDate(weekStart, item.weekday - 1),
+        startTime: item.startTime,
+        endTime: item.endTime,
+        note: item.note || item.rawText,
+        progressStatus: "planned",
+        createdAt: new Date().toISOString()
+      })),
+    [selectedStudentId, selectedStudentLabel, syncDraftItems, weekStart]
+  );
+  const draftEvents = studentScheduleInputTab === "sync" ? syncDraftEvents : notionDraftEvents;
   const displayEvents = useMemo(() => {
+    const onlyActiveRosterEvents = (items: ScheduleEvent[]) =>
+      items.filter(
+        (event) =>
+          eventHasInstructorInSet(event, activeInstructorIdSet, activeInstructorNameSet) &&
+          (eventHasStudentInSet(event, activeStudentIdSet, activeStudentNameSet) || eventHasProspectStudent(event))
+      );
+    const filterInstructorStudent = (items: ScheduleEvent[]) => {
+      if (!instructorStudentKeyword && !instructorStudentKeywordToken) return items;
+      return items.filter((event) =>
+        event.studentNames.some((studentName) => {
+          const lowerName = studentName.toLowerCase();
+          return (
+            (instructorStudentKeyword && lowerName.includes(instructorStudentKeyword)) ||
+            (instructorStudentKeywordToken && normalizeLookupToken(studentName).includes(instructorStudentKeywordToken))
+          );
+        })
+      );
+    };
+
     if (mainTab === "overview") {
-      return overviewDisplayEvents;
+      return onlyActiveRosterEvents(overviewDisplayEvents);
     }
     if (roleView === "instructor") {
       // 강사 탭은 활성 학생 기준 실시간 수업 + 활성 학생 그룹 스냅샷을 함께 반영한다.
-      return activeStudentEventsForInstructor;
+      return filterInstructorStudent(onlyActiveRosterEvents(activeStudentEventsForInstructor));
     }
 
     const preferredGroup = selectedGroup ?? activeGroup;
@@ -1542,53 +2343,58 @@ export default function SynchroSPage() {
       const snapshot = preferredGroup.snapshotEvents ?? [];
       const hasDraftSnapshot = snapshot.some((event) => event.id.startsWith("draft-"));
       if (snapshot.length > 0 && !hasDraftSnapshot) {
-        return snapshot;
+        return onlyActiveRosterEvents(snapshot);
       }
       const idSet = new Set(preferredGroup.classIds);
-      return filteredEvents.filter((event) => idSet.has(event.id));
+      return onlyActiveRosterEvents(filteredEvents.filter((event) => idSet.has(event.id)));
     }
     if (draftEvents.length > 0) return draftEvents;
-    return filteredEvents;
+    if (selectedScheduleTagId) return [];
+    if (selectedStudentId && studentGroupTargetIdsForWeek.has(selectedStudentId)) return [];
+    return onlyActiveRosterEvents(filteredEvents);
   }, [
     activeGroup,
+    activeInstructorIdSet,
+    activeInstructorNameSet,
     activeStudentEventsForInstructor,
+    activeStudentIdSet,
+    activeStudentNameSet,
     draftEvents,
     filteredEvents,
+    instructorStudentKeyword,
+    instructorStudentKeywordToken,
     mainTab,
     overviewDisplayEvents,
     roleView,
-    selectedGroup
+    selectedScheduleTagId,
+    selectedGroup,
+    selectedStudentId,
+    studentGroupTargetIdsForWeek
   ]);
-  const activeHighlightCellTints = useMemo(() => {
-    if (displayEvents.length === 0) return {};
-    const chainEvents = [...displayEvents]
-      .sort((a, b) => {
-        if (a.weekday !== b.weekday) return a.weekday - b.weekday;
-        return timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
-      });
-
-    const map: Record<string, string> = {};
-    for (let i = 0; i < chainEvents.length; i += 1) {
-      const event = chainEvents[i];
-      const prev = chainEvents[i - 1];
-      const next = chainEvents[i + 1];
-      const start = timeToMinutes(event.startTime);
-      const end = timeToMinutes(event.endTime);
-      const isChainWithPrev =
-        Boolean(prev) &&
-        prev.weekday === event.weekday &&
-        prev.subjectCode === event.subjectCode &&
-        timeToMinutes(prev.endTime) === start;
-      const isChainWithNext =
-        Boolean(next) &&
-        next.weekday === event.weekday &&
-        next.subjectCode === event.subjectCode &&
-        timeToMinutes(next.startTime) === end;
-
-      map[`${event.weekday}-${event.startTime}`] = subjectTint(event.subjectCode, isChainWithPrev || isChainWithNext);
+  const timetableEmptyMessage = useMemo(() => {
+    if (roleView !== "student" || displayEvents.length > 0) return undefined;
+    if (!selectedScheduleTagId) {
+      return "분류(태그)를 선택하면 해당 범위의 시간표만 표시됩니다.";
     }
-    return map;
-  }, [displayEvents]);
+    if (!displayedGroup) {
+      return `#${selectedScheduleTagLabel}로 저장된 시간표가 없습니다. 미분류 시간표는 이 범위에 표시되지 않습니다.`;
+    }
+    return `#${selectedScheduleTagLabel} 시간표에 등록된 수업이 없습니다.`;
+  }, [displayEvents.length, displayedGroup, roleView, selectedScheduleTagId, selectedScheduleTagLabel]);
+  const specialNotesByGroupId = useMemo(() => {
+    const notesByGroup = new Map<string, SpecialNoteItem[]>();
+    for (const note of specialNotes) {
+      if (!note.groupId) continue;
+      const groupNotes = notesByGroup.get(note.groupId) ?? [];
+      groupNotes.push(note);
+      notesByGroup.set(note.groupId, groupNotes);
+    }
+    return notesByGroup;
+  }, [specialNotes]);
+  const displayedGroupNotes = useMemo(
+    () => (displayedGroup ? specialNotesByGroupId.get(displayedGroup.id) ?? [] : []),
+    [displayedGroup, specialNotesByGroupId]
+  );
   const eventDateSet = useMemo(() => new Set(displayEvents.map((event) => event.classDate)), [displayEvents]);
   const filteredInstructors = useMemo(
     () => (keyword.length === 0 ? instructors : instructors.filter((item) => item.name.toLowerCase().includes(keyword))),
@@ -1598,23 +2404,349 @@ export default function SynchroSPage() {
     () => (keyword.length === 0 ? students : students.filter((item) => item.name.toLowerCase().includes(keyword))),
     [students, keyword]
   );
+  const effectiveGroupIdSet = useMemo(
+    () => new Set([...effectiveStudentGroupByTargetId.values()].map((group) => group.id)),
+    [effectiveStudentGroupByTargetId]
+  );
   const filteredGroups = useMemo(
     () =>
       timetableGroups
         .filter((group) => group.roleView === roleView && group.targetId === currentTargetId)
-        .filter((group) => (showActiveOnly ? group.isActive : true))
+        .filter((group) => (showActiveOnly ? group.isActive || effectiveGroupIdSet.has(group.id) : true))
         .sort((a, b) => {
+          const aEffective = effectiveGroupIdSet.has(a.id);
+          const bEffective = effectiveGroupIdSet.has(b.id);
+          if (aEffective !== bEffective) return aEffective ? -1 : 1;
           if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
           return b.createdAt.localeCompare(a.createdAt);
         }),
-    [currentTargetId, roleView, showActiveOnly, timetableGroups]
+    [currentTargetId, effectiveGroupIdSet, roleView, showActiveOnly, timetableGroups]
   );
-  const visibleGroups = useMemo(() => {
-    const pageSize = 4;
-    const start = (groupPage - 1) * pageSize;
-    return filteredGroups.slice(start, start + pageSize);
-  }, [filteredGroups, groupPage]);
-  const groupPageCount = useMemo(() => Math.max(1, Math.ceil(filteredGroups.length / 4)), [filteredGroups.length]);
+  const currentGroupMonthKey = useMemo(() => calendarMonth.slice(0, 7), [calendarMonth]);
+  const groupMonthSections = useMemo<TimetableGroupMonthSection[]>(() => {
+    const groupsBySection = new Map<string, TimetableGroup[]>();
+    for (const group of filteredGroups) {
+      const monthKey = getTimetableGroupMonthKey(group);
+      const sectionKey = `${group.tagId ?? "untagged"}::${monthKey}`;
+      const bucket = groupsBySection.get(sectionKey) ?? [];
+      bucket.push(group);
+      groupsBySection.set(sectionKey, bucket);
+    }
+
+    return [...groupsBySection.entries()]
+      .sort(([a], [b]) => {
+        const [aTag, aMonth] = a.split("::");
+        const [bTag, bMonth] = b.split("::");
+        const selectedTagKey = selectedScheduleTagId ?? "untagged";
+        if (aTag === selectedTagKey && bTag !== selectedTagKey) return -1;
+        if (bTag === selectedTagKey && aTag !== selectedTagKey) return 1;
+        if (aMonth === currentGroupMonthKey && bMonth !== currentGroupMonthKey) return -1;
+        if (bMonth === currentGroupMonthKey && aMonth !== currentGroupMonthKey) return 1;
+        return b.localeCompare(a);
+      })
+      .map(([sectionKey, groups]) => {
+        const monthKey = sectionKey.split("::")[1] ?? "";
+        const tagId = groups[0]?.tagId ?? null;
+        const tag = scheduleTags.find((item) => item.id === tagId);
+        return {
+          sectionKey,
+          monthKey,
+          label: formatTimetableGroupMonthLabel(monthKey),
+          tagId,
+          tagName: tag?.name ?? "미분류",
+          tagColorKey: tag?.colorKey ?? "slate",
+          isCurrentMonth: monthKey === currentGroupMonthKey,
+          groups
+        };
+      });
+  }, [currentGroupMonthKey, filteredGroups, scheduleTags, selectedScheduleTagId]);
+  const reviewStudents = useMemo(() => {
+    const byKey = new Map<string, SelectOption>();
+
+    for (const student of students) {
+      const key = getReviewStudentKey(student);
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, student);
+        continue;
+      }
+
+      const existingHasDetail = Boolean(existing.secondary);
+      const nextHasDetail = Boolean(student.secondary);
+      if (!existingHasDetail && nextHasDetail) {
+        byKey.set(key, student);
+      }
+    }
+
+
+    for (const event of reviewEvents) {
+      event.studentIds.forEach((studentId, index) => {
+        if (!studentId.startsWith("prospect:")) return;
+        const name = event.studentNames[index] ?? event.studentNames[0] ?? "[가안] 신규문의";
+        if (!byKey.has(studentId)) {
+          byKey.set(studentId, { id: studentId, name, secondary: "신규문의 가안" });
+        }
+      });
+    }
+
+    return [...byKey.values()];
+  }, [reviewEvents, students]);
+  const reviewStudentAlias = useMemo(() => {
+    const idToCanonical = new Map<string, SelectOption>();
+    const nameToCanonical = new Map<string, SelectOption>();
+    const canonicalByKey = new Map(reviewStudents.map((student) => [getReviewStudentKey(student), student]));
+
+    for (const student of reviewStudents) {
+      idToCanonical.set(student.id, student);
+      const normalizedName = normalizePersonName(student.name);
+      if (normalizedName && !nameToCanonical.has(normalizedName)) {
+        nameToCanonical.set(normalizedName, student);
+      }
+    }
+
+    for (const student of students) {
+      const key = getReviewStudentKey(student);
+      const canonical = canonicalByKey.get(key) ?? student;
+      idToCanonical.set(student.id, canonical);
+      const normalizedName = normalizePersonName(student.name);
+      if (normalizedName && !nameToCanonical.has(normalizedName)) {
+        nameToCanonical.set(normalizedName, canonical);
+      }
+    }
+
+    return { idToCanonical, nameToCanonical };
+  }, [reviewStudents, students]);
+  const reviewByStudentId = useMemo(() => {
+    const map = new Map<string, ScheduleReviewItem>();
+    for (const item of scheduleReviews) {
+      const canonicalStudent =
+        reviewStudentAlias.idToCanonical.get(item.studentId) ??
+        (item.studentName ? reviewStudentAlias.nameToCanonical.get(normalizePersonName(item.studentName)) : undefined);
+      const canonicalId = canonicalStudent?.id ?? item.studentId;
+      const existing = map.get(canonicalId);
+      if (!existing || (item.reviewedAt ?? "") > (existing.reviewedAt ?? "")) {
+        map.set(canonicalId, { ...item, studentId: canonicalId });
+      }
+    }
+    return map;
+  }, [reviewStudentAlias, scheduleReviews]);
+  const reviewActiveGroupByStudentId = useMemo(() => {
+    const byStudentId = new Map<string, TimetableGroup>();
+
+    for (const group of effectiveStudentGroupByTargetId.values()) {
+      const canonicalStudent = reviewStudentAlias.idToCanonical.get(group.targetId);
+      if (!canonicalStudent) {
+        continue;
+      }
+
+      byStudentId.set(canonicalStudent.id, group);
+    }
+
+    return byStudentId;
+  }, [effectiveStudentGroupByTargetId, reviewStudentAlias]);
+  const reviewHasGroupByStudentId = useMemo(() => {
+    const byStudentId = new Set<string>();
+
+    for (const targetId of studentGroupTargetIdsForWeek) {
+      const canonicalStudent = reviewStudentAlias.idToCanonical.get(targetId);
+      if (canonicalStudent) {
+        byStudentId.add(canonicalStudent.id);
+      }
+    }
+
+    return byStudentId;
+  }, [reviewStudentAlias, studentGroupTargetIdsForWeek]);
+  const reviewEventsByStudentId = useMemo(() => {
+    const map = new Map<string, ScheduleEvent[]>();
+
+    for (const student of reviewStudents) {
+      const activeGroup = reviewActiveGroupByStudentId.get(student.id);
+      const sourceEvents =
+        activeGroup && (activeGroup.snapshotEvents?.length ?? 0) > 0
+          ? activeGroup.snapshotEvents ?? []
+          : activeGroup?.classIds.length
+            ? reviewEvents.filter((event) => activeGroup.classIds.includes(event.id))
+            : reviewHasGroupByStudentId.has(student.id)
+              ? []
+            : reviewEvents.filter((event) =>
+                event.studentIds.some((studentId) => reviewStudentAlias.idToCanonical.get(studentId)?.id === student.id) ||
+                event.studentNames.some((studentName) => reviewStudentAlias.nameToCanonical.get(normalizePersonName(studentName))?.id === student.id)
+              );
+
+      const studentEvents: ScheduleEvent[] = [];
+      const seenKeys = new Set<string>();
+
+      for (const event of sourceEvents) {
+        const isProspect = student.id.startsWith("prospect:");
+        if (
+          !eventHasInstructorInSet(event, activeInstructorIdSet, activeInstructorNameSet) ||
+          (!isProspect && !eventHasStudentInSet(event, activeStudentIdSet, activeStudentNameSet))
+        ) {
+          continue;
+        }
+
+        const hasCanonicalStudent =
+          event.studentIds.some((studentId) => reviewStudentAlias.idToCanonical.get(studentId)?.id === student.id) ||
+          event.studentNames.some((studentName) => reviewStudentAlias.nameToCanonical.get(normalizePersonName(studentName))?.id === student.id);
+        if (!hasCanonicalStudent) {
+          continue;
+        }
+
+        const eventKey = getReviewEventDedupeKey(event);
+        if (seenKeys.has(eventKey)) {
+          continue;
+        }
+
+        seenKeys.add(eventKey);
+        studentEvents.push(event);
+      }
+
+      studentEvents.sort((a, b) => {
+        if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+        return a.startTime.localeCompare(b.startTime);
+      });
+
+      map.set(student.id, studentEvents);
+    }
+
+    return map;
+  }, [
+    activeInstructorIdSet,
+    activeInstructorNameSet,
+    activeStudentIdSet,
+    activeStudentNameSet,
+    reviewActiveGroupByStudentId,
+    reviewEvents,
+    reviewHasGroupByStudentId,
+    reviewStudentAlias,
+    reviewStudents
+  ]);
+  const getReviewHints = useCallback((eventsForStudent: ScheduleEvent[]) => {
+    const hints: string[] = [];
+    if (eventsForStudent.length === 0) {
+      hints.push("이번 주 수업 없음");
+    }
+
+    for (let i = 0; i < eventsForStudent.length; i += 1) {
+      for (let j = i + 1; j < eventsForStudent.length; j += 1) {
+        const a = eventsForStudent[i]!;
+        const b = eventsForStudent[j]!;
+        if (a.weekday !== b.weekday) continue;
+        if (timeToMinutes(a.startTime) < timeToMinutes(b.endTime) && timeToMinutes(a.endTime) > timeToMinutes(b.startTime)) {
+          hints.push(`${weekdayLabel(a.weekday)} ${a.startTime} 시간 중복`);
+        }
+      }
+    }
+
+    if (eventsForStudent.some((event) => timeToMinutes(event.endTime) > 22 * 60)) {
+      hints.push("22시 이후 종료");
+    }
+
+    return Array.from(new Set(hints)).slice(0, 3);
+  }, []);
+  const reviewRows = useMemo(() => {
+    return reviewStudents
+      .map((student) => {
+        const eventsForStudent = reviewEventsByStudentId.get(student.id) ?? [];
+        const review = reviewByStudentId.get(student.id) ?? null;
+        const hints = getReviewHints(eventsForStudent);
+        return {
+          student,
+          events: eventsForStudent,
+          review,
+          hints
+        };
+      })
+      .filter((row) => {
+        if (reviewFilter === "all") return true;
+        if (reviewFilter === "unreviewed") return !row.review;
+        if (reviewFilter === "memo") return Boolean(row.review?.memo?.trim());
+        return row.review?.status === reviewFilter;
+      })
+      .filter((row) => {
+        const keyword = reviewSearchKeyword.trim().toLowerCase();
+        if (!keyword) return true;
+        return [row.student.name, row.student.secondary ?? ""].join(" ").toLowerCase().includes(keyword);
+      })
+      .sort((a, b) => {
+        if (reviewSortMode === "class_desc") {
+          return b.events.length - a.events.length || a.student.name.localeCompare(b.student.name, "ko");
+        }
+        if (reviewSortMode === "class_asc") {
+          return a.events.length - b.events.length || a.student.name.localeCompare(b.student.name, "ko");
+        }
+        if (reviewSortMode === "name") {
+          return a.student.name.localeCompare(b.student.name, "ko");
+        }
+        const aStatus = a.review?.status ?? "unreviewed";
+        const bStatus = b.review?.status ?? "unreviewed";
+        if (aStatus !== bStatus) {
+          const order = ["unreviewed", "issue", "needs_check", "normal"];
+          return order.indexOf(aStatus) - order.indexOf(bStatus);
+        }
+        return b.events.length - a.events.length || a.student.name.localeCompare(b.student.name, "ko");
+      });
+  }, [getReviewHints, reviewByStudentId, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, reviewStudents]);
+  const reviewStats = useMemo(() => {
+    const reviewedIds = new Set(reviewByStudentId.keys());
+    return {
+      total: reviewStudents.length,
+      normal: [...reviewByStudentId.values()].filter((item) => item.status === "normal").length,
+      needsCheck: [...reviewByStudentId.values()].filter((item) => item.status === "needs_check").length,
+      issue: [...reviewByStudentId.values()].filter((item) => item.status === "issue").length,
+      unreviewed: reviewStudents.filter((student) => !reviewedIds.has(student.id)).length,
+      memo: [...reviewByStudentId.values()].filter((item) => item.memo.trim().length > 0).length
+    };
+  }, [reviewByStudentId, reviewStudents]);
+  const selectedReviewStudent = useMemo(
+    () => reviewRows.find((row) => row.student.id === selectedReviewStudentId)?.student ?? reviewRows[0]?.student ?? null,
+    [reviewRows, selectedReviewStudentId]
+  );
+  const selectedReview = selectedReviewStudent ? reviewByStudentId.get(selectedReviewStudent.id) ?? null : null;
+  const selectedReviewEvents = useMemo(
+    () => (selectedReviewStudent ? reviewEventsByStudentId.get(selectedReviewStudent.id) ?? [] : []),
+    [reviewEventsByStudentId, selectedReviewStudent]
+  );
+  const selectedReviewProgressByEventKey = useMemo(() => {
+    const progress = new Map<string, { index: number; total: number }>();
+    const eventGroups = new Map<string, ScheduleEvent[]>();
+
+    for (const event of selectedReviewEvents) {
+      const key = [
+        event.weekday,
+        getReviewSubjectKey(event)
+      ].join("::");
+      const bucket = eventGroups.get(key) ?? [];
+      bucket.push(event);
+      eventGroups.set(key, bucket);
+    }
+
+    for (const group of eventGroups.values()) {
+      const ordered = [...group].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+      let chainStart = 0;
+      while (chainStart < ordered.length) {
+        let chainEnd = chainStart;
+        while (chainEnd + 1 < ordered.length) {
+          const current = ordered[chainEnd];
+          const next = ordered[chainEnd + 1];
+          if (timeToMinutes(current.endTime) !== timeToMinutes(next.startTime)) break;
+          chainEnd += 1;
+        }
+        const total = chainEnd - chainStart + 1;
+        for (let idx = chainStart; idx <= chainEnd; idx += 1) {
+          const event = ordered[idx];
+          progress.set(getReviewEventKey(event), {
+            index: idx - chainStart + 1,
+            total
+          });
+        }
+        chainStart = chainEnd + 1;
+      }
+    }
+
+    return progress;
+  }, [selectedReviewEvents]);
+  const selectedReviewHints = useMemo(() => getReviewHints(selectedReviewEvents), [getReviewHints, selectedReviewEvents]);
   const groupNumberById = useMemo(() => {
     const byDate = new Map<string, TimetableGroup[]>();
     for (const group of filteredGroups) {
@@ -1631,10 +2763,6 @@ export default function SynchroSPage() {
     }
     return numberMap;
   }, [filteredGroups]);
-  const headerGlowClass =
-    roleView === "instructor"
-      ? "before:absolute before:-inset-2 before:-z-10 before:rounded-[28px] before:bg-[radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.32),transparent_60%)]"
-      : "before:absolute before:-inset-2 before:-z-10 before:rounded-[28px] before:bg-[radial-gradient(circle_at_85%_20%,rgba(16,185,129,0.32),transparent_60%)]";
   const filteredConflictLogs = useMemo(
     () =>
       keyword.length === 0
@@ -1686,6 +2814,14 @@ export default function SynchroSPage() {
         return;
       }
 
+      if (next === "review") {
+        setRoleView("student");
+        if (!selectedReviewStudentId && reviewStudents.length > 0) {
+          setSelectedReviewStudentId(reviewStudents[0]!.id);
+        }
+        return;
+      }
+
       if (next === "new") {
         setRoleView("student");
         return;
@@ -1697,7 +2833,7 @@ export default function SynchroSPage() {
 
       setRoleView(next);
     },
-    [overviewEntity, overviewVisibleInstructors, selectedInstructorId, selectedStudentId, students]
+    [overviewEntity, overviewVisibleInstructors, reviewStudents, selectedInstructorId, selectedReviewStudentId, selectedStudentId, students]
   );
 
   const handleToggleInstructorDayOff = useCallback(
@@ -1760,82 +2896,6 @@ export default function SynchroSPage() {
     [getInstructorDaysOff, moveToLogin, selectedInstructorId, selectedInstructorLabel]
   );
 
-  const handleToggleInstructorAvailableTime = useCallback(
-    async (startTime: string) => {
-      if (!selectedInstructorId) {
-        setConflictDialog({ open: true, title: "강사 선택 필요", message: "먼저 가능 시간을 설정할 강사를 선택해 주세요." });
-        return;
-      }
-
-      const selectedInstructor = instructors.find((item) => item.id === selectedInstructorId);
-      const currentByDay = normalizeAvailableTimeSlotsByDay(selectedInstructor?.availableTimeSlotsByDay);
-      const currentSlots = getInstructorAvailableTimeSlotsForWeekday(selectedInstructor, availabilityEditorWeekday);
-      const nextSlots = currentSlots.includes(startTime)
-        ? currentSlots.filter((value) => value !== startTime)
-        : [...currentSlots, startTime].sort((a, b) => a.localeCompare(b));
-      const nextByDay: AvailableTimeSlotsByDay = {
-        ...currentByDay
-      };
-
-      if (nextSlots.length > 0) {
-        nextByDay[availabilityEditorWeekday] = nextSlots;
-      } else {
-        delete nextByDay[availabilityEditorWeekday];
-      }
-
-      setSavingInstructorAvailability(true);
-      setError(null);
-
-      try {
-        const res = await fetch(`/api/instructors/${selectedInstructorId}/availability`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ availableTimeSlotsByDay: nextByDay })
-        });
-
-        if (res.status === 401) {
-          moveToLogin();
-          return;
-        }
-
-        if (!res.ok) {
-          throw new Error(await getApiErrorMessage(res, "강사 가능 시간 저장에 실패했습니다."));
-        }
-
-        const data = (await res.json().catch(() => ({}))) as {
-          availableTimeSlots?: string[];
-          availableTimeSlotsByDay?: AvailableTimeSlotsByDay;
-        };
-        const resolvedByDay = normalizeAvailableTimeSlotsByDay(data.availableTimeSlotsByDay ?? nextByDay);
-        const resolvedSlots = flattenAvailableTimeSlotsByDay(resolvedByDay, data.availableTimeSlots ?? nextSlots);
-        setInstructors((prev) =>
-          prev.map((item) =>
-            item.id === selectedInstructorId
-              ? {
-                  ...item,
-                  availableTimeSlots: resolvedSlots,
-                  availableTimeSlotsByDay: resolvedByDay
-                }
-              : item
-          )
-        );
-
-        const weekdayLabel = DAYS.find((day) => day.key === availabilityEditorWeekday)?.label ?? `${availabilityEditorWeekday}`;
-        const resolvedDaySlots = normalizeAvailableTimeSlots(resolvedByDay[availabilityEditorWeekday]);
-        setNotice(
-          resolvedDaySlots.length > 0
-            ? `${selectedInstructorLabel} 강사의 ${weekdayLabel} 가능 시간을 저장했습니다.`
-            : `${selectedInstructorLabel} 강사의 ${weekdayLabel} 시간 제한을 해제했습니다.`
-        );
-      } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "강사 가능 시간 저장에 실패했습니다.");
-      } finally {
-        setSavingInstructorAvailability(false);
-      }
-    },
-    [availabilityEditorWeekday, instructors, moveToLogin, selectedInstructorId, selectedInstructorLabel]
-  );
-
   const buildUndoState = useCallback(
     (label: string, restoreMove?: UndoState["restoreMove"]): UndoState => ({
       label,
@@ -1850,8 +2910,14 @@ export default function SynchroSPage() {
     [events, notionInput, notionPreview, parsedNotionItems, selectedGroupId, timetableGroups]
   );
 
-  const loadOptions = useCallback(async () => {
-    const res = await fetch("/api/schedules/options", { method: "GET", cache: "no-store" });
+  const loadOptions = useCallback(async (opts?: { refreshSheets?: boolean }) => {
+    const query = new URLSearchParams();
+    if (opts?.refreshSheets) {
+      query.set("refreshSheets", "1");
+    }
+    const queryString = query.toString();
+    const url = queryString ? `/api/schedules/options?${queryString}` : "/api/schedules/options";
+    const res = await fetch(url, { method: "GET", cache: "no-store", headers: await getFirebaseAuthHeaders() });
 
     if (res.status === 401) {
       moveToLogin();
@@ -1865,12 +2931,15 @@ export default function SynchroSPage() {
     const data = (await res.json()) as OptionsResponse;
 
     setInstructors(data.instructors);
+    setSuspendedInstructors(data.suspendedInstructors ?? []);
     setStudents(data.students);
+    setSuspendedStudents(data.suspendedStudents ?? []);
     setSubjects(data.subjects);
     setClassTypes(data.classTypes);
     if (data.viewerRole) {
       setViewerRole(data.viewerRole);
     }
+    setViewerRoleResolved(true);
 
     setSelectedInstructorId((prev) => {
       if (data.instructors.some((item) => item.id === prev)) return prev;
@@ -1882,6 +2951,7 @@ export default function SynchroSPage() {
     if (data.viewerRole === "instructor") {
       setMainTab("instructor");
       setRoleView("instructor");
+      setShowIntroPage(false);
     } else if (data.instructors.length > 0 && data.students.length === 0) {
       setRoleView("instructor");
     }
@@ -2019,13 +3089,20 @@ export default function SynchroSPage() {
   );
 
   const loadWeek = useCallback(async (opts?: { silent?: boolean }) => {
+    const requestId = ++weekLoadRequestRef.current;
     if (roleView === "instructor" && !selectedInstructorId) {
-      setEvents([]);
+      if (requestId === weekLoadRequestRef.current) {
+        setEvents([]);
+        setLoading(false);
+      }
       return;
     }
 
     if (roleView === "student" && !selectedStudentId) {
-      setEvents([]);
+      if (requestId === weekLoadRequestRef.current) {
+        setEvents([]);
+        setLoading(false);
+      }
       return;
     }
 
@@ -2057,13 +3134,15 @@ export default function SynchroSPage() {
       }
 
       const data = (await res.json()) as WeekResponse;
+      if (requestId !== weekLoadRequestRef.current) return;
       setEvents(data.events);
       setError(null);
     } catch (loadError) {
+      if (requestId !== weekLoadRequestRef.current) return;
       setError(loadError instanceof Error ? loadError.message : "Failed to load week schedule");
       setEvents([]);
     } finally {
-      if (!opts?.silent) {
+      if (!opts?.silent && requestId === weekLoadRequestRef.current) {
         setLoading(false);
       }
     }
@@ -2089,7 +3168,10 @@ export default function SynchroSPage() {
         timestampLabel: formatSaveHistoryTimestamp(new Date(item.created_at)),
         targetType: item.target_type,
         targetName: item.target_name,
-        targetLabel: `${item.target_type}: ${item.target_name}`
+        targetId: item.target_id ?? null,
+        targetLabel: `${item.target_type}: ${item.target_name}`,
+        tagId: item.tag_id ?? null,
+        tagLabel: item.tag_name?.trim() || "기록 없음"
       }))
     );
     setError(null);
@@ -2120,6 +3202,105 @@ export default function SynchroSPage() {
       setConflictLogsLoading(false);
     }
   }, [moveToLogin]);
+
+  const loadScheduleReviews = useCallback(async () => {
+    if (mainTab !== "review") {
+      return;
+    }
+
+    const requestedTagId = selectedScheduleTagId;
+    setReviewLoading(true);
+
+    try {
+      const reviewQuery = new URLSearchParams({ weekStart, tagId: requestedTagId ?? "" });
+      const weekQuery = new URLSearchParams({ weekStart, view: "student" });
+      const [weekRes, reviewRes] = await Promise.all([
+        fetch(`/api/schedules/week?${weekQuery.toString()}`, { method: "GET", cache: "no-store" }),
+        fetch(`/api/timetable-notes?${reviewQuery.toString()}`, { method: "GET", cache: "no-store" })
+      ]);
+
+      if (weekRes.status === 401 || reviewRes.status === 401) {
+        moveToLogin();
+        return;
+      }
+
+      if (!reviewRes.ok) {
+        throw new Error(await getApiErrorMessage(reviewRes, "시간표 검토 상태를 불러오지 못했습니다."));
+      }
+
+      // 검토 상태는 주간 시간표 응답과 독립적으로 먼저 복원합니다. 한쪽 요청이
+      // 지연되거나 실패해도 이미 서버에 저장된 판정이 미검토로 되돌아가지 않습니다.
+      const reviewData = (await reviewRes.json()) as { items?: ScheduleReviewItem[] };
+      setScheduleReviews(reviewData.items ?? []);
+
+      if (!weekRes.ok) {
+        throw new Error(await getApiErrorMessage(weekRes, "검토용 시간표를 불러오지 못했습니다."));
+      }
+      const weekData = (await weekRes.json()) as { events?: ScheduleEvent[] };
+      setReviewEvents(weekData.events ?? []);
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "시간표 검토 데이터를 불러오지 못했습니다.");
+    } finally {
+      setReviewLoading(false);
+    }
+  }, [mainTab, moveToLogin, selectedScheduleTagId, weekStart]);
+
+  const saveScheduleReview = useCallback(
+    async (studentId: string, status: ReviewStatus, memo: string) => {
+      if (!studentId || reviewSavingId) return;
+
+      const previousReviews = scheduleReviews;
+      const studentName = reviewStudents.find((student) => student.id === studentId)?.name ?? "";
+      const optimisticItem: ScheduleReviewItem = {
+        id: `optimistic:${studentId}:${Date.now()}`,
+        studentId,
+        studentName,
+        weekStart,
+        tagId: selectedScheduleTagId,
+        isLegacyFallback: false,
+        status,
+        memo: memo.trim(),
+        reviewedAt: new Date().toISOString()
+      };
+      setReviewSavingId(studentId);
+      setError(null);
+      setNotice(null);
+      setScheduleReviews((prev) => [optimisticItem, ...prev.filter((item) => item.studentId !== studentId)]);
+
+      try {
+        const res = await fetch("/api/timetable-notes", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ weekStart, studentId, tagId: selectedScheduleTagId, status, memo })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          throw new Error(await getApiErrorMessage(res, "시간표 검토 저장에 실패했습니다."));
+        }
+
+        const data = (await res.json().catch(() => ({}))) as { item?: ScheduleReviewItem };
+        if (data.item) {
+          setScheduleReviews((prev) => [data.item!, ...prev.filter((item) => item.studentId !== studentId)]);
+          if (studentId === selectedReviewStudentId) {
+            setReviewMemoDraft(data.item.memo ?? "");
+          }
+        }
+        setNotice(`${REVIEW_STATUS_META[status].label} 상태를 서버에 저장했습니다.`);
+      } catch (saveError) {
+        setScheduleReviews(previousReviews);
+        setError(saveError instanceof Error ? saveError.message : "시간표 검토 저장에 실패했습니다.");
+      } finally {
+        setReviewSavingId(null);
+      }
+    },
+    [moveToLogin, reviewSavingId, reviewStudents, scheduleReviews, selectedReviewStudentId, selectedScheduleTagId, weekStart]
+  );
 
   const resolveStudentNames = useCallback(
     (studentIds: string[]) =>
@@ -2162,22 +3343,64 @@ export default function SynchroSPage() {
   );
 
   const loadTimetableGroups = useCallback(async () => {
-    const res = await fetch("/api/schedules/groups", { method: "GET", cache: "no-store" });
+    const requestId = ++timetableGroupsLoadRequestRef.current;
+    setTimetableGroupsLoading(true);
 
-    if (res.status === 401) {
-      moveToLogin();
-      return;
+    try {
+      const fetchGroups = async (query: URLSearchParams) => {
+        const url = `/api/schedules/groups?${query.toString()}`;
+        const res = await fetch(url, { method: "GET", cache: "no-store" });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return [] as TimetableGroup[];
+        }
+
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(err.error ?? "저장된 시간표 그룹을 불러오지 못했습니다.");
+        }
+
+        const data = (await res.json().catch(() => ({}))) as TimetableGroupsResponse;
+        if (typeof data.supportsExpiration === "boolean") {
+          setTimetableGroupExpirationSupported((prev) => prev && data.supportsExpiration === true);
+        }
+        return (data.items ?? []).map(mapApiGroupToState);
+      };
+
+      const activeQuery = new URLSearchParams({
+        roleView: "student",
+        effectiveWeekStart: shiftDate(weekStart, 7),
+        includeSnapshots:
+          mainTab === "review" || roleView === "instructor" || isInstructorReadOnly || (showIntroPage && !isInstructorReadOnly)
+            ? "1"
+            : "0",
+        activeOnly: "1",
+        tagId: selectedScheduleTagId ?? ""
+      });
+      setTimetableGroupExpirationSupported(true);
+      const requests = [fetchGroups(activeQuery)];
+
+      if (currentTargetId) {
+        requests.push(fetchGroups(new URLSearchParams({ roleView, targetId: currentTargetId })));
+      }
+
+      const responses = await Promise.all(requests);
+      const mergedById = new Map<string, TimetableGroup>();
+      for (const item of responses.flat()) {
+        mergedById.set(item.id, item);
+      }
+      const mergedGroups = [...mergedById.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      if (requestId !== timetableGroupsLoadRequestRef.current) return;
+      setTimetableGroups(mergedGroups);
+      setError(null);
+    } catch (loadError) {
+      if (requestId !== timetableGroupsLoadRequestRef.current) return;
+      throw loadError;
+    } finally {
+      if (requestId === timetableGroupsLoadRequestRef.current) setTimetableGroupsLoading(false);
     }
-
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(err.error ?? "저장된 시간표 그룹을 불러오지 못했습니다.");
-    }
-
-    const data = (await res.json().catch(() => ({}))) as TimetableGroupsResponse;
-    setTimetableGroups((data.items ?? []).map(mapApiGroupToState));
-    setError(null);
-  }, [moveToLogin]);
+  }, [currentTargetId, isInstructorReadOnly, mainTab, moveToLogin, roleView, selectedScheduleTagId, showIntroPage, weekStart]);
 
   const createTimetableGroup = useCallback(
     async (input: {
@@ -2185,14 +3408,20 @@ export default function SynchroSPage() {
       roleView: RoleView;
       targetId: string;
       weekStart: string;
+      expiresOn?: string | null;
+      tagId?: string | null;
       classIds: string[];
       snapshotEvents: ScheduleEvent[];
       isActive?: boolean;
     }) => {
+      const resolvedTagId = input.tagId === undefined ? selectedScheduleTagId : input.tagId;
+      if (input.roleView === "student" && !resolvedTagId) {
+        throw new Error("학생 시간표를 저장하려면 분류(태그)를 먼저 선택해 주세요.");
+      }
       const res = await fetch("/api/schedules/groups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input)
+        body: JSON.stringify({ ...input, tagId: resolvedTagId })
       });
 
       if (res.status === 401) {
@@ -2207,18 +3436,104 @@ export default function SynchroSPage() {
 
       const payload = (await res.json().catch(() => ({}))) as { item?: TimetableGroupApiItem };
       const created = payload.item ? mapApiGroupToState(payload.item) : null;
-      await loadTimetableGroups();
+      if (created) {
+        setTimetableGroups((prev) => {
+          const next = prev
+            .filter((group) => group.id !== created.id)
+            .map((group) =>
+              created.isActive &&
+              group.roleView === created.roleView &&
+              group.targetId === created.targetId &&
+              group.weekStart === created.weekStart &&
+              (group.tagId ?? null) === (created.tagId ?? null)
+                ? { ...group, isActive: false }
+                : group
+            );
+          return [created, ...next].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        });
+      }
       return created;
     },
-    [loadTimetableGroups, moveToLogin]
+    [moveToLogin, selectedScheduleTagId]
   );
+
+  const loadScheduleTags = useCallback(async () => {
+    const res = await fetch("/api/settings/schedule-tags", { method: "GET", cache: "no-store" });
+    if (res.status === 401) {
+      moveToLogin();
+      return;
+    }
+    if (!res.ok) throw new Error(await getApiErrorMessage(res, "시간표 태그를 불러오지 못했습니다."));
+    const payload = (await res.json().catch(() => ({}))) as { items?: ScheduleTag[] };
+    const items = payload.items ?? [];
+    setScheduleTags(items);
+    if (!scheduleTagSelectionInitializedRef.current) {
+      scheduleTagSelectionInitializedRef.current = true;
+      const currentTag = items.find((tag) => tag.isCurrent && tag.isActive);
+      if (currentTag) {
+        setSelectedScheduleTagId(currentTag.id);
+        setSelectedGroupId(null);
+      }
+    }
+  }, [moveToLogin]);
+
+  const createScheduleTag = useCallback(async (input: { name: string; colorKey: ScheduleTag["colorKey"] }) => {
+    setScheduleTagsBusy(true);
+    try {
+      const res = await fetch("/api/settings/schedule-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input)
+      });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "태그 저장에 실패했습니다."));
+      const payload = (await res.json()) as { item: ScheduleTag };
+      setSelectedScheduleTagId(payload.item.id);
+      await loadScheduleTags();
+      setNotice(`'${payload.item.name}' 태그를 만들었습니다.`);
+    } finally {
+      setScheduleTagsBusy(false);
+    }
+  }, [loadScheduleTags]);
+
+  const updateScheduleTag = useCallback(async (id: string, input: { name?: string; colorKey?: ScheduleTag["colorKey"]; isActive?: boolean; isCurrent?: boolean }) => {
+    setScheduleTagsBusy(true);
+    try {
+      const res = await fetch("/api/settings/schedule-tags", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...input })
+      });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "태그 수정에 실패했습니다."));
+      if (input.isCurrent === true) {
+        setSelectedScheduleTagId(id);
+        setSelectedGroupId(null);
+      }
+      await loadScheduleTags();
+    } finally {
+      setScheduleTagsBusy(false);
+    }
+  }, [loadScheduleTags]);
+
+  const updateTimetableGroupTag = useCallback(async (groupId: string, tagId: string | null) => {
+    const res = await fetch("/api/schedules/groups", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "tag", id: groupId, tagId })
+    });
+    if (!res.ok) throw new Error(await getApiErrorMessage(res, "시간표 태그 변경에 실패했습니다."));
+    await loadTimetableGroups();
+    setSelectedScheduleTagId(tagId);
+  }, [loadTimetableGroups]);
 
   const activateTimetableGroup = useCallback(
     async (groupId: string) => {
+      const target = timetableGroups.find((group) => group.id === groupId);
+      if (!target) throw new Error("변경할 시간표 그룹을 찾지 못했습니다.");
+      const desiredActiveState = !target.isActive;
       const res = await fetch("/api/schedules/groups", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "activate", id: groupId })
+        body: JSON.stringify({ action: "activate", id: groupId, isActive: desiredActiveState })
       });
       if (res.status === 401) {
         moveToLogin();
@@ -2228,10 +3543,29 @@ export default function SynchroSPage() {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error ?? "그룹 활성화에 실패했습니다.");
       }
+      const payload = (await res.json().catch(() => ({}))) as { isActive?: boolean };
+      const isActive = payload.isActive ?? desiredActiveState;
+      setTimetableGroups((prev) => {
+        const currentTarget = prev.find((group) => group.id === groupId);
+        if (!currentTarget) return prev;
+        return prev.map((group) => {
+          if (group.id === groupId) return { ...group, isActive };
+          if (
+            isActive &&
+            group.roleView === currentTarget.roleView &&
+            group.targetId === currentTarget.targetId &&
+            group.weekStart === currentTarget.weekStart &&
+            (group.tagId ?? null) === (currentTarget.tagId ?? null)
+          ) {
+            return { ...group, isActive: false };
+          }
+          return group;
+        });
+      });
       await loadTimetableGroups();
-      return true;
+      return isActive;
     },
-    [loadTimetableGroups, moveToLogin]
+    [loadTimetableGroups, moveToLogin, timetableGroups]
   );
 
   const renameTimetableGroup = useCallback(
@@ -2279,6 +3613,25 @@ export default function SynchroSPage() {
     [moveToLogin]
   );
 
+  const updateTimetableGroupExpiration = useCallback(
+    async (groupId: string, expiresOn: string | null) => {
+      const res = await fetch("/api/schedules/groups", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expiration", id: groupId, expiresOn })
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "그룹 만료일 저장에 실패했습니다.");
+      }
+    },
+    [moveToLogin]
+  );
+
   const deleteTimetableGroupRecord = useCallback(
     async (groupId: string) => {
       const res = await fetch(`/api/schedules/groups?id=${encodeURIComponent(groupId)}`, {
@@ -2298,35 +3651,42 @@ export default function SynchroSPage() {
   );
 
   const loadOverviewEvents = useCallback(async () => {
-    if (showIntroPage || mainTab !== "overview") {
+    if (mainTab !== "overview" && !(showIntroPage && !isInstructorReadOnly)) {
       setOverviewEvents([]);
+      setOverviewLoading(false);
       return;
     }
 
-    const targetView = overviewEntity;
-    const query = new URLSearchParams({
-      weekStart,
-      view: targetView
-    });
+    setOverviewLoading(true);
 
-    const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
+    try {
+      const targetView = overviewEntity;
+      const query = new URLSearchParams({
+        weekStart,
+        view: targetView
+      });
 
-    if (res.status === 401) {
-      moveToLogin();
-      return;
+      const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
+
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "/api/schedules/week overview 호출에 실패했습니다."));
+      }
+
+      const data = (await res.json()) as WeekResponse;
+      setOverviewEvents(data.events);
+      setError(null);
+    } finally {
+      setOverviewLoading(false);
     }
-
-    if (!res.ok) {
-      throw new Error(await getApiErrorMessage(res, "/api/schedules/week overview 호출에 실패했습니다."));
-    }
-
-    const data = (await res.json()) as WeekResponse;
-    setOverviewEvents(data.events);
-    setError(null);
-  }, [mainTab, moveToLogin, overviewEntity, showIntroPage, weekStart]);
+  }, [isInstructorReadOnly, mainTab, moveToLogin, overviewEntity, showIntroPage, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
-    if (showIntroPage || !isWorkspaceTab || !currentTargetId) {
+    if (!isWorkspaceTab || !currentTargetId || (showIntroPage && !isInstructorReadOnly)) {
       setSpecialNotes([]);
       return;
     }
@@ -2347,7 +3707,7 @@ export default function SynchroSPage() {
 
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? "특이사항을 불러오지 못했습니다.");
+        throw new Error(err.error ?? "시간표 메모를 불러오지 못했습니다.");
       }
 
       const data = (await res.json().catch(() => ({}))) as SpecialNotesResponse;
@@ -2355,17 +3715,18 @@ export default function SynchroSPage() {
         (data.items ?? []).map((item) => ({
           id: item.id,
           createdAt: item.created_at,
-          content: item.content
+          content: item.content,
+          groupId: item.group_id ?? null
         }))
       );
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "특이사항을 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : "시간표 메모를 불러오지 못했습니다.");
       setSpecialNotes([]);
     } finally {
       setNotesLoading(false);
     }
-  }, [currentTargetId, isWorkspaceTab, moveToLogin, roleView, showIntroPage]);
+  }, [currentTargetId, isInstructorReadOnly, isWorkspaceTab, moveToLogin, roleView, showIntroPage]);
 
   const removeClassFromGroups = useCallback((classId: string) => {
     setTimetableGroups((prev) =>
@@ -2393,9 +3754,8 @@ export default function SynchroSPage() {
       const classTypeMatch = resolveClassTypeOption(source.classTypeLabel, classTypes);
       const targetInstructorName = source.instructorName ? normalizeInstructorAlias(source.instructorName) : "";
       const exactInstructor =
-        instructorIndex.find((entry) => entry.token === normalize(targetInstructorName)) ??
-        instructorIndex.find((entry) => entry.token.includes(normalize(targetInstructorName)) || normalize(targetInstructorName).includes(entry.token));
-      const instructorId = exactInstructor?.id ?? selectedInstructorId;
+        instructorIndex.find((entry) => entry.token === normalize(targetInstructorName));
+      const instructorId = exactInstructor?.id ?? (!targetInstructorName && roleView === "instructor" ? selectedInstructorId : "");
       const studentIds = selectedStudentId ? [selectedStudentId] : [];
 
       if (!subjectMatch || !classTypeMatch || !instructorId || studentIds.length === 0) {
@@ -2406,6 +3766,8 @@ export default function SynchroSPage() {
         rawLabel: source.rawText,
         payload: {
           instructorId,
+          sourceInstructorName: targetInstructorName || undefined,
+          sourceRawText: source.rawText,
           studentIds,
           subjectCode: subjectMatch.code,
           classTypeCode: classTypeMatch.code,
@@ -2418,8 +3780,408 @@ export default function SynchroSPage() {
         }
       };
     },
-    [classTypes, instructors, parsedNotionItems, selectedInstructorId, selectedStudentId, subjects, weekStart]
+    [classTypes, instructors, parsedNotionItems, roleView, selectedInstructorId, selectedStudentId, subjects, weekStart]
   );
+
+  const handleAddSyncDraft = useCallback(
+    (input: SyncScheduleDraftInput) => {
+      if (!selectedScheduleTagId) {
+        setError("학생 시간표를 입력하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
+        return;
+      }
+      if (!selectedStudentId) {
+        setError("학생을 선택한 뒤 싱크로 시간표를 입력해 주세요.");
+        return;
+      }
+
+      const instructor = input.instructorId ? instructors.find((item) => item.id === input.instructorId) : null;
+      const classType = input.classTypeCode ? classTypes.find((item) => item.code === input.classTypeCode) : null;
+      const subject = resolveSubjectOption(input.subjectLabel, subjects);
+
+      if (input.kind === "class" && (!instructor || !classType)) {
+        setError("강사와 수업 유형을 다시 확인해 주세요.");
+        return;
+      }
+
+      const candidate = {
+        classTypeCode: input.kind === "self-study" ? "SELF_STUDY" : input.classTypeCode,
+        classTypeLabel: input.kind === "self-study" ? "자기주도학습" : classType?.label
+      };
+      const mixedConflict =
+        input.kind === "class"
+          ? displayEvents.find(
+              (event) =>
+                event.instructorId === input.instructorId &&
+                event.weekday === input.weekday &&
+                hasTimeOverlap(input.startTime, input.endTime, event.startTime, event.endTime) &&
+                hasMixedClassTypeConflict(candidate, event)
+            )
+          : null;
+
+      if (mixedConflict) {
+        setConflictDialog({
+          open: true,
+          title: "혼합 배정 불가",
+          message: `${mixedConflict.startTime}-${mixedConflict.endTime} ${mixedConflict.classTypeLabel} 수업과 겹칩니다.\n${MIXED_CLASS_TYPE_CONFLICT_MESSAGE}`
+        });
+        return;
+      }
+
+      const idSeed =
+        typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const classTypeLabel = input.kind === "self-study" ? "자기주도학습" : classType?.label ?? input.classTypeCode;
+      const badgeText = input.kind === "self-study" ? "[자습]" : classType?.badgeText ?? `[${classTypeLabel}]`;
+      const instructorName = input.kind === "self-study" ? "" : instructor?.name ?? "";
+      const subjectLabel = input.kind === "self-study" ? "자기주도학습" : subject?.label ?? input.subjectLabel;
+      const rawText =
+        input.kind === "self-study"
+          ? `자기주도학습 ${input.startTime}-${input.endTime}`
+          : `${subjectLabel} ${instructorName} ${classTypeLabel} ${input.startTime}-${input.endTime}`;
+
+      setSyncDraftItems((prev) => [
+        ...prev,
+        {
+          id: `${SYNC_DRAFT_EVENT_ID_PREFIX}${idSeed}`,
+          weekday: input.weekday,
+          startTime: input.startTime,
+          endTime: input.endTime,
+          subjectLabel,
+          instructorId: input.instructorId,
+          instructorName,
+          classTypeCode: input.kind === "self-study" ? "SELF_STUDY" : input.classTypeCode,
+          classTypeLabel,
+          badgeText,
+          note: input.note,
+          isSelfStudy: input.kind === "self-study",
+          rawText
+        }
+      ]);
+      setError(null);
+      setNotice(`${rawText} 초안을 시간표에 추가했습니다. DB 저장 전까지는 미리보기입니다.`);
+    },
+    [classTypes, displayEvents, instructors, selectedScheduleTagId, selectedStudentId, subjects]
+  );
+
+  const handleResetSyncDrafts = useCallback(() => {
+    if (syncDraftItems.length === 0) {
+      setNotice("초기화할 싱크로 시간표 초안이 없습니다.");
+      return;
+    }
+    setSyncDraftItems([]);
+    setError(null);
+    setNotice("싱크로 시간표 초안을 초기화했습니다.");
+  }, [syncDraftItems.length]);
+
+  const handleSaveSyncDraftsToServer = useCallback(async () => {
+    if (savingSyncDrafts) return;
+    if (!selectedScheduleTagId) {
+      setError("학생 시간표를 저장하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
+      return;
+    }
+    if (!selectedStudentId || !currentTargetId) {
+      setError("학생을 선택한 뒤 싱크로 시간표를 저장해 주세요.");
+      return;
+    }
+    if (syncDraftItems.length === 0) {
+      setError("저장할 싱크로 시간표 초안이 없습니다. 빈 시간표 칸을 눌러 수업을 추가해 주세요.");
+      return;
+    }
+
+    const classDrafts = syncDraftItems.filter((item) => !item.isSelfStudy);
+    const selfStudyDrafts = syncDraftItems.filter((item) => item.isSelfStudy);
+    const validationErrors: string[] = [];
+    const prepared: {
+      draft: SyncScheduleDraftItem;
+      payload: ScheduleFormInput;
+      subject: SubjectOptionWithColor;
+      classType: ClassTypeOption;
+    }[] = [];
+
+    for (const draft of classDrafts) {
+      const subject = resolveSubjectOption(draft.subjectLabel, subjects);
+      const classType = classTypes.find((item) => item.code === draft.classTypeCode);
+      const instructor = instructors.find((item) => item.id === draft.instructorId);
+      const dayLabel = weekdayLabel(draft.weekday);
+
+      if (!subject) {
+        validationErrors.push(`${dayLabel} ${draft.startTime}-${draft.endTime} '${draft.subjectLabel}' 과목을 DB 과목 코드와 매칭하지 못했습니다.`);
+        continue;
+      }
+      if (!classType) {
+        validationErrors.push(`${dayLabel} ${draft.startTime}-${draft.endTime} '${draft.classTypeLabel}' 수업 유형을 찾지 못했습니다.`);
+        continue;
+      }
+      if (!instructor) {
+        validationErrors.push(`${dayLabel} ${draft.startTime}-${draft.endTime} '${draft.instructorName || "강사 미지정"}' 강사를 찾지 못했습니다.`);
+        continue;
+      }
+      if (getInstructorDaysOff(draft.instructorId).includes(draft.weekday)) {
+        validationErrors.push(`${dayLabel} ${draft.startTime}-${draft.endTime} ${instructor.name} 강사는 해당 요일 휴무입니다.`);
+        continue;
+      }
+
+      const mixedConflict = displayEvents.find(
+        (event) =>
+          event.id !== draft.id &&
+          !isSelfStudyEventId(event.id) &&
+          event.instructorId === draft.instructorId &&
+          event.weekday === draft.weekday &&
+          hasTimeOverlap(draft.startTime, draft.endTime, event.startTime, event.endTime) &&
+          hasMixedClassTypeConflict({ classTypeCode: draft.classTypeCode, classTypeLabel: draft.classTypeLabel }, event)
+      );
+      if (mixedConflict) {
+        validationErrors.push(
+          `${dayLabel} ${draft.startTime}-${draft.endTime} ${draft.subjectLabel} 수업이 ${mixedConflict.startTime}-${mixedConflict.endTime} ${mixedConflict.classTypeLabel} 수업과 겹칩니다.`
+        );
+        continue;
+      }
+
+      prepared.push({
+        draft,
+        subject,
+        classType,
+        payload: {
+          instructorId: draft.instructorId,
+          studentIds: [selectedStudentId],
+          subjectCode: subject.code,
+          classTypeCode: classType.code,
+          note: draft.note || draft.rawText || "싱크로 시간표 직접 입력",
+          scheduleMode: "recurring",
+          weekday: draft.weekday,
+          activeFrom: weekStart,
+          startTime: draft.startTime,
+          endTime: draft.endTime,
+          scheduleTagId: selectedScheduleTagId
+        }
+      });
+    }
+
+    if (validationErrors.length > 0) {
+      const message = validationErrors.join("\n");
+      setError(message);
+      setConflictDialog({
+        open: true,
+        title: "싱크로 시간표 저장 전 확인",
+        message
+      });
+      return;
+    }
+
+    setSavingSyncDrafts(true);
+    setImportProgress({
+      active: true,
+      total: syncDraftItems.length,
+      done: 0,
+      label: "싱크로 시간표를 서버에 저장 중입니다..."
+    });
+    setError(null);
+
+    const importedClassIds: string[] = [];
+    const importedEvents: ScheduleEvent[] = [];
+    const memoUpdates: Record<string, string> = {};
+    const conflictDetails: string[] = [];
+    const conflictLogEntries: ConflictLogCreateInput[] = [];
+
+    try {
+      let processedCount = selfStudyDrafts.length;
+      setImportProgress((prev) => ({ ...prev, done: processedCount }));
+
+      if (prepared.length > 0) {
+        const batch = prepared;
+        const createRes = await fetch("/api/schedules/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: batch.map((entry) => entry.payload),
+            targetType: "학생",
+            targetName: currentTargetLabel
+          })
+        });
+
+        if (createRes.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        const payload = (await createRes.json().catch(() => ({}))) as {
+          error?: string;
+          results?: {
+            status?: string;
+            classId?: string;
+            conflict?: ConflictResult;
+          }[];
+        };
+
+        if (!createRes.ok) {
+          throw new Error(payload.error ?? "싱크로 시간표 저장 요청에 실패했습니다.");
+        }
+
+        const results = Array.isArray(payload.results) ? payload.results : [];
+        batch.forEach((entry, batchIndex) => {
+          const result = results[batchIndex];
+          if (!result) {
+            conflictDetails.push(`${entry.draft.rawText}: 저장 결과를 확인하지 못했습니다.`);
+            return;
+          }
+
+          if (result.status === "conflict") {
+            const conflict: ConflictResult = result.conflict ?? { hasConflict: true, conflicts: [] };
+            const reason = summarizeConflictReason(conflict);
+            const detailedMessage = buildConflictAttemptDetails({
+              studentName: selectedStudentLabel,
+              instructorName: entry.draft.instructorName,
+              classTypeLabel: entry.draft.classTypeLabel,
+              weekday: entry.draft.weekday,
+              startTime: entry.draft.startTime,
+              endTime: entry.draft.endTime,
+              scheduleTagLabel: selectedScheduleTagLabel,
+              conflictMessage:
+                getConflictMessageForDisplay(conflict, [...effectiveStudentGroupByTargetId.values()], students) || getConflictMessage(conflict)
+            });
+            conflictDetails.push(`${entry.draft.rawText}\n${detailedMessage}`);
+            conflictLogEntries.push({
+              weekStart,
+              targetType: "학생",
+              targetName: currentTargetLabel,
+              studentName: selectedStudentLabel,
+              instructorName: entry.draft.instructorName,
+              weekday: entry.draft.weekday,
+              startTime: entry.draft.startTime,
+              endTime: entry.draft.endTime,
+              reason,
+              details: detailedMessage,
+              source: "싱크로 직접 입력",
+              rawText: entry.draft.rawText
+            });
+            return;
+          }
+
+          if (result.classId) {
+            importedClassIds.push(result.classId);
+            memoUpdates[result.classId] = entry.payload.note;
+            importedEvents.push({
+              id: result.classId,
+              scheduleMode: "recurring",
+              instructorId: entry.payload.instructorId,
+              instructorName: entry.draft.instructorName,
+              studentIds: [selectedStudentId],
+              studentNames: [selectedStudentLabel],
+              subjectCode: entry.subject.code,
+              subjectName: entry.subject.label,
+              classTypeCode: entry.classType.code,
+              classTypeLabel: entry.classType.label,
+              badgeText: entry.classType.badgeText,
+              weekday: entry.draft.weekday,
+              classDate: shiftDate(weekStart, entry.draft.weekday - 1),
+              startTime: entry.draft.startTime,
+              endTime: entry.draft.endTime,
+              progressStatus: "planned",
+              createdAt: new Date().toISOString(),
+              note: entry.payload.note
+            });
+          }
+        });
+
+        processedCount += batch.length;
+        setImportProgress((prev) => ({ ...prev, done: processedCount }));
+      }
+
+      void recordConflictLogs(conflictLogEntries);
+      if (Object.keys(memoUpdates).length > 0) {
+        setMemoByEventId((prev) => ({ ...prev, ...memoUpdates }));
+      }
+
+      const existingSnapshotEvents = displayEvents
+        .filter((event) => !event.id.startsWith("draft-") && !isSyncDraftEventId(event.id))
+        .map((event) => ({ ...event }));
+      const existingClassIds = extractSnapshotClassIds(existingSnapshotEvents);
+      const selfStudyEvents: ScheduleEvent[] = selfStudyDrafts.map((draft) => ({
+        id: `${SELF_STUDY_EVENT_ID_PREFIX}${selectedStudentId}:${shiftDate(weekStart, draft.weekday - 1)}:${draft.startTime}:${draft.id.replace(SYNC_DRAFT_EVENT_ID_PREFIX, "")}`,
+        scheduleMode: "one_off",
+        instructorId: "",
+        instructorName: "",
+        studentIds: [selectedStudentId],
+        studentNames: [selectedStudentLabel],
+        subjectCode: "SELF_STUDY",
+        subjectName: "자기주도학습",
+        classTypeCode: "SELF_STUDY",
+        classTypeLabel: "자기주도학습",
+        badgeText: "[자습]",
+        weekday: draft.weekday,
+        classDate: shiftDate(weekStart, draft.weekday - 1),
+        startTime: draft.startTime,
+        endTime: draft.endTime,
+        progressStatus: "planned",
+        createdAt: new Date().toISOString(),
+        note: draft.note || "자기주도학습"
+      }));
+      const nextSnapshot = [...existingSnapshotEvents, ...importedEvents, ...selfStudyEvents];
+      const nextClassIds = Array.from(new Set([...existingClassIds, ...importedClassIds]));
+      const savedCount = importedEvents.length + selfStudyEvents.length;
+
+      if (savedCount > 0 && nextSnapshot.length > 0) {
+        const created = await createTimetableGroup({
+          name: `${weekStart} ${currentTargetLabel} 시간표`,
+          roleView: "student",
+          targetId: currentTargetId,
+          weekStart,
+          classIds: nextClassIds,
+          snapshotEvents: nextSnapshot,
+          isActive: true
+        });
+        if (created?.id) {
+          setSelectedGroupId(created.id);
+        }
+      }
+
+      setSyncDraftItems(conflictDetails.length > 0 ? syncDraftItems.filter((item) => conflictDetails.some((detail) => detail.includes(item.rawText))) : []);
+      await Promise.all([loadWeek({ silent: true }), loadSaveHistory(), loadOverviewEvents(), loadScheduleReviews()]);
+      setNotice(`싱크로 시간표 저장 완료: 반영 ${savedCount}건${conflictDetails.length > 0 ? ` / 충돌 ${conflictDetails.length}건` : ""}`);
+
+      if (conflictDetails.length > 0) {
+        setConflictDialog({
+          open: true,
+          title: "시간표 충돌 경고",
+          message: conflictDetails.join("\n")
+        });
+      }
+    } catch (syncSaveError) {
+      const message = syncSaveError instanceof Error ? syncSaveError.message : "싱크로 시간표 저장에 실패했습니다.";
+      setError(message);
+      setConflictDialog({
+        open: true,
+        title: "DB 저장 실패",
+        message
+      });
+    } finally {
+      setSavingSyncDrafts(false);
+      setImportProgress((prev) => ({ ...prev, active: false, label: "" }));
+    }
+  }, [
+    classTypes,
+    createTimetableGroup,
+    currentTargetId,
+    currentTargetLabel,
+    displayEvents,
+    effectiveStudentGroupByTargetId,
+    getInstructorDaysOff,
+    instructors,
+    loadOverviewEvents,
+    loadSaveHistory,
+    loadScheduleReviews,
+    loadWeek,
+    moveToLogin,
+    recordConflictLogs,
+    savingSyncDrafts,
+    selectedStudentId,
+    selectedStudentLabel,
+    selectedScheduleTagId,
+    selectedScheduleTagLabel,
+    students,
+    subjects,
+    syncDraftItems,
+    weekStart
+  ]);
 
   const handleHardRefreshData = useCallback(async () => {
     if (refreshingData) return;
@@ -2429,15 +4191,17 @@ export default function SynchroSPage() {
     setNotice(null);
 
     try {
-      router.refresh();
       await Promise.all([
-        loadOptions(),
+        loadOptions({ refreshSheets: true }),
         loadSaveHistory(),
         !showIntroPage && mainTab === "issues" ? loadConflictLogs() : Promise.resolve(),
         loadTimetableGroups(),
-        !showIntroPage && isWorkspaceTab ? loadWeek({ silent: true }) : Promise.resolve(),
-        !showIntroPage && mainTab === "overview" ? loadOverviewEvents() : Promise.resolve(),
-        !showIntroPage && isWorkspaceTab ? loadSpecialNotes() : Promise.resolve()
+        isWorkspaceTab && (!showIntroPage || isInstructorReadOnly) ? loadWeek({ silent: true }) : Promise.resolve(),
+        !showIntroPage && mainTab === "review" ? loadScheduleReviews() : Promise.resolve(),
+        (!showIntroPage && mainTab === "overview") || (showIntroPage && !isInstructorReadOnly)
+          ? loadOverviewEvents()
+          : Promise.resolve(),
+        isWorkspaceTab && (!showIntroPage || isInstructorReadOnly) ? loadSpecialNotes() : Promise.resolve()
       ]);
       setNotice("최신 DB 기준으로 데이터를 새로고침했습니다.");
     } catch (refreshError) {
@@ -2449,16 +4213,63 @@ export default function SynchroSPage() {
     loadOptions,
     loadConflictLogs,
     loadOverviewEvents,
+    loadScheduleReviews,
     loadSaveHistory,
     loadSpecialNotes,
     loadTimetableGroups,
     loadWeek,
+    isInstructorReadOnly,
     isWorkspaceTab,
     mainTab,
     refreshingData,
-    router,
     showIntroPage
   ]);
+
+  const handleToggleRosterStatus = useCallback(
+    async (entityType: OverviewEntity, item: SelectOption, isActive: boolean) => {
+      if (statusUpdatingId) return;
+
+      const entityLabel = entityType === "instructor" ? "강사" : "학생";
+      if (
+        !isActive &&
+        !window.confirm(
+          `${entityLabel} '${item.name}'을(를) 중지 처리할까요?\n중지된 ${entityLabel}의 수업은 시간표와 충돌 검토에서 제외됩니다.`
+        )
+      ) {
+        return;
+      }
+
+      setStatusUpdatingId(`${entityType}-${item.id}`);
+      setError(null);
+      setNotice(null);
+
+      try {
+        const res = await fetch("/api/schedules/entity-status", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entityType, id: item.id, isActive })
+        });
+
+        if (res.status === 401) {
+          moveToLogin();
+          return;
+        }
+
+        if (!res.ok) {
+          throw new Error(await getApiErrorMessage(res, "명단 상태 변경에 실패했습니다."));
+        }
+
+        await Promise.all([loadOptions(), loadTimetableGroups(), loadWeek({ silent: true }), loadOverviewEvents()]);
+        setSelectedGroupId(null);
+        setNotice(`${item.name} ${entityLabel}를 ${isActive ? "활성 명단으로 복구" : "중지 명단으로 이동"}했습니다.`);
+      } catch (statusError) {
+        setError(statusError instanceof Error ? statusError.message : "명단 상태 변경에 실패했습니다.");
+      } finally {
+        setStatusUpdatingId(null);
+      }
+    },
+    [loadOptions, loadOverviewEvents, loadTimetableGroups, loadWeek, moveToLogin, statusUpdatingId]
+  );
 
   const handleUndoLastChange = useCallback(async () => {
     if (!undoState) return;
@@ -2506,8 +4317,13 @@ export default function SynchroSPage() {
 
   const handleCreate = useCallback(
     async (input: ScheduleFormInput) => {
+      if (roleView === "student" && !selectedScheduleTagId) {
+        setError("학생 시간표를 입력하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
+        return;
+      }
       const normalizedInput: ScheduleFormInput = {
         ...input,
+        scheduleTagId: roleView === "student" ? selectedScheduleTagId ?? undefined : input.scheduleTagId,
         note: input.note.trim(),
         activeFrom: input.scheduleMode === "recurring" ? weekStart : undefined,
         classDate: input.scheduleMode === "one_off" ? input.classDate : undefined,
@@ -2517,7 +4333,23 @@ export default function SynchroSPage() {
         normalizedInput.scheduleMode === "recurring"
           ? (normalizedInput.weekday as Weekday)
           : dayOf(normalizedInput.classDate as string);
-      const immediateOverlap = events.find(
+      const candidateStudentName = resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정";
+      const candidateInstructorName = instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? "강사 미지정";
+      const candidateClassTypeLabel =
+        classTypes.find((item) => item.code === normalizedInput.classTypeCode)?.label ?? normalizedInput.classTypeCode;
+      const describeConflict = (conflict: ConflictResult) =>
+        buildConflictAttemptDetails({
+          studentName: candidateStudentName,
+          instructorName: candidateInstructorName,
+          classTypeLabel: candidateClassTypeLabel,
+          weekday: targetWeekday,
+          startTime: normalizedInput.startTime,
+          endTime: normalizedInput.endTime,
+          scheduleTagLabel: selectedScheduleTagLabel,
+          conflictMessage:
+            getConflictMessageForDisplay(conflict, [...effectiveStudentGroupByTargetId.values()], students) || getConflictMessage(conflict)
+        });
+      const immediateOverlap = displayEvents.find(
         (event) =>
           event.instructorId === normalizedInput.instructorId &&
           event.weekday === targetWeekday &&
@@ -2540,24 +4372,44 @@ export default function SynchroSPage() {
       }
 
       if (immediateOverlap) {
+        const immediateConflict: ConflictResult = {
+          hasConflict: true,
+          conflicts: [
+            {
+              classId: immediateOverlap.id,
+              reason: MIXED_CLASS_TYPE_CONFLICT_MESSAGE,
+              existingSchedule: {
+                studentNames: immediateOverlap.studentNames,
+                classTypeCode: immediateOverlap.classTypeCode,
+                classTypeLabel: immediateOverlap.classTypeLabel,
+                weekday: immediateOverlap.weekday,
+                startTime: immediateOverlap.startTime,
+                endTime: immediateOverlap.endTime,
+                source: "student_timetable"
+              }
+            }
+          ]
+        };
+        const details = describeConflict(immediateConflict);
         void recordConflictLogs([
           {
             weekStart,
             targetType: roleView === "student" ? "학생" : "강사",
             targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
-            studentName: resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정",
-            instructorName: instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? immediateOverlap.instructorName,
+            studentName: candidateStudentName,
+            instructorName: candidateInstructorName,
             weekday: targetWeekday,
             startTime: normalizedInput.startTime,
             endTime: normalizedInput.endTime,
             reason: MIXED_CLASS_TYPE_CONFLICT_MESSAGE,
+            details,
             source: "수동 추가"
           }
         ]);
         setConflictDialog({
           open: true,
           title: "혼합 배정 불가",
-          message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+          message: details
         });
         return;
       }
@@ -2589,18 +4441,19 @@ export default function SynchroSPage() {
       const conflict = (await conflictRes.json()) as ConflictResult;
 
       if (conflict.hasConflict) {
+        const details = describeConflict(conflict);
         void recordConflictLogs([
           {
             weekStart,
             targetType: roleView === "student" ? "학생" : "강사",
             targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
-            studentName: resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정",
-            instructorName: instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? "",
+            studentName: candidateStudentName,
+            instructorName: candidateInstructorName,
             weekday: targetWeekday,
             startTime: normalizedInput.startTime,
             endTime: normalizedInput.endTime,
             reason: summarizeConflictReason(conflict),
-            details: getConflictMessage(conflict),
+            details,
             source: "수동 추가"
           }
         ]);
@@ -2608,7 +4461,7 @@ export default function SynchroSPage() {
           setConflictDialog({
             open: true,
             title: "혼합 배정 불가",
-            message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+            message: details
           });
           return;
         }
@@ -2628,18 +4481,19 @@ export default function SynchroSPage() {
 
       if (createRes.status === 409) {
         const payload = (await createRes.json()) as { conflict: ConflictResult };
+        const details = describeConflict(payload.conflict);
         void recordConflictLogs([
           {
             weekStart,
             targetType: roleView === "student" ? "학생" : "강사",
             targetName: roleView === "student" ? selectedStudentLabel : selectedInstructorLabel,
-            studentName: resolveStudentNames(normalizedInput.studentIds).join(", ") || "학생 미지정",
-            instructorName: instructors.find((item) => item.id === normalizedInput.instructorId)?.name ?? "",
+            studentName: candidateStudentName,
+            instructorName: candidateInstructorName,
             weekday: targetWeekday,
             startTime: normalizedInput.startTime,
             endTime: normalizedInput.endTime,
             reason: summarizeConflictReason(payload.conflict),
-            details: getConflictMessage(payload.conflict),
+            details,
             source: "수동 추가"
           }
         ]);
@@ -2647,7 +4501,7 @@ export default function SynchroSPage() {
           setConflictDialog({
             open: true,
             title: "혼합 배정 불가",
-            message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+            message: details
           });
           return;
         }
@@ -2675,7 +4529,9 @@ export default function SynchroSPage() {
       await loadWeek();
     },
     [
-      events,
+      classTypes,
+      displayEvents,
+      effectiveStudentGroupByTargetId,
       getInstructorDaysOff,
       initialCell?.weekday,
       instructors,
@@ -2684,8 +4540,11 @@ export default function SynchroSPage() {
       recordConflictLogs,
       resolveStudentNames,
       roleView,
+      selectedScheduleTagId,
+      selectedScheduleTagLabel,
       selectedInstructorLabel,
       selectedStudentLabel,
+      students,
       weekStart
     ]
   );
@@ -2705,7 +4564,9 @@ export default function SynchroSPage() {
         const baseSnapshot =
           selectedEditingGroup && selectedSnapshot.length > 0 && !snapshotHasDraftIds
             ? selectedSnapshot
-            : classIdBackedSnapshot;
+            : selectedEditingGroup
+              ? classIdBackedSnapshot
+              : displayEvents;
 
         let targetClassId = ctx.classId;
         let draftIndex = -1;
@@ -2769,7 +4630,7 @@ export default function SynchroSPage() {
           targetEvent.instructorId || normalizePersonName(targetEvent.instructorName || selectedInstructorLabel);
         const conflictMessages: string[] = [];
         const detectedConflictLogs: ConflictLogCreateInput[] = [];
-        const candidateGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
+        const candidateGroups = [...effectiveStudentGroupByTargetId.values()];
 
         for (const group of candidateGroups) {
           const groupEvents = group.snapshotEvents ?? [];
@@ -2911,6 +4772,7 @@ export default function SynchroSPage() {
           body: JSON.stringify({
             weekday: ctx.weekday,
             startTime: ctx.startTime,
+            endTime: ctx.endTime,
             weekStart,
             studentId: roleView === "student" ? selectedStudentId || undefined : undefined
           })
@@ -2948,7 +4810,7 @@ export default function SynchroSPage() {
             });
             return;
           }
-          const activeStudentGroups = timetableGroups.filter((group) => group.roleView === "student" && group.isActive);
+          const activeStudentGroups = [...effectiveStudentGroupByTargetId.values()];
           const readable = getConflictMessageForDisplay(payload.conflict, activeStudentGroups, students);
           const msg = `드래그 이동 충돌:\n${readable || getConflictMessage(payload.conflict)}`;
           setError(msg);
@@ -2971,6 +4833,57 @@ export default function SynchroSPage() {
           return;
         }
 
+        const movePayload = (await res.json().catch(() => ({}))) as { updated?: { id?: string | null } };
+        const updatedClassId = movePayload.updated?.id ?? targetClassId;
+        const movedSnapshot = moveEventInList(baseSnapshot, {
+          classId: targetClassId,
+          weekday: ctx.weekday,
+          startTime: ctx.startTime,
+          endTime: ctx.endTime,
+          classDate: moveClassDate
+        });
+        const nextSnapshot =
+          updatedClassId && updatedClassId !== targetClassId
+            ? replaceEventIdInList(movedSnapshot, targetClassId, updatedClassId)
+            : movedSnapshot;
+        const nextClassIds = selectedEditingGroup
+          ? updatedClassId && updatedClassId !== targetClassId
+            ? replaceClassId(selectedEditingGroup.classIds, targetClassId, updatedClassId)
+            : selectedEditingGroup.classIds
+          : extractSnapshotClassIds(nextSnapshot);
+
+        if (updatedClassId && updatedClassId !== targetClassId) {
+          setEvents((current) => replaceEventIdInList(current, targetClassId, updatedClassId));
+        }
+
+        if (selectedEditingGroup) {
+          setTimetableGroups((prev) =>
+            prev.map((group) =>
+              group.id === selectedEditingGroup.id
+                ? {
+                    ...group,
+                    classIds: nextClassIds,
+                    snapshotEvents: nextSnapshot
+                  }
+                : group
+            )
+          );
+          await saveTimetableGroupSnapshot(selectedEditingGroup.id, nextClassIds, nextSnapshot);
+        } else if (roleView === "student" && selectedStudentId) {
+          const created = await createTimetableGroup({
+            name: `${weekStart} ${selectedStudentLabel} 시간표`,
+            roleView: "student",
+            targetId: selectedStudentId,
+            weekStart,
+            classIds: nextClassIds,
+            snapshotEvents: nextSnapshot,
+            isActive: true
+          });
+          if (created?.id) {
+            setSelectedGroupId(created.id);
+          }
+        }
+
         setNotice(`수업을 ${ctx.startTime} / ${DAYS.find((day) => day.key === ctx.weekday)?.label ?? ""}로 이동했습니다.`);
         void loadWeek({ silent: true });
       } finally {
@@ -2979,24 +4892,209 @@ export default function SynchroSPage() {
     },
     [
       activeGroup,
+      createTimetableGroup,
+      displayEvents,
       draftEvents,
+      effectiveStudentGroupByTargetId,
       events,
       filteredEvents,
       buildUndoState,
       getInstructorDaysOff,
       loadWeek,
       moveToLogin,
+      saveTimetableGroupSnapshot,
       selectedGroup,
       selectedInstructorLabel,
       selectedStudentId,
       selectedStudentLabel,
       students,
-      timetableGroups,
       recordConflictLogs,
       roleView,
       weekStart
     ]
   );
+
+  const handleOpenTimeEdit = useCallback(
+    (event: ScheduleEvent) => {
+      if (isInstructorReadOnly || roleView !== "student" || timetableViewMode !== "detailed") return;
+      if (event.id.startsWith("draft-")) return;
+      setTimeEditEvent(event);
+      setTimeEditForm({ startTime: event.startTime, endTime: event.endTime });
+      setError(null);
+    },
+    [isInstructorReadOnly, roleView, timetableViewMode]
+  );
+
+  const handleSaveSelfStudy = useCallback(async () => {
+    if (!selfStudyDraft || selfStudySaving) return;
+    if (!selectedStudentId) {
+      setError("학생을 선택한 뒤 자기주도학습을 추가해 주세요.");
+      return;
+    }
+    if (timeToMinutes(selfStudyDraft.endTime) <= timeToMinutes(selfStudyDraft.startTime)) {
+      setError("종료 시간은 시작 시간보다 늦어야 합니다.");
+      return;
+    }
+
+    setSelfStudySaving(true);
+    setError(null);
+    try {
+      const targetGroup = selectedGroup ?? activeGroup;
+      const classDate = shiftDate(weekStart, selfStudyDraft.weekday - 1);
+      const stableSuffix =
+        typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const selfStudyEvent: ScheduleEvent = {
+        id: `${SELF_STUDY_EVENT_ID_PREFIX}${selectedStudentId}:${classDate}:${selfStudyDraft.startTime}:${stableSuffix}`,
+        scheduleMode: "one_off",
+        instructorId: "",
+        instructorName: "",
+        studentIds: [selectedStudentId],
+        studentNames: [selectedStudentLabel],
+        subjectCode: "SELF_STUDY",
+        subjectName: "자기주도학습",
+        classTypeCode: "SELF_STUDY",
+        classTypeLabel: "자기주도학습",
+        badgeText: "[자습]",
+        weekday: selfStudyDraft.weekday,
+        classDate,
+        startTime: selfStudyDraft.startTime,
+        endTime: selfStudyDraft.endTime,
+        progressStatus: "planned",
+        createdAt: new Date().toISOString(),
+        note: "자기주도학습"
+      };
+      const baseSnapshot = targetGroup?.snapshotEvents?.length ? targetGroup.snapshotEvents : displayEvents;
+      const nextSnapshot = [...baseSnapshot.map((event) => ({ ...event })), selfStudyEvent];
+      const classIds = targetGroup ? targetGroup.classIds : extractSnapshotClassIds(nextSnapshot);
+
+      if (targetGroup) {
+        setTimetableGroups((prev) =>
+          prev.map((group) =>
+            group.id === targetGroup.id
+              ? {
+                  ...group,
+                  classIds,
+                  snapshotEvents: nextSnapshot
+                }
+              : group
+          )
+        );
+        await saveTimetableGroupSnapshot(targetGroup.id, classIds, nextSnapshot);
+        setSelectedGroupId(targetGroup.id);
+      } else {
+        const created = await createTimetableGroup({
+          name: `${weekStart} ${selectedStudentLabel} 시간표`,
+          roleView: "student",
+          targetId: selectedStudentId,
+          weekStart,
+          classIds,
+          snapshotEvents: nextSnapshot,
+          isActive: true
+        });
+        if (created?.id) {
+          setSelectedGroupId(created.id);
+        }
+      }
+
+      setSelfStudyDraft(null);
+      setNotice("자기주도학습을 시간표에 추가했습니다.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "자기주도학습 추가에 실패했습니다.");
+    } finally {
+      setSelfStudySaving(false);
+    }
+  }, [
+    activeGroup,
+    createTimetableGroup,
+    displayEvents,
+    saveTimetableGroupSnapshot,
+    selectedGroup,
+    selectedStudentId,
+    selectedStudentLabel,
+    selfStudyDraft,
+    selfStudySaving,
+    weekStart
+  ]);
+
+  const handleSaveTimeEdit = useCallback(async () => {
+    if (!timeEditEvent || timeEditSaving) return;
+    if (timeToMinutes(timeEditForm.endTime) <= timeToMinutes(timeEditForm.startTime)) {
+      setError("종료 시간은 시작 시간보다 늦어야 합니다.");
+      return;
+    }
+
+    setTimeEditSaving(true);
+    setError(null);
+    try {
+      if (isSelfStudyEventId(timeEditEvent.id)) {
+        const targetGroup =
+          selectedGroup ??
+          activeGroup ??
+          timetableGroups.find(
+            (group) =>
+              group.roleView === "student" &&
+              group.targetId === selectedStudentId &&
+              group.weekStart === weekStart &&
+              (group.snapshotEvents ?? []).some((event) => event.id === timeEditEvent.id)
+          );
+        if (!targetGroup) {
+          setError("자기주도학습이 저장된 시간표 그룹을 찾지 못했습니다.");
+          return;
+        }
+        const classDate = shiftDate(weekStart, timeEditEvent.weekday - 1);
+        const baseSnapshot = targetGroup.snapshotEvents?.length ? targetGroup.snapshotEvents : displayEvents;
+        const nextSnapshot = baseSnapshot.map((event) =>
+          event.id === timeEditEvent.id
+            ? {
+                ...event,
+                startTime: timeEditForm.startTime,
+                endTime: timeEditForm.endTime,
+                classDate
+              }
+            : { ...event }
+        );
+        const classIds = targetGroup.classIds.length > 0 ? targetGroup.classIds : extractSnapshotClassIds(nextSnapshot);
+
+        setTimetableGroups((prev) =>
+          prev.map((group) =>
+            group.id === targetGroup.id
+              ? {
+                  ...group,
+                  classIds,
+                  snapshotEvents: nextSnapshot
+                }
+              : group
+          )
+        );
+        await saveTimetableGroupSnapshot(targetGroup.id, classIds, nextSnapshot);
+        setNotice("자기주도학습 시간을 수정했습니다.");
+        setTimeEditEvent(null);
+        return;
+      }
+      await handleMoveSchedule({
+        classId: timeEditEvent.id,
+        weekday: timeEditEvent.weekday,
+        startTime: timeEditForm.startTime,
+        endTime: timeEditForm.endTime
+      });
+      setTimeEditEvent(null);
+    } finally {
+      setTimeEditSaving(false);
+    }
+  }, [
+    activeGroup,
+    displayEvents,
+    handleMoveSchedule,
+    saveTimetableGroupSnapshot,
+    selectedGroup,
+    selectedStudentId,
+    timetableGroups,
+    timeEditEvent,
+    timeEditForm.endTime,
+    timeEditForm.startTime,
+    timeEditSaving,
+    weekStart
+  ]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -3138,6 +5236,10 @@ export default function SynchroSPage() {
   }, [buildUndoState, notionTextValue, parsedNotionItems.length]);
 
   const handleImportNotionToServer = useCallback(async () => {
+    if (roleView === "student" && !selectedScheduleTagId) {
+      setError("학생 시간표를 저장하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
+      return;
+    }
     const normalizedNotionText = notionTextValue.trim();
     const parsedItemsForSave =
       parsedNotionItems.length > 0
@@ -3203,10 +5305,7 @@ export default function SynchroSPage() {
       const aliased = normalizeInstructorAlias(name);
       const target = normalize(aliased);
       if (!target) return "";
-      const exact = instructorExactMap.get(target);
-      if (exact) return exact;
-      const partial = instructorIndex.find((entry) => entry.token.includes(target) || target.includes(entry.token));
-      return partial?.id ?? "";
+      return instructorExactMap.get(target) ?? "";
     };
     const resolveSubjectCached = (rawLabel: string) => {
       const key = normalize(rawLabel);
@@ -3235,6 +5334,8 @@ export default function SynchroSPage() {
     const conflictLogEntries: ConflictLogCreateInput[] = [];
     const dayOffDetails: string[] = [];
     const noSubjectDetails: string[] = [];
+    const noInstructorDetails: string[] = [];
+    const unresolvedInstructorNames = new Set<string>();
     const skipReasons: Record<string, number> = {
       noInstructor: 0,
       noStudent: 0,
@@ -3253,12 +5354,35 @@ export default function SynchroSPage() {
         const subject = resolveSubjectCached(item.subjectLabel);
         const classType = resolveClassTypeCached(item.classTypeLabel);
 
-        const instructorId = item.instructorName ? findInstructorId(item.instructorName) : selectedInstructorId;
+        const instructorId = item.instructorName
+          ? findInstructorId(item.instructorName)
+          : roleView === "instructor"
+            ? selectedInstructorId
+            : "";
         const studentIds: string[] = selectedStudentId ? [selectedStudentId] : [];
 
         if (!instructorId) {
           skipped += 1;
           skipReasons.noInstructor += 1;
+          const unresolvedName = normalizeInstructorAlias(item.instructorName || "강사명 없음");
+          const reason = item.instructorName ? "강사 명단 매핑 실패" : "강사명 인식 실패";
+          const detail = `${weekdayLabel(item.weekday)} ${toKoreanHourRange(item.startTime)} · ${reason} · 원문: ${item.rawText}`;
+          unresolvedInstructorNames.add(unresolvedName);
+          noInstructorDetails.push(detail);
+          conflictLogEntries.push({
+            weekStart,
+            targetType: roleView === "student" ? "학생" : "강사",
+            targetName: currentTargetLabel,
+            studentName: selectedStudentLabel || "학생 미지정",
+            instructorName: unresolvedName,
+            weekday: item.weekday,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            reason,
+            details: detail,
+            source: "노션 일괄 저장",
+            rawText: item.rawText
+          });
           continue;
         }
         if (studentIds.length === 0) {
@@ -3335,6 +5459,8 @@ export default function SynchroSPage() {
           item,
           payload: {
             instructorId,
+            sourceInstructorName: normalizeInstructorAlias(item.instructorName),
+            sourceRawText: item.rawText,
             studentIds,
             subjectCode: subject.code,
             classTypeCode: classType.code,
@@ -3343,7 +5469,8 @@ export default function SynchroSPage() {
             weekday: item.weekday,
             activeFrom: weekStart,
             startTime: item.startTime,
-            endTime: item.endTime
+            endTime: item.endTime,
+            scheduleTagId: roleView === "student" ? selectedScheduleTagId ?? undefined : undefined
           }
         });
       }
@@ -3351,9 +5478,8 @@ export default function SynchroSPage() {
       let processedCount = skipped;
       setImportProgress((prev) => ({ ...prev, done: processedCount }));
 
-      const batchSize = 12;
-      for (let idx = 0; idx < preparedItems.length; idx += batchSize) {
-        const batch = preparedItems.slice(idx, idx + batchSize);
+      if (preparedItems.length > 0) {
+        const batch = preparedItems;
         const createRes = await fetch("/api/schedules/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3374,7 +5500,7 @@ export default function SynchroSPage() {
           results?: {
             status?: string;
             classId?: string;
-            conflict?: { conflicts?: { reason?: string; classId?: string }[] };
+            conflict?: ConflictResult;
           }[];
         };
 
@@ -3392,7 +5518,7 @@ export default function SynchroSPage() {
             });
             processedCount += batch.length;
             setImportProgress((prev) => ({ ...prev, done: processedCount }));
-            continue;
+            throw new Error(payload.error ?? "해당 강사의 휴무일입니다.");
           }
           throw new Error(payload.error ?? "시간표 저장 요청에 실패했습니다.");
         }
@@ -3422,16 +5548,22 @@ export default function SynchroSPage() {
             skipReasons.conflict += 1;
             const weekdayLabel = DAYS.find((day) => day.key === entry.item.weekday)?.label ?? String(entry.item.weekday);
             const slotLabel = `${weekdayLabel} ${toKoreanHourRange(entry.item.startTime)}`;
-            const structuredConflict: ConflictResult = {
-              hasConflict: Boolean(result.conflict?.conflicts?.length),
-              conflicts: (result.conflict?.conflicts ?? []).map((conflict) => ({
-                classId: conflict.classId ?? "",
-                reason: conflict.reason ?? "시간표 충돌"
-              }))
-            };
-            const conflictReason =
-              result.conflict?.conflicts?.map((conflict) => conflict.reason).filter(Boolean).join(", ") ?? "시간표 충돌";
-            conflictDetails.push(`- ${slotLabel} (${entry.item.rawText}): ${conflictReason}`);
+            const structuredConflict: ConflictResult = result.conflict ?? { hasConflict: true, conflicts: [] };
+            const conflictReason = summarizeConflictReason(structuredConflict);
+            const detailedMessage = buildConflictAttemptDetails({
+              studentName: selectedStudentLabel,
+              instructorName:
+                instructors.find((item) => item.id === entry.payload.instructorId)?.name ?? entry.item.instructorName ?? "강사 미지정",
+              classTypeLabel: entry.item.classTypeLabel,
+              weekday: entry.item.weekday,
+              startTime: entry.item.startTime,
+              endTime: entry.item.endTime,
+              scheduleTagLabel: selectedScheduleTagLabel,
+              conflictMessage:
+                getConflictMessageForDisplay(structuredConflict, [...effectiveStudentGroupByTargetId.values()], students) ||
+                getConflictMessage(structuredConflict)
+            });
+            conflictDetails.push(`- ${slotLabel} (${entry.item.rawText})\n${detailedMessage}`);
             conflictLogEntries.push({
               weekStart,
               targetType: roleView === "student" ? "학생" : "강사",
@@ -3443,7 +5575,7 @@ export default function SynchroSPage() {
               startTime: entry.item.startTime,
               endTime: entry.item.endTime,
               reason: conflictReason,
-              details: getConflictMessage(structuredConflict),
+              details: detailedMessage,
               source: "노션 일괄 저장",
               rawText: entry.item.rawText
             });
@@ -3473,13 +5605,34 @@ export default function SynchroSPage() {
         .filter(([, count]) => count > 0)
         .map(([key, count]) => `${key}:${count}`)
         .join(", ");
-      setNotice(`노션 가져오기 완료: 생성 ${created}건 / 기존유지 ${existing}건 / 건너뜀 ${skipped}건${reasonLine ? ` (${reasonLine})` : ""}`);
-
       const dedupedClassIds = Array.from(new Set(importedClassIds));
+      if (dedupedClassIds.length === 0) {
+        const unresolvedNames = [...unresolvedInstructorNames].filter(Boolean).join(", ");
+        const failureMessage =
+          skipReasons.noInstructor > 0
+            ? `강사 명단에서 ${unresolvedNames || "입력된 강사"} 강사를 찾지 못해 DB 수업과 시간표 그룹을 저장하지 않았습니다. 명단을 새로고침한 뒤 다시 저장해 주세요.`
+            : `DB에 저장된 수업이 없어 시간표 그룹을 만들지 못했습니다.${reasonLine ? ` 건너뜀 사유: ${reasonLine}` : ""}`;
+        setNotice(null);
+        setError(failureMessage);
+        setConflictDialog({
+          open: true,
+          title: "시간표 그룹 저장 안 됨",
+          message: failureMessage
+        });
+      } else {
+        setNotice(`노션 가져오기 완료: 생성 ${created}건 / 기존유지 ${existing}건 / 건너뜀 ${skipped}건${reasonLine ? ` (${reasonLine})` : ""}`);
+      }
+
       const postSaveWarnings: string[] = [];
-      if (dedupedClassIds.length > 0 && currentTargetId) {
-        try {
-          const created = await createTimetableGroup({
+      const shouldRefreshHistory = created > 0 || existing > 0;
+      if (shouldRefreshHistory) {
+        setParsedNotionItems([]);
+        setNotionInput("");
+      }
+
+      const [groupSaveResult, historyRefreshResult] = await Promise.allSettled([
+        dedupedClassIds.length > 0 && currentTargetId
+          ? createTimetableGroup({
             name: `${weekStart} ${currentTargetLabel} 시간표`,
             roleView,
             targetId: currentTargetId,
@@ -3487,25 +5640,23 @@ export default function SynchroSPage() {
             classIds: dedupedClassIds,
             snapshotEvents: [],
             isActive: true
-          });
-          if (created?.id) {
-            setSelectedGroupId(created.id);
-          }
-        } catch (postSaveError) {
-          console.error("[notion-import] group save failed after classes were saved", postSaveError);
-          postSaveWarnings.push("수업 DB 저장은 완료됐지만 저장된 시간표 그룹 갱신 중 일시 오류가 발생했습니다.");
+          })
+          : Promise.resolve(null),
+        shouldRefreshHistory ? loadSaveHistory() : Promise.resolve()
+      ]);
+
+      if (groupSaveResult.status === "fulfilled") {
+        if (groupSaveResult.value?.id) {
+          setSelectedGroupId(groupSaveResult.value.id);
         }
+      } else {
+        console.error("[notion-import] group save failed after classes were saved", groupSaveResult.reason);
+        postSaveWarnings.push("수업 DB 저장은 완료됐지만 저장된 시간표 그룹 갱신 중 일시 오류가 발생했습니다.");
       }
 
-      if (created > 0 || existing > 0) {
-        setParsedNotionItems([]);
-        setNotionInput("");
-        try {
-          await loadSaveHistory();
-        } catch (postSaveError) {
-          console.error("[notion-import] save history reload failed after classes were saved", postSaveError);
-          postSaveWarnings.push("수업 DB 저장은 완료됐지만 최근 저장 기록 갱신 중 일시 오류가 발생했습니다.");
-        }
+      if (historyRefreshResult.status === "rejected") {
+        console.error("[notion-import] save history reload failed after classes were saved", historyRefreshResult.reason);
+        postSaveWarnings.push("수업 DB 저장은 완료됐지만 최근 저장 기록 갱신 중 일시 오류가 발생했습니다.");
       }
 
       if (postSaveWarnings.length > 0) {
@@ -3518,7 +5669,7 @@ export default function SynchroSPage() {
         });
       }
 
-      if (conflictDetails.length > 0 || dayOffDetails.length > 0 || noSubjectDetails.length > 0) {
+      if (conflictDetails.length > 0 || dayOffDetails.length > 0 || noSubjectDetails.length > 0 || noInstructorDetails.length > 0) {
         const lines: string[] = [];
         let title = "시간표 저장 경고";
         if (conflictDetails.length > 0) {
@@ -3554,6 +5705,21 @@ export default function SynchroSPage() {
           lines.push("");
           lines.push("사탐/사회 과목은 subjects 테이블에 코드가 있어야 저장됩니다.");
         }
+        if (noInstructorDetails.length > 0) {
+          if (lines.length > 0) {
+            lines.push("");
+          }
+          if (conflictDetails.length === 0 && dayOffDetails.length === 0 && noSubjectDetails.length === 0) {
+            title = "강사명 확인 필요";
+          }
+          lines.push(`강사명 확인 실패 ${noInstructorDetails.length}건`);
+          lines.push(...noInstructorDetails.slice(0, 12).map((item) => `- ${item}`));
+          if (noInstructorDetails.length > 12) {
+            lines.push(`- 외 ${noInstructorDetails.length - 12}건`);
+          }
+          lines.push("");
+          lines.push("강사명을 확인할 수 없는 수업은 다른 강사로 대체하지 않고 저장에서 제외했습니다.");
+        }
         setConflictDialog({
           open: true,
           title,
@@ -3582,7 +5748,10 @@ export default function SynchroSPage() {
     if (pendingRealtimeReloadRef.current) {
       pendingRealtimeReloadRef.current = false;
     }
-    await loadWeek({ silent: true });
+    void loadWeek({ silent: true }).catch((reloadError) => {
+      console.error("[notion-import] background timetable refresh failed", reloadError);
+      setError("저장은 완료됐지만 최신 시간표를 다시 불러오지 못했습니다. 새로고침해 주세요.");
+    });
   }, [
     createTimetableGroup,
     classTypes,
@@ -3599,14 +5768,22 @@ export default function SynchroSPage() {
     currentTargetId,
     currentTargetLabel,
     displayEvents,
+    effectiveStudentGroupByTargetId,
     getInstructorDaysOff,
     loadSaveHistory,
     roleView,
+    selectedScheduleTagId,
+    selectedScheduleTagLabel,
+    students,
     weekStart
   ]);
 
   const handleSaveSingleSchedule = useCallback(
     async (event: ScheduleEvent) => {
+      if (roleView === "student" && !selectedScheduleTagId) {
+        setError("학생 시간표를 저장하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
+        return;
+      }
       if (!event.id.startsWith("draft-")) {
         setNotice("이미 DB에 저장된 수업입니다.");
         return;
@@ -3635,7 +5812,12 @@ export default function SynchroSPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            items: [prepared.payload],
+            items: [
+              {
+                ...prepared.payload,
+                scheduleTagId: roleView === "student" ? selectedScheduleTagId ?? undefined : prepared.payload.scheduleTagId
+              }
+            ],
             targetType: roleView === "student" ? "학생" : "강사",
             targetName: currentTargetLabel
           })
@@ -3654,6 +5836,17 @@ export default function SynchroSPage() {
 
         if (res.status === 409 || result?.status === "conflict") {
           const conflict = result?.conflict ?? { hasConflict: false, conflicts: [] };
+          const details = buildConflictAttemptDetails({
+            studentName: event.studentNames.join(", ") || selectedStudentLabel,
+            instructorName: event.instructorName,
+            classTypeLabel: event.classTypeLabel,
+            weekday: event.weekday,
+            startTime: event.startTime,
+            endTime: event.endTime,
+            scheduleTagLabel: selectedScheduleTagLabel,
+            conflictMessage:
+              getConflictMessageForDisplay(conflict, [...effectiveStudentGroupByTargetId.values()], students) || getConflictMessage(conflict)
+          });
           void recordConflictLogs([
             {
               weekStart,
@@ -3665,7 +5858,7 @@ export default function SynchroSPage() {
               startTime: event.startTime,
               endTime: event.endTime,
               reason: summarizeConflictReason(conflict),
-              details: getConflictMessage(conflict),
+              details,
               source: "개별 저장",
               rawText: prepared.rawLabel
             }
@@ -3674,14 +5867,14 @@ export default function SynchroSPage() {
             setConflictDialog({
               open: true,
               title: "혼합 배정 불가",
-              message: MIXED_CLASS_TYPE_CONFLICT_MESSAGE
+              message: details
             });
             return;
           }
           setConflictDialog({
             open: true,
             title: "시간표 충돌 경고",
-            message: getConflictMessage(conflict) || "시간표 충돌로 개별 저장이 차단되었습니다."
+            message: details || "시간표 충돌로 개별 저장이 차단되었습니다."
           });
           return;
         }
@@ -3717,6 +5910,7 @@ export default function SynchroSPage() {
     [
       buildSinglePayloadFromDraft,
       currentTargetLabel,
+      effectiveStudentGroupByTargetId,
       getInstructorDaysOff,
       instructors,
       loadOverviewEvents,
@@ -3725,13 +5919,22 @@ export default function SynchroSPage() {
       moveToLogin,
       recordConflictLogs,
       roleView,
+      selectedScheduleTagId,
+      selectedScheduleTagLabel,
       selectedStudentLabel,
+      students,
       weekStart
     ]
   );
 
   const handleDeleteSingleSchedule = useCallback(
     async (event: ScheduleEvent) => {
+      if (isSyncDraftEventId(event.id)) {
+        setSyncDraftItems((prev) => prev.filter((item) => item.id !== event.id));
+        setNotice("싱크로 시간표 초안을 삭제했습니다.");
+        return;
+      }
+
       if (event.id.startsWith("draft-")) {
         const draftIndex = Number(event.id.replace("draft-", ""));
         if (!Number.isNaN(draftIndex)) {
@@ -3781,7 +5984,11 @@ export default function SynchroSPage() {
 
   const handleCreateSpecialNote = useCallback(async () => {
     if (!currentTargetId) {
-      setError("특이사항을 등록할 강사/학생을 먼저 선택해 주세요.");
+      setError("시간표 메모를 등록할 학생을 먼저 선택해 주세요.");
+      return;
+    }
+    if (roleView === "student" && !displayedGroup) {
+      setError("시간표를 먼저 저장한 뒤 해당 저장 그룹에 메모를 등록해 주세요.");
       return;
     }
 
@@ -3798,6 +6005,7 @@ export default function SynchroSPage() {
         body: JSON.stringify({
           targetType: roleView === "student" ? "학생" : "강사",
           targetId: currentTargetId,
+          groupId: roleView === "student" ? displayedGroup?.id ?? null : null,
           content
         })
       });
@@ -3809,18 +6017,18 @@ export default function SynchroSPage() {
 
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error ?? "특이사항 저장에 실패했습니다.");
+        throw new Error(payload.error ?? "시간표 메모 저장에 실패했습니다.");
       }
 
       setSpecialNoteInput("");
       await loadSpecialNotes();
-      setNotice("특이사항을 저장했습니다.");
+      setNotice("선택한 시간표 그룹에 메모를 저장했습니다.");
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "특이사항 저장에 실패했습니다.");
+      setError(saveError instanceof Error ? saveError.message : "시간표 메모 저장에 실패했습니다.");
     } finally {
       setNoteSubmitting(false);
     }
-  }, [currentTargetId, loadSpecialNotes, moveToLogin, roleView, specialNoteInput]);
+  }, [currentTargetId, displayedGroup, loadSpecialNotes, moveToLogin, roleView, specialNoteInput]);
 
   const handleDeleteSpecialNote = useCallback(
     async (noteId: string) => {
@@ -3858,7 +6066,7 @@ export default function SynchroSPage() {
     try {
       const res = await fetch("/api/sheets/sync", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await getFirebaseAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({})
       });
 
@@ -3869,16 +6077,24 @@ export default function SynchroSPage() {
 
       const payload = (await res.json().catch(() => ({}))) as {
         error?: string;
+        source?: "firebase" | "sheets";
         teachersInserted?: number;
+        teachersUpdated?: number;
         studentsInserted?: number;
+        studentsUpdated?: number;
       };
 
       if (!res.ok) {
         throw new Error(payload.error ?? "시트 동기화에 실패했습니다.");
       }
 
-      setNotice(`시트 동기화 완료: 강사 ${payload.teachersInserted ?? 0}명 추가 / 학생 ${payload.studentsInserted ?? 0}명 추가`);
-      await loadOptions();
+      const sourceLabel = payload.source === "firebase" ? "Firebase 명단" : "시트";
+      setNotice(
+        `${sourceLabel} 동기화 완료: 강사 ${payload.teachersInserted ?? 0}명 추가, ${payload.teachersUpdated ?? 0}명 갱신 / 학생 ${
+          payload.studentsInserted ?? 0
+        }명 추가, ${payload.studentsUpdated ?? 0}명 갱신`
+      );
+      await loadOptions({ refreshSheets: true });
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "시트 동기화에 실패했습니다.");
     } finally {
@@ -3889,14 +6105,27 @@ export default function SynchroSPage() {
   const handleActivateGroup = useCallback(
     async (groupId: string) => {
       setParsedNotionItems([]);
-      await activateTimetableGroup(groupId);
-      const activated = timetableGroups.find((group) => group.id === groupId);
-      const activatedSnapshot = activated?.snapshotEvents ?? [];
-      if (activatedSnapshot.length > 0) {
-        setEvents(activatedSnapshot.map((event) => ({ ...event })));
+      setGroupActivationPendingId(groupId);
+      setGroupActivationPulseId(null);
+      try {
+        const isActive = await activateTimetableGroup(groupId);
+        const activated = timetableGroups.find((group) => group.id === groupId);
+        if (activated) setSelectedScheduleTagId(activated.tagId ?? null);
+        const activatedSnapshot = activated?.snapshotEvents ?? [];
+        if (isActive && activatedSnapshot.length > 0) {
+          setEvents(activatedSnapshot.map((event) => ({ ...event })));
+        }
+        setSelectedGroupId(groupId);
+        setGroupActivationPulseId(groupId);
+        window.setTimeout(() => {
+          setGroupActivationPulseId((current) => (current === groupId ? null : current));
+        }, 300);
+        setNotice(isActive ? "활성 시간표를 변경했습니다." : "시간표 그룹을 비활성화했습니다.");
+      } catch (activationError) {
+        setError(activationError instanceof Error ? activationError.message : "시간표 상태 변경에 실패했습니다.");
+      } finally {
+        setGroupActivationPendingId((current) => (current === groupId ? null : current));
       }
-      setSelectedGroupId(groupId);
-      setNotice("활성 시간표를 변경했습니다.");
     },
     [activateTimetableGroup, timetableGroups]
   );
@@ -3904,6 +6133,8 @@ export default function SynchroSPage() {
   const handleSelectGroup = useCallback(
     (groupId: string) => {
       setParsedNotionItems([]);
+      const selected = timetableGroups.find((group) => group.id === groupId);
+      if (selected) setSelectedScheduleTagId(selected.tagId ?? null);
       let seededSnapshot: ScheduleEvent[] | null = null;
       let seededClassIds: string[] = [];
       setTimetableGroups((prev) =>
@@ -3928,8 +6159,100 @@ export default function SynchroSPage() {
       setSelectedGroupId(groupId);
       setNotice("선택한 그룹 시간표를 표시했습니다.");
     },
-    [filteredEvents, saveTimetableGroupSnapshot]
+    [filteredEvents, saveTimetableGroupSnapshot, timetableGroups]
   );
+
+  const handleCaptureTimetableImage = useCallback(async () => {
+    const target = timetableCaptureRef.current;
+    if (!target) return;
+
+    const ClipboardItemCtor = window.ClipboardItem;
+    if (!navigator.clipboard?.write || !ClipboardItemCtor) {
+      setError("이 브라우저에서는 이미지 클립보드 복사를 지원하지 않습니다.");
+      return;
+    }
+
+    setCapturingTimetable(true);
+    setError(null);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const gridNode = target.querySelector("[data-timetable-grid='true']") as HTMLElement | null;
+      const tableNode = target.querySelector("[data-timetable-table='true']") as HTMLElement | null;
+      const captureWidth = Math.ceil(Math.max(tableNode?.scrollWidth ?? 0, gridNode?.scrollWidth ?? 0, 1));
+      const captureHeight = Math.ceil(target.scrollHeight);
+      const canvas = await html2canvas(target, {
+        backgroundColor: "#ffffff",
+        scale: Math.min(2, window.devicePixelRatio || 1),
+        useCORS: true,
+        logging: false,
+        width: captureWidth,
+        height: captureHeight,
+        windowWidth: captureWidth,
+        windowHeight: captureHeight,
+        onclone: (documentClone) => {
+          const captureNode = documentClone.querySelector("[data-timetable-capture='true']") as HTMLElement | null;
+          if (!captureNode) return;
+          captureNode.style.display = "inline-block";
+          captureNode.style.width = `${captureWidth}px`;
+          captureNode.style.maxWidth = "none";
+          captureNode.querySelectorAll<HTMLElement>(".grid-scrollbar").forEach((node) => {
+            node.style.width = `${captureWidth}px`;
+            node.style.overflow = "visible";
+            node.style.maxWidth = "none";
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-timetable-table='true']").forEach((node) => {
+            node.style.width = `${captureWidth}px`;
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-timetable-watermark='true']").forEach((node) => {
+            node.style.display = "block";
+            node.style.opacity = "0.07";
+            node.style.zIndex = "20";
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-schedule-time-notch='true']").forEach((node) => {
+            node.style.display = "none";
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-schedule-time-bubble='true']").forEach((node) => {
+            node.style.height = "22px";
+            node.style.minHeight = "22px";
+            node.style.paddingTop = "0";
+            node.style.paddingBottom = "0";
+            node.style.lineHeight = "22px";
+            node.style.alignItems = "center";
+            node.style.justifyContent = "center";
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-schedule-time-bubble='true'] span").forEach((node) => {
+            node.style.lineHeight = "22px";
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-schedule-type-badge='true']").forEach((node) => {
+            node.style.height = "20px";
+            node.style.minHeight = "20px";
+            node.style.paddingTop = "0";
+            node.style.paddingBottom = "0";
+            node.style.lineHeight = "20px";
+            node.style.alignItems = "center";
+            node.style.justifyContent = "center";
+          });
+          captureNode.querySelectorAll<HTMLElement>("[data-timetable-time-button='true']").forEach((node) => {
+            node.style.display = "flex";
+            node.style.alignItems = "center";
+            node.style.justifyContent = "center";
+            node.style.height = "32px";
+            node.style.paddingTop = "0";
+            node.style.paddingBottom = "0";
+            node.style.lineHeight = "32px";
+          });
+        }
+      });
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("이미지 생성에 실패했습니다.");
+      await navigator.clipboard.write([new ClipboardItemCtor({ "image/png": blob })]);
+      setNotice("시간표 이미지를 클립보드에 복사했습니다.");
+    } catch (captureError) {
+      setError(captureError instanceof Error ? captureError.message : "시간표 이미지 복사에 실패했습니다.");
+    } finally {
+      setCapturingTimetable(false);
+    }
+  }, []);
 
   const handleOpenDeleteGroupDialog = useCallback(
     (groupId: string) => {
@@ -3990,13 +6313,6 @@ export default function SynchroSPage() {
       setDeleteGroupDialog({ open: false, groupId: null, groupName: "", submitting: false });
       setTimetableGroups((prev) => {
         const next = prev.filter((group) => group.id !== groupId);
-        const sameScope = next
-          .filter((group) => group.roleView === targetGroup.roleView && group.targetId === targetGroup.targetId)
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        if (!sameScope.some((group) => group.isActive) && sameScope.length > 0) {
-          const activeId = sameScope[0]?.id;
-          return next.map((group) => (group.id === activeId ? { ...group, isActive: true } : group));
-        }
         return next;
       });
       setSelectedGroupId((prev) => (prev === groupId ? null : prev));
@@ -4010,6 +6326,10 @@ export default function SynchroSPage() {
     setTimetableGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, name } : group)));
   }, []);
 
+  const handleGroupExpirationChange = useCallback((groupId: string, expiresOn: string) => {
+    setTimetableGroups((prev) => prev.map((group) => (group.id === groupId ? { ...group, expiresOn: expiresOn || null } : group)));
+  }, []);
+
   const handleSelectSaveHistoryTarget = useCallback(
     (entry: SaveHistoryEntry) => {
       setShowIntroPage(false);
@@ -4017,25 +6337,38 @@ export default function SynchroSPage() {
       setShowStudentPicker(false);
       setShowInstructorPicker(false);
       setSelectedGroupId(null);
+      setError(null);
+      setNotice(null);
+      if (entry.tagId) setSelectedScheduleTagId(entry.tagId);
 
       if (entry.targetType === "학생") {
         const matchedStudent = findOptionByName(students, entry.targetName);
-        if (!matchedStudent) {
+        const fallbackStudent = entry.targetId ? { id: entry.targetId, name: entry.targetName } : null;
+        const targetStudent = matchedStudent ?? fallbackStudent;
+        if (!targetStudent) {
           setError(`저장 기록 대상 학생을 찾지 못했습니다: ${entry.targetName}`);
           return;
         }
         setMainTab("student");
         setRoleView("student");
-        setSelectedStudentId(matchedStudent.id);
+        setSelectedStudentId(targetStudent.id);
+        if (!matchedStudent) {
+          setNotice(`활성 학생 목록에는 없지만 저장 기록 기준으로 '${entry.targetName}' 시간표를 열었습니다.`);
+        }
       } else {
         const matchedInstructor = findOptionByName(instructors, entry.targetName);
-        if (!matchedInstructor) {
+        const fallbackInstructor = entry.targetId ? { id: entry.targetId, name: entry.targetName } : null;
+        const targetInstructor = matchedInstructor ?? fallbackInstructor;
+        if (!targetInstructor) {
           setError(`저장 기록 대상 강사를 찾지 못했습니다: ${entry.targetName}`);
           return;
         }
         setMainTab("instructor");
         setRoleView("instructor");
-        setSelectedInstructorId(matchedInstructor.id);
+        setSelectedInstructorId(targetInstructor.id);
+        if (!matchedInstructor) {
+          setNotice(`활성 강사 목록에는 없지만 저장 기록 기준으로 '${entry.targetName}' 시간표를 열었습니다.`);
+        }
       }
 
       if (typeof window !== "undefined") {
@@ -4056,11 +6389,62 @@ export default function SynchroSPage() {
     [renameTimetableGroup]
   );
 
+  const handlePersistGroupExpiration = useCallback(
+    async (groupId: string, expiresOn: string) => {
+      try {
+        const normalized = expiresOn.trim() || null;
+        await updateTimetableGroupExpiration(groupId, normalized);
+        await loadTimetableGroups();
+        setNotice(normalized ? `시간표 그룹 만료일을 ${normalized}로 저장했습니다.` : "시간표 그룹 만료일을 해제했습니다.");
+      } catch (expirationError) {
+        setError(expirationError instanceof Error ? expirationError.message : "그룹 만료일 저장에 실패했습니다.");
+        await loadTimetableGroups().catch(() => undefined);
+      }
+    },
+    [loadTimetableGroups, updateTimetableGroupExpiration]
+  );
+
   useEffect(() => {
     void loadOptions().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "Failed to load options");
     });
   }, [loadOptions]);
+
+  useEffect(() => {
+    void loadScheduleTags().catch((loadError) => {
+      setError(loadError instanceof Error ? loadError.message : "시간표 태그를 불러오지 못했습니다.");
+    });
+  }, [loadScheduleTags]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("synchro-s-schedule-tag-v1");
+    setSelectedScheduleTagId(saved || null);
+  }, []);
+
+  useEffect(() => {
+    const refreshToday = () => setTodayISO(formatDateISOInKST(new Date()));
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshToday();
+    };
+    refreshToday();
+    const timer = window.setInterval(refreshToday, 60_000);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedScheduleTagId) window.localStorage.setItem("synchro-s-schedule-tag-v1", selectedScheduleTagId);
+    else window.localStorage.removeItem("synchro-s-schedule-tag-v1");
+  }, [selectedScheduleTagId]);
+
+  useEffect(() => {
+    if (selectedScheduleTagId && scheduleTags.length > 0 && !scheduleTags.some((tag) => tag.id === selectedScheduleTagId)) {
+      setSelectedScheduleTagId(null);
+    }
+  }, [scheduleTags, selectedScheduleTagId]);
 
   useEffect(() => {
     void loadSaveHistory().catch((loadError) => {
@@ -4075,13 +6459,13 @@ export default function SynchroSPage() {
   }, [loadTimetableGroups]);
 
   useEffect(() => {
-    if (showIntroPage || mainTab !== "overview") {
+    if (mainTab !== "overview" && !(showIntroPage && !isInstructorReadOnly)) {
       return;
     }
     void loadOverviewEvents().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "전체 요약 데이터를 불러오지 못했습니다.");
     });
-  }, [loadOverviewEvents, mainTab, showIntroPage]);
+  }, [isInstructorReadOnly, loadOverviewEvents, mainTab, showIntroPage]);
 
   useEffect(() => {
     if (showIntroPage || mainTab !== "issues") {
@@ -4091,22 +6475,29 @@ export default function SynchroSPage() {
   }, [loadConflictLogs, mainTab, showIntroPage]);
 
   useEffect(() => {
-    if (showIntroPage || !isWorkspaceTab) {
+    if (showIntroPage || mainTab !== "review") {
+      return;
+    }
+    void loadScheduleReviews();
+  }, [loadScheduleReviews, mainTab, showIntroPage]);
+
+  useEffect(() => {
+    if (!isWorkspaceTab || (showIntroPage && !isInstructorReadOnly)) {
       setLoading(false);
       setEvents([]);
       return;
     }
     void loadWeek();
-  }, [isWorkspaceTab, loadWeek, showIntroPage]);
+  }, [isInstructorReadOnly, isWorkspaceTab, loadWeek, showIntroPage]);
 
   useEffect(() => {
-    if (showIntroPage || !isWorkspaceTab) {
+    if (!isWorkspaceTab || (showIntroPage && !isInstructorReadOnly)) {
       setSpecialNotes([]);
       setNotesLoading(false);
       return;
     }
     void loadSpecialNotes();
-  }, [isWorkspaceTab, loadSpecialNotes, showIntroPage]);
+  }, [isInstructorReadOnly, isWorkspaceTab, loadSpecialNotes, showIntroPage]);
 
   useEffect(() => {
     if (error === "Bad Request") {
@@ -4132,6 +6523,27 @@ export default function SynchroSPage() {
   }, [mainTab, overviewEntity, overviewVisibleInstructors, selectedInstructorId, selectedStudentId, students]);
 
   useEffect(() => {
+    if (mainTab !== "review") {
+      return;
+    }
+    if (!selectedReviewStudentId && reviewStudents.length > 0) {
+      setSelectedReviewStudentId(reviewStudents[0]!.id);
+      return;
+    }
+    if (selectedReviewStudentId && !reviewStudents.some((student) => student.id === selectedReviewStudentId)) {
+      setSelectedReviewStudentId(reviewStudents[0]?.id ?? "");
+    }
+  }, [mainTab, reviewStudents, selectedReviewStudentId]);
+
+  useEffect(() => {
+    setReviewMemoDraft(selectedReview?.memo ?? "");
+  }, [selectedReview?.memo, selectedReviewStudent?.id]);
+
+  useEffect(() => {
+    setSelectedReviewClassKey(null);
+  }, [selectedReviewStudent?.id]);
+
+  useEffect(() => {
     setNewPlacementDraft((prev) => ({
       ...prev,
       subjectCode: prev.subjectCode || subjects[0]?.code || "",
@@ -4154,15 +6566,47 @@ export default function SynchroSPage() {
   }, [memoByEventId]);
 
   useEffect(() => {
-    setGroupPage(1);
     setSelectedGroupId(null);
+    autoSelectedGroupScopeRef.current = null;
   }, [currentTargetId, roleView]);
 
   useEffect(() => {
-    if (groupPage > groupPageCount) {
-      setGroupPage(groupPageCount);
+    if (timetableGroupsLoading || !currentTargetId || !selectedScheduleTagId) return;
+
+    const scopeKey = `${roleView}:${currentTargetId}:${selectedScheduleTagId}`;
+    if (autoSelectedGroupScopeRef.current === scopeKey) return;
+
+    const preferredGroup =
+      roleView === "student"
+        ? getLatestActiveStudentGroup(timetableGroups, currentTargetId, selectedScheduleTagId, shiftDate(weekStart, 7))
+        : getLatestActiveStudentGroupForInstructor(
+            timetableGroups,
+            currentTargetId,
+            selectedInstructorLabel,
+            selectedScheduleTagId
+          );
+
+    autoSelectedGroupScopeRef.current = scopeKey;
+    if (!preferredGroup || preferredGroup.weekStart <= weekStart) return;
+
+    setWeekStart(preferredGroup.weekStart);
+    setCalendarMonth(monthStart(preferredGroup.weekStart));
+    if (roleView === "student") {
+      setSelectedGroupId(preferredGroup.id);
     }
-  }, [groupPage, groupPageCount]);
+  }, [
+    currentTargetId,
+    roleView,
+    selectedInstructorLabel,
+    selectedScheduleTagId,
+    timetableGroups,
+    timetableGroupsLoading,
+    weekStart
+  ]);
+
+  useEffect(() => {
+    setExpandedGroupMonths((prev) => ({ ...prev, [currentGroupMonthKey]: true }));
+  }, [currentGroupMonthKey, currentTargetId, roleView]);
 
   useEffect(() => {
     if (!selectedGroupId) return;
@@ -4177,10 +6621,10 @@ export default function SynchroSPage() {
   useEffect(() => {
     if (!showActiveOnly || !selectedGroupId) return;
     const selected = timetableGroups.find((group) => group.id === selectedGroupId);
-    if (selected && !selected.isActive) {
+    if (selected && !selected.isActive && !effectiveGroupIdSet.has(selected.id)) {
       setSelectedGroupId(activeGroup?.id ?? null);
     }
-  }, [activeGroup?.id, selectedGroupId, showActiveOnly, timetableGroups]);
+  }, [activeGroup?.id, effectiveGroupIdSet, selectedGroupId, showActiveOnly, timetableGroups]);
 
   useEffect(() => {
     if (!keyword || (!isWorkspaceTab && mainTab !== "overview")) return;
@@ -4221,11 +6665,14 @@ export default function SynchroSPage() {
 
     const supabase = createSupabaseBrowserClient();
     const reloadActiveScreen = () => {
-      if (!showIntroPage && isWorkspaceTab) {
+      if (isWorkspaceTab && (!showIntroPage || isInstructorReadOnly)) {
         void loadWeek({ silent: true });
       }
-      if (!showIntroPage && mainTab === "overview") {
+      if ((!showIntroPage && mainTab === "overview") || (showIntroPage && !isInstructorReadOnly)) {
         void loadOverviewEvents();
+      }
+      if (!showIntroPage && mainTab === "review") {
+        void loadScheduleReviews();
       }
     };
     const channel = supabase
@@ -4251,20 +6698,28 @@ export default function SynchroSPage() {
         }
         reloadActiveScreen();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "special_notes" }, () => {
+        if (!showIntroPage && mainTab === "review") void loadScheduleReviews();
+      })
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isWorkspaceTab, loadOverviewEvents, loadWeek, mainTab, showIntroPage]);
+  }, [isInstructorReadOnly, isWorkspaceTab, loadOverviewEvents, loadScheduleReviews, loadWeek, mainTab, showIntroPage]);
 
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-[1760px] gap-4 bg-[radial-gradient(circle_at_5%_10%,#dbeafe,transparent_35%),radial-gradient(circle_at_95%_0%,#bfdbfe,transparent_30%),#eef2f7] px-4 py-6 lg:px-8 2xl:max-w-[1880px] xl:grid-cols-[13rem_minmax(0,1fr)] xl:items-start">
-      <aside className="hidden xl:block xl:sticky xl:top-24 xl:self-start">
-        <div className="max-h-[calc(100vh-7.5rem)] w-[12.75rem] overflow-hidden rounded-[26px] border border-white/50 bg-white/40 shadow-[0_18px_42px_rgba(15,23,42,0.10)] backdrop-blur-md">
-          <div className="border-b border-white/45 bg-white/35 px-4 py-3">
+    <main
+      className={`sync-tabular grid min-h-screen w-full gap-3 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 lg:px-4 2xl:px-6 xl:items-start ${
+        viewerRoleResolved && !isInstructorReadOnly ? "xl:grid-cols-[12.5rem_minmax(0,1fr)]" : "xl:grid-cols-1"
+      }`}
+    >
+      {viewerRoleResolved && !isInstructorReadOnly ? (
+      <aside className="hidden xl:block xl:sticky xl:top-4 xl:self-start">
+        <div className="sync-surface max-h-[calc(100vh-2rem)] w-[12.5rem] overflow-hidden rounded-xl bg-white">
+          <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center gap-2">
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-2xl border border-white/55 bg-white/70 text-slate-500 shadow-sm">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
                   <path d="M8 7h8" strokeLinecap="round" />
                   <path d="M8 12h8" strokeLinecap="round" />
@@ -4281,27 +6736,28 @@ export default function SynchroSPage() {
             </div>
           </div>
 
-          <div className="max-h-[calc(100vh-11.5rem)] overflow-y-auto px-4 py-3">
+          <div className="max-h-[calc(100vh-11.5rem)] overflow-y-auto px-3 py-3">
             {saveHistory.length === 0 ? (
-              <div className="rounded-2xl border border-white/45 bg-white/34 px-3 py-3 text-xs font-semibold leading-5 text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
+              <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold leading-5 text-slate-500">
                 아직 저장 기록이 없습니다.
                 <br />
                 [DB로 저장] 성공 시 이곳에 최신순으로 표시됩니다.
               </div>
             ) : (
-              <div className="relative pl-5">
-                <span className="absolute left-[7px] top-1 bottom-1 w-px bg-[linear-gradient(180deg,rgba(148,163,184,0.45),rgba(148,163,184,0.08))]" />
-                <div className="space-y-3">
+              <div className="relative pl-4">
+                <span className="absolute left-[6px] top-1 bottom-1 w-px bg-slate-200" />
+                <div className="space-y-2.5">
                   {saveHistory.map((entry) => (
                     <div key={entry.id} className="relative">
-                      <span className="absolute -left-5 top-1.5 h-3 w-3 rounded-full border border-white/70 bg-[linear-gradient(135deg,rgba(96,165,250,0.95),rgba(167,243,208,0.9))] shadow-[0_4px_10px_rgba(96,165,250,0.25)]" />
+                      <span className="absolute -left-4 top-1.5 h-2.5 w-2.5 rounded-full border border-blue-100 bg-blue-500 shadow-sm shadow-blue-200" />
                       <button
                         type="button"
                         onClick={() => handleSelectSaveHistoryTarget(entry)}
-                        className="w-full rounded-2xl border border-white/45 bg-white/34 px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition hover:border-sky-200/80 hover:bg-white/55"
+                        className="sync-pressable sync-focus w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left hover:border-blue-200 hover:bg-blue-50"
                       >
-                        <p className="text-[11px] font-black tracking-wide text-slate-700">[{entry.timestampLabel}]</p>
-                        <p className="mt-1 text-xs font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
+                        <p className="truncate text-[10px] font-black tracking-wide text-slate-700">[{entry.timestampLabel}]</p>
+                        <p className="mt-1 truncate text-[11px] font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
+                        <p className="mt-0.5 truncate text-[10px] font-bold text-blue-600">분류: {entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</p>
                       </button>
                     </div>
                   ))}
@@ -4311,15 +6767,13 @@ export default function SynchroSPage() {
           </div>
         </div>
       </aside>
+      ) : null}
 
       <div className="flex min-w-0 flex-col gap-4">
-      <section
-        className={`relative z-[80] overflow-visible rounded-[32px] border border-white/40 bg-white/30 p-4 shadow-xl shadow-cyan-500/10 backdrop-blur-md ${headerGlowClass}`}
-      >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(110,231,183,0.22),transparent_28%),radial-gradient(circle_at_18%_18%,rgba(147,197,253,0.18),transparent_24%)]" />
-        <div className="relative space-y-4">
+      <section className="sync-surface sticky top-0 z-[80] overflow-visible rounded-xl bg-white p-4">
+        <div className="space-y-4">
           <div className="grid gap-3 xl:grid-cols-[1.2fr_minmax(320px,0.9fr)_auto]">
-            <div className="rounded-[28px] border border-white/45 bg-white/35 p-4 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(15,23,42,0.02)]">
               <div className="flex items-center gap-4">
                 <img
                   src="https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png"
@@ -4328,18 +6782,18 @@ export default function SynchroSPage() {
                 />
                 <div>
                   <div className="flex flex-wrap items-end gap-3">
-                    <h1 className="text-[2.35rem] font-black tracking-tight text-slate-900">Synchro-S</h1>
-                    <span className="mb-1 rounded-full border border-white/50 bg-white/35 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-slate-500">
+                    <h1 className="sync-heading text-2xl font-black text-slate-900">Synchro-S</h1>
+                    <span className="mb-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                       Timetable DB
                     </span>
                   </div>
-                  <p className="text-sm font-semibold text-slate-500">{weekStart} ~ {weekEnd} | 입력 일시/진행현황 자동 기록</p>
+                  <p className="sync-copy text-sm font-semibold text-slate-500">{weekStart} ~ {weekEnd} | 입력 일시/진행현황 자동 기록</p>
                 </div>
               </div>
             </div>
 
-            <label className="flex min-h-[88px] items-center gap-3 rounded-[28px] border border-white/45 bg-white/35 px-5 shadow-lg shadow-slate-900/5 backdrop-blur-md">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/45 bg-white/55 text-slate-500 shadow-inner shadow-white/40">
+            <label className="flex min-h-[88px] items-center gap-3 rounded-lg border border-slate-200 bg-white px-5">
+              <span className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
                   <circle cx="11" cy="11" r="6" />
                   <path d="m20 20-3.5-3.5" strokeLinecap="round" />
@@ -4356,47 +6810,48 @@ export default function SynchroSPage() {
               </div>
             </label>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 rounded-[28px] border border-white/45 bg-white/30 p-3 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+              {!isInstructorReadOnly ? (
               <button
                 type="button"
                 onClick={() => {
                   setError(null);
                   setShowIntroPage(true);
                 }}
-                className="inline-flex items-center gap-2 rounded-full border border-white/45 bg-white/45 px-4 py-2 text-xs font-bold text-slate-700 shadow-sm shadow-white/20 hover:bg-white/60"
+                className={`sync-pressable sync-focus inline-flex h-9 items-center gap-2 rounded-md border px-3 text-xs font-bold shadow-sm ${
+                  showIntroPage
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-slate-100 hover:text-blue-700"
+                }`}
               >
-                <span className="h-2 w-2 rounded-full bg-sky-400" />
-                앱 소개
+                <span className={`h-2 w-2 rounded-full ${showIntroPage ? "bg-white" : "bg-sky-400"}`} />
+                홈
               </button>
-              <div className="inline-flex rounded-2xl border border-white/55 bg-white/35 p-1 shadow-[0_12px_34px_rgba(31,38,135,0.16)] backdrop-blur-xl">
+              ) : null}
+              {!isInstructorReadOnly ? (
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
                 {(isInstructorReadOnly
                   ? ([{ key: "instructor", label: "강사" }] as const)
                   : ([
                       { key: "overview", label: "전체 요약" },
+                      { key: "review", label: "시간표 검토" },
                       { key: "issues", label: "오류 기록" },
-                      { key: "new", label: "신규" },
+                      { key: "new", label: "시간표 생성" },
                       { key: "instructor", label: "강사" },
                       { key: "student", label: "학생" }
                     ] as const)
                 ).map((tab) => {
-                  const active = mainTab === tab.key;
-                  const accentClass =
-                    tab.key === "overview"
-                      ? "shadow-[inset_0_-2px_0_rgba(99,102,241,0.42),0_7px_16px_rgba(99,102,241,0.22)]"
-                      : tab.key === "issues"
-                        ? "shadow-[inset_0_-2px_0_rgba(245,158,11,0.42),0_7px_16px_rgba(251,146,60,0.22)]"
-                      : tab.key === "new"
-                        ? "shadow-[inset_0_-2px_0_rgba(217,70,239,0.42),0_7px_16px_rgba(217,70,239,0.22)]"
-                      : tab.key === "instructor"
-                        ? "shadow-[inset_0_-2px_0_rgba(59,130,246,0.45),0_7px_16px_rgba(59,130,246,0.24)]"
-                        : "shadow-[inset_0_-2px_0_rgba(16,185,129,0.45),0_7px_16px_rgba(16,185,129,0.24)]";
+                  const active = !showIntroPage && mainTab === tab.key;
                   return (
                     <button
                       key={tab.key}
                       type="button"
                       onClick={() => handleMainTabChange(tab.key)}
-                      className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                        active ? `bg-white/90 text-slate-900 ${accentClass}` : "text-slate-700 hover:bg-white/70"
+                      className={`sync-pressable sync-focus rounded-md px-3 py-2 text-sm font-semibold ${
+                        active
+                          ? "border border-blue-600 bg-blue-600 text-white shadow-sm"
+                          : "border border-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       }`}
                     >
                       {tab.label}
@@ -4404,10 +6859,44 @@ export default function SynchroSPage() {
                   );
                 })}
               </div>
+              ) : null}
+              {isInstructorReadOnly ? (
+              <label className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 shadow-sm">
+                <span className="h-2 w-2 rounded-full bg-blue-500" />
+                <span className="sr-only">시간표 태그</span>
+                <select
+                  value={selectedScheduleTagId ?? ""}
+                  onChange={(event) => {
+                    setSelectedScheduleTagId(event.target.value || null);
+                    setSelectedGroupId(null);
+                  }}
+                  className="max-w-[150px] bg-transparent pr-1 font-bold outline-none"
+                  aria-label="현재 시간표 태그"
+                >
+                  <option value="">미분류</option>
+                  {scheduleTags.filter((tag) => tag.isActive || tag.id === selectedScheduleTagId).map((tag) => (
+                    <option key={tag.id} value={tag.id}>{tag.name}{tag.isCurrent ? " (현재)" : ""}</option>
+                  ))}
+                </select>
+              </label>
+              ) : null}
+              {!isInstructorReadOnly ? (
+                <button
+                  type="button"
+                  onClick={() => setScheduleTagManagerOpen(true)}
+                  className="sync-pressable sync-focus inline-flex h-9 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M4 7h10l6 6-7 7-9-9V7Z" strokeLinejoin="round" />
+                    <circle cx="9" cy="11" r="1.5" />
+                  </svg>
+                  태그 관리자
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void handleLogout()}
-                className="inline-flex items-center gap-2 rounded-full border border-white/45 bg-white/35 px-4 py-2 text-xs font-bold text-slate-700 shadow-sm shadow-white/20 hover:bg-white/55"
+                className="sync-pressable sync-focus inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-100"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
                   <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" strokeLinecap="round" />
@@ -4416,60 +6905,106 @@ export default function SynchroSPage() {
                 </svg>
                 로그아웃
               </button>
+              </div>
+              {!isInstructorReadOnly ? (
+                <nav aria-label="시간표 분류 바로가기" className="mt-2 flex flex-wrap items-center justify-end gap-1.5 border-t border-slate-200 pt-2">
+                  <span className="mr-1 text-[11px] font-black text-slate-400">시간표 분류</span>
+                  <button
+                    type="button"
+                    aria-pressed={selectedScheduleTagId === null}
+                    onClick={() => {
+                      setSelectedScheduleTagId(null);
+                      setSelectedGroupId(null);
+                    }}
+                    className={`sync-pressable sync-focus min-h-10 rounded-full border px-3 text-xs font-black transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
+                      selectedScheduleTagId === null
+                        ? "border-slate-500 bg-slate-700 text-white shadow-sm"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-100"
+                    }`}
+                  >
+                    미분류
+                  </button>
+                  {scheduleTags.filter((tag) => tag.isActive || tag.id === selectedScheduleTagId).map((tag) => {
+                    const active = tag.id === selectedScheduleTagId;
+                    return (
+                      <button
+                        key={`header-tag-${tag.id}`}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => {
+                          setSelectedScheduleTagId(tag.id);
+                          setSelectedGroupId(null);
+                        }}
+                        className={`sync-pressable sync-focus min-h-10 rounded-full border px-3 text-xs font-black transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
+                          active
+                            ? `${SCHEDULE_TAG_TONES[tag.colorKey]} ring-2 ring-blue-200 ring-offset-1 ring-offset-slate-50 shadow-sm`
+                            : `${SCHEDULE_TAG_TONES[tag.colorKey]} opacity-75 hover:opacity-100`
+                        }`}
+                      >
+                        <span>#{tag.name}</span>
+                        {tag.isCurrent ? (
+                          <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-black ${active ? "bg-white/85 text-blue-700" : "bg-blue-600 text-white"}`}>
+                            현재
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </nav>
+              ) : null}
             </div>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[auto_auto_1fr_auto]">
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-[24px] border border-white/45 bg-white/30 p-1.5 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+          <div className="grid gap-3 xl:grid-cols-[auto_1fr_auto]">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
               <button
                 type="button"
-                className="rounded-2xl px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white/45"
+                className="sync-pressable sync-focus h-8 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 onClick={() => setWeekStart((prev) => shiftDate(prev, -7))}
               >
                 이전 주
               </button>
               <button
                 type="button"
-                className="rounded-2xl bg-white/65 px-4 py-2 text-xs font-black text-slate-800 shadow-sm"
+                className="sync-pressable sync-focus h-8 rounded-md bg-blue-600 px-3 text-xs font-black text-white shadow-sm"
                 onClick={() => setWeekStart(mondayOfCurrentWeek())}
               >
                 이번 주
               </button>
               <button
                 type="button"
-                className="rounded-2xl px-4 py-2 text-xs font-bold text-slate-600 hover:bg-white/45"
+                className="sync-pressable sync-focus h-8 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 onClick={() => setWeekStart((prev) => shiftDate(prev, 7))}
               >
                 다음 주
               </button>
             </div>
 
-            <button
-              type="button"
-              disabled={refreshingData}
-              onClick={() => void handleHardRefreshData()}
-              className="inline-flex items-center justify-center gap-2 rounded-[24px] border border-white/45 bg-white/36 px-4 py-2 text-xs font-bold text-slate-700 shadow-lg shadow-slate-900/5 backdrop-blur-md transition hover:bg-white/56 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.9"
-              >
-                <path d="M20 12a8 8 0 1 1-2.34-5.66" strokeLinecap="round" />
-                <path d="M20 4v6h-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {refreshingData ? "새로고침 중..." : "데이터 새로고침"}
-            </button>
-
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={refreshingData}
+                onClick={() => void handleHardRefreshData()}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                >
+                  <path d="M20 12a8 8 0 1 1-2.34-5.66" strokeLinecap="round" />
+                  <path d="M20 4v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {refreshingData ? "새로고침 중..." : "새로고침"}
+              </button>
               <div className="group relative">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/50 bg-white/40 px-3 py-2 text-[11px] font-bold text-slate-600 shadow-lg shadow-slate-900/5 backdrop-blur-md">
-                  <span className="text-sm leading-none">💡</span>
+                <div className="inline-flex h-10 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-[11px] font-bold text-amber-800">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
                   <span>정규수업 매주 자동 반복</span>
                 </div>
-                <div className="pointer-events-none absolute left-0 top-full z-[180] mt-2 w-72 rounded-2xl border border-white/60 bg-[linear-gradient(160deg,rgba(255,255,255,0.88),rgba(219,234,254,0.76),rgba(236,253,245,0.72))] p-3 text-xs font-semibold leading-5 text-slate-700 opacity-0 shadow-[0_18px_40px_rgba(15,23,42,0.14)] backdrop-blur-xl transition duration-150 group-hover:opacity-100">
+                <div className="pointer-events-none absolute left-0 top-full z-[180] mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 text-xs font-semibold leading-5 text-slate-700 opacity-0 shadow-lg transition duration-150 group-hover:opacity-100">
                   정규수업은 매주 같은 시간에 반복 표시됩니다. 특정 날짜에 배정된 보강/단기 수업(one-off)만 해당 주차에 표시됩니다.
                 </div>
               </div>
@@ -4477,7 +7012,7 @@ export default function SynchroSPage() {
                 <>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm shadow-blue-500/10 backdrop-blur-md hover:bg-white/55"
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
                     onClick={() => void handleCopyForNotion()}
                   >
                     <span className="h-2 w-2 rounded-full bg-blue-400" />
@@ -4486,7 +7021,7 @@ export default function SynchroSPage() {
                   <button
                     type="button"
                     disabled={syncingSheets}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-emerald-700 shadow-sm shadow-emerald-500/10 backdrop-blur-md hover:bg-white/55 disabled:opacity-60"
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
                     onClick={() => void handleSyncSheets()}
                   >
                     <span className="h-2 w-2 rounded-full bg-emerald-400" />
@@ -4494,7 +7029,7 @@ export default function SynchroSPage() {
                   </button>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/45 bg-white/35 px-3 py-2 text-xs font-bold text-violet-700 shadow-sm shadow-violet-500/10 backdrop-blur-md hover:bg-white/55"
+                    className="inline-flex h-10 items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 text-xs font-bold text-violet-700 hover:bg-violet-100"
                     onClick={openSubjectSettingsModal}
                   >
                     <span className="h-2 w-2 rounded-full bg-violet-400" />
@@ -4505,114 +7040,35 @@ export default function SynchroSPage() {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
-              <div className={`min-w-[240px] rounded-[26px] border border-white/45 bg-gradient-to-br ${showIntroPage ? "from-slate-100/65 via-white/40 to-sky-100/45 text-slate-500" : profileAccentClass} p-3 shadow-lg shadow-slate-900/5 backdrop-blur-md`}>
+              <div className="min-w-[240px] rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/55 bg-white/55 text-base font-black text-slate-800 shadow-inner shadow-white/40">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-base font-black text-slate-800">
                     {showIntroPage ? "홈" : profileInitial}
                   </div>
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold uppercase tracking-[0.18em]">
-                      {showIntroPage ? "Home Guide" : mainTab === "overview" ? "Overview Dashboard" : profileTitle}
+                      {showIntroPage ? (isInstructorReadOnly ? "My Timetable" : "Today Dashboard") : mainTab === "overview" ? "Overview Dashboard" : profileTitle}
                     </p>
                     <p className="truncate text-lg font-black text-slate-900">
                       {showIntroPage
-                        ? "운영 가이드 홈화면"
+                        ? isInstructorReadOnly
+                          ? `${selectedInstructorLabel} 시간표`
+                          : `${homeDashboardRelativeLabel} ${homeDashboardWeekdayLabel}요일 운영 대시보드`
                         : mainTab === "overview"
                           ? "강사 스케줄 모아보기"
                           : profileName}
                     </p>
                     <p className="truncate text-xs font-semibold text-slate-500">
                       {showIntroPage
-                        ? "먼저 안내를 확인한 뒤 시간표 작업을 시작하세요."
+                        ? isInstructorReadOnly
+                          ? "로그인한 강사의 이번 주 수업을 바로 확인합니다."
+                          : "선택한 날짜의 강사와 학생 배치를 한 화면에 정리합니다."
                         : mainTab === "overview"
                           ? "등록된 강사를 빠르게 넘겨 보며 심플 시간표를 조회합니다."
                           : profileSecondary || "상세 정보 없음"}
                     </p>
                   </div>
                 </div>
-                {!showIntroPage && isWorkspaceTab && roleView === "instructor" && selectedInstructorId ? (
-                  <div className="mt-3 rounded-2xl border border-white/45 bg-white/35 p-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Days Off</p>
-                      <span className="text-[10px] font-semibold text-slate-500">
-                        {savingInstructorDaysOff ? "저장 중..." : selectedInstructorDaysOff.length > 0 ? "회색 열로 표시" : "설정 없음"}
-                      </span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-7 gap-1">
-                      {DAYS.map((day) => {
-                        const active = selectedInstructorDaysOff.includes(day.key);
-                        return (
-                          <button
-                            key={`day-off-${day.key}`}
-                            type="button"
-                            disabled={savingInstructorDaysOff}
-                            onClick={() => void handleToggleInstructorDayOff(day.key)}
-                            className={`rounded-2xl border px-0 py-1.5 text-[11px] font-bold transition ${
-                              active
-                                ? "border-slate-300 bg-slate-700/80 text-white shadow-[0_8px_20px_rgba(71,85,105,0.22)]"
-                                : "border-white/50 bg-white/55 text-slate-600 hover:bg-white/70"
-                            } disabled:opacity-60`}
-                          >
-                            {day.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-3 border-t border-white/45 pt-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Available Time</p>
-                        <span className="text-[10px] font-semibold text-slate-500">
-                          {savingInstructorAvailability
-                            ? "저장 중..."
-                            : selectedInstructorAvailableTimeSlots.length > 0
-                              ? `${DAYS.find((day) => day.key === availabilityEditorWeekday)?.label ?? availabilityEditorWeekday} ${selectedInstructorAvailableTimeSlots.length}개 설정`
-                              : `${DAYS.find((day) => day.key === availabilityEditorWeekday)?.label ?? availabilityEditorWeekday} 전체 시간 허용`}
-                        </span>
-                      </div>
-                      <div className="mt-2 grid grid-cols-7 gap-1">
-                        {DAYS.map((day) => {
-                          const active = day.key === availabilityEditorWeekday;
-                          const daySlots = normalizeAvailableTimeSlots(selectedInstructorAvailableTimeSlotsByDay[day.key]);
-                          return (
-                            <button
-                              key={`available-day-${day.key}`}
-                              type="button"
-                              onClick={() => setAvailabilityEditorWeekday(day.key)}
-                              className={`rounded-2xl border px-0 py-1.5 text-[11px] font-bold transition ${
-                                active
-                                  ? "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]"
-                                  : "border-white/50 bg-white/55 text-slate-600 hover:bg-white/70"
-                              }`}
-                            >
-                              {day.label}
-                              {daySlots.length > 0 ? ` ${daySlots.length}` : ""}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-2 grid grid-cols-4 gap-1">
-                        {TIME_SLOTS.map((slot) => {
-                          const active = selectedInstructorAvailableTimeSlots.includes(slot);
-                          return (
-                            <button
-                              key={`available-time-${slot}`}
-                              type="button"
-                              disabled={savingInstructorAvailability}
-                              onClick={() => void handleToggleInstructorAvailableTime(slot)}
-                              className={`rounded-2xl border px-0 py-1.5 text-[10px] font-bold transition ${
-                                active
-                                  ? "border-emerald-300 bg-emerald-500/80 text-white shadow-[0_8px_20px_rgba(16,185,129,0.22)]"
-                                  : "border-white/50 bg-white/55 text-slate-600 hover:bg-white/70"
-                              } disabled:opacity-60`}
-                            >
-                              {slot}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
               </div>
 
               {!showIntroPage && isWorkspaceTab ? (
@@ -4624,12 +7080,12 @@ export default function SynchroSPage() {
                         setShowInstructorPicker((prev) => !prev);
                         setShowStudentPicker(false);
                       }}
-                      className="rounded-full border border-white/45 bg-white/40 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm backdrop-blur-md hover:bg-white/55"
+                      className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"
                     >
                       강사: {selectedInstructorLabel}
                     </button>
                     {showInstructorPicker ? (
-                      <div className="absolute right-0 z-[220] mt-2 w-64 overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.2)] backdrop-blur-2xl">
+                      <div className="absolute right-0 z-[220] mt-2 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
                         <div className="max-h-72 overflow-auto">
                           {(filteredInstructors.length > 0 ? filteredInstructors : instructors).map((instructor) => (
                             <button
@@ -4639,7 +7095,7 @@ export default function SynchroSPage() {
                                 setSelectedInstructorId(instructor.id);
                                 setShowInstructorPicker(false);
                               }}
-                              className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                              className={`block w-full rounded-md px-3 py-2 text-left text-sm font-semibold ${
                                 instructor.id === selectedInstructorId
                                   ? "bg-indigo-100 text-indigo-800"
                                   : "text-slate-800 hover:bg-slate-100/70"
@@ -4663,12 +7119,12 @@ export default function SynchroSPage() {
                         setShowStudentPicker((prev) => !prev);
                         setShowInstructorPicker(false);
                       }}
-                      className="rounded-full border border-white/45 bg-white/40 px-4 py-2 text-sm font-bold text-slate-700 shadow-sm backdrop-blur-md hover:bg-white/55"
+                      className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"
                     >
                       학생: {selectedStudentLabel}
                     </button>
                     {showStudentPicker ? (
-                      <div className="absolute right-0 z-[220] mt-2 w-72 overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[0_16px_36px_rgba(15,23,42,0.2)] backdrop-blur-2xl">
+                      <div className="absolute right-0 z-[220] mt-2 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
                         <div className="max-h-80 overflow-auto">
                           {(filteredStudents.length > 0 ? filteredStudents : students).map((student) => (
                             <button
@@ -4678,7 +7134,7 @@ export default function SynchroSPage() {
                                 setSelectedStudentId(student.id);
                                 setShowStudentPicker(false);
                               }}
-                              className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                              className={`block w-full rounded-md px-3 py-2 text-left text-sm font-semibold ${
                                 student.id === selectedStudentId
                                   ? "bg-teal-100 text-teal-800"
                                   : "text-slate-800 hover:bg-slate-100/70"
@@ -4701,7 +7157,99 @@ export default function SynchroSPage() {
         </div>
       </section>
 
-      {!showIntroPage && isWorkspaceTab ? (
+      {!showIntroPage && isWorkspaceTab && roleView === "instructor" ? (
+        <section className="sync-surface rounded-xl bg-white p-2">
+          <div className="inline-flex w-full rounded-lg bg-slate-100 p-1 sm:w-auto">
+            {([
+              ["schedule", "수업 시간표"],
+              ["availability", "수업 가능 일정"]
+            ] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => {
+                  setInstructorWorkspaceTab(tab);
+                  setError(null);
+                  setNotice(null);
+                }}
+                className={`sync-pressable sync-focus min-h-10 flex-1 rounded-lg px-5 text-xs font-black transition-[background-color,box-shadow,color] duration-150 ease-out sm:flex-none ${
+                  instructorWorkspaceTab === tab
+                    ? "bg-white text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_18px_rgba(37,99,235,0.08)]"
+                    : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {!showIntroPage && isWorkspaceTab && roleView === "instructor" && instructorWorkspaceTab === "schedule" && selectedInstructorId && !isInstructorReadOnly ? (
+        <section className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <div className="mr-1 min-w-[92px]">
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Days Off</p>
+                  <span className="text-[10px] font-semibold text-slate-500">
+                    {savingInstructorDaysOff ? "저장 중..." : selectedInstructorDaysOff.length > 0 ? "회색 열 표시" : "설정 없음"}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                {DAYS.map((day) => {
+                  const active = selectedInstructorDaysOff.includes(day.key);
+                  return (
+                    <button
+                      key={`day-off-${day.key}`}
+                      type="button"
+                      disabled={savingInstructorDaysOff}
+                      onClick={() => void handleToggleInstructorDayOff(day.key)}
+                      className={`inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] font-bold transition ${
+                        active ? "border-slate-700 bg-slate-700 text-white" : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                      } disabled:opacity-60`}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {!showIntroPage && isWorkspaceTab && roleView === "instructor" && instructorWorkspaceTab === "availability" ? (
+        selectedInstructorId ? (
+          <InstructorAvailabilityWorkspace
+            instructorId={selectedInstructorId}
+            instructorName={selectedInstructorLabel}
+            initialAvailability={selectedInstructorAvailabilityByDay}
+            students={students}
+            classTypes={classTypes}
+            onActiveAvailabilityChange={(slotsByDay) => {
+              setInstructors((prev) =>
+                prev.map((item) =>
+                  item.id === selectedInstructorId
+                    ? {
+                        ...item,
+                        availableTimeSlotsByDay: slotsByDay,
+                        availableTimeSlots: flattenAvailableTimeSlotsByDay(slotsByDay)
+                      }
+                    : item
+                )
+              );
+            }}
+          />
+        ) : (
+          <div className="sync-surface rounded-xl bg-white p-6 text-center text-sm font-bold text-slate-500">
+            가능 일정을 관리할 강사를 먼저 선택해 주세요.
+          </div>
+        )
+      ) : null}
+
+      {!showIntroPage && isWorkspaceTab && (roleView !== "instructor" || instructorWorkspaceTab === "schedule") ? (
         <>
       {error ? (
         <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
@@ -4715,70 +7263,159 @@ export default function SynchroSPage() {
       ) : null}
       {roleView === "student" ? (
         <>
-          <div className="rounded-xl border border-blue-100 bg-white/60 px-4 py-2 text-xs font-semibold text-slate-600 backdrop-blur-sm">
-            노션 시간표는 아래 입력칸에 직접 붙여넣거나 클립보드에서 불러온 뒤, 시간표 미리보기/DB 저장까지 진행할 수 있습니다.
-          </div>
           {!isInstructorReadOnly ? (
-            <div className="rounded-xl border border-slate-200 bg-white/70 p-3 backdrop-blur-sm">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <p className="text-xs font-semibold text-slate-600">노션 시간표 원본 텍스트</p>
-                <button
-                  type="button"
-                  onClick={() => void handleLoadClipboardToNotionInput()}
-                  className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-                >
-                  클립보드 불러오기
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApplyNotionInput}
-                  className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-                >
-                  시간표에 반영
-                </button>
-                <button
-                  type="button"
-                  disabled={importingNotion}
-                  onClick={() => void handleImportNotionToServer()}
-                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-                >
-                  {importingNotion ? "저장 중..." : "DB로 저장"}
-                </button>
-                <button
-                  type="button"
-                  disabled={!undoState || importingNotion}
-                  onClick={() => void handleUndoLastChange()}
-                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  되돌리기
-                </button>
-                <button
-                  type="button"
-                  disabled={importingNotion || (!notionTextValue && parsedNotionItems.length === 0)}
-                  onClick={handleResetNotionInput}
-                  className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  초기화
-                </button>
-                {notionPreview ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyForNotion()}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    현재 주차 내보내기 복사
-                  </button>
-                ) : null}
+            <div className="sync-surface rounded-xl bg-white p-3">
+              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 pb-3">
+                <div>
+                  <p className="sync-heading text-sm font-black text-slate-900">학생별 시간표 입력</p>
+                  <p className="sync-copy mt-1 text-xs font-semibold text-slate-500">
+                    직접 입력하거나 노션 표를 붙여넣어 미리보기 후 DB에 저장합니다.
+                  </p>
+                </div>
+                <div className="inline-flex rounded-t-xl bg-slate-100 p-1">
+                  {([
+                    ["sync", "싱크로 시간표"],
+                    ["notion", "노션 시간표"],
+                    ["availability", "가능 일정"]
+                  ] as const).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setStudentScheduleInputTab(tab)}
+                      className={`sync-pressable sync-focus min-h-10 rounded-lg px-4 text-xs font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
+                        studentScheduleInputTab === tab
+                          ? "bg-white text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_18px_rgba(37,99,235,0.08)]"
+                          : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <textarea
-                value={notionTextValue}
-                onChange={(event) => {
-                  setNotionInput(event.target.value);
-                  setParsedNotionItems([]);
-                }}
-                placeholder="노션 표를 그대로 붙여넣으세요. 예: 시간, 월요일, 화요일..."
-                className="h-28 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700"
-              />
+
+              {studentScheduleInputTab === "sync" ? (
+                <div className="grid gap-3 pt-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+                    시간표의 빈칸을 누르면 과목, 강사, 수업 유형, 수업 시간을 입력할 수 있습니다. 초안은 아래 시간표에 바로 표시되고, DB 저장 전에는 실제 데이터가 바뀌지 않습니다.
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span className="sync-tabular rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600">
+                      초안 {syncDraftItems.length}건
+                    </span>
+                    <button
+                      type="button"
+                      disabled={savingSyncDrafts || syncDraftItems.length === 0 || !selectedScheduleTagId}
+                      onClick={() => void handleSaveSyncDraftsToServer()}
+                      className="sync-pressable sync-focus min-h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-black text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingSyncDrafts ? "저장 중" : "DB로 저장"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingSyncDrafts || syncDraftItems.length === 0}
+                      onClick={handleResetSyncDrafts}
+                      className="sync-pressable sync-focus min-h-9 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      초안 초기화
+                    </button>
+                  </div>
+                  {selectedStudentId ? null : (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 lg:col-span-2">
+                      먼저 학생을 선택해야 싱크로 시간표를 입력할 수 있습니다.
+                    </p>
+                  )}
+                  {selectedScheduleTagId ? null : (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 lg:col-span-2">
+                      필수 항목: 상단에서 시간표 분류(태그)를 선택해야 입력과 DB 저장을 진행할 수 있습니다.
+                    </p>
+                  )}
+                  {syncDraftItems.length > 0 ? (
+                    <div className="grid gap-2 lg:col-span-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {syncDraftItems.slice(0, 6).map((item) => (
+                        <div key={item.id} className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
+                          <span className="sync-tabular text-blue-700">
+                            {DAYS.find((day) => day.key === item.weekday)?.label} {item.startTime}-{item.endTime}
+                          </span>
+                          <span className="ml-2">{item.rawText}</span>
+                        </div>
+                      ))}
+                      {syncDraftItems.length > 6 ? (
+                        <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">
+                          외 {syncDraftItems.length - 6}건
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : studentScheduleInputTab === "notion" ? (
+                <div className="pt-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-semibold text-slate-600">노션 시간표 원본 텍스트</p>
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadClipboardToNotionInput()}
+                      className="sync-pressable sync-focus min-h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      클립보드 불러오기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApplyNotionInput}
+                      className="sync-pressable sync-focus min-h-8 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                    >
+                      시간표에 반영
+                    </button>
+                    <button
+                      type="button"
+                      disabled={importingNotion || !selectedScheduleTagId}
+                      onClick={() => void handleImportNotionToServer()}
+                      className="sync-pressable sync-focus min-h-8 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                    >
+                      {importingNotion ? "저장 중" : "DB로 저장"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!undoState || importingNotion}
+                      onClick={() => void handleUndoLastChange()}
+                      className="sync-pressable sync-focus min-h-8 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      되돌리기
+                    </button>
+                    <button
+                      type="button"
+                      disabled={importingNotion || (!notionTextValue && parsedNotionItems.length === 0)}
+                      onClick={handleResetNotionInput}
+                      className="sync-pressable sync-focus min-h-8 rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      초기화
+                    </button>
+                    {notionPreview ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyForNotion()}
+                        className="sync-pressable sync-focus min-h-8 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        현재 주차 내보내기 복사
+                      </button>
+                    ) : null}
+                  </div>
+                  {selectedScheduleTagId ? null : (
+                    <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+                      필수 항목: 상단에서 시간표 분류(태그)를 선택해야 노션 시간표를 DB에 저장할 수 있습니다.
+                    </p>
+                  )}
+                  <textarea
+                    value={notionTextValue}
+                    onChange={(event) => {
+                      setNotionInput(event.target.value);
+                      setParsedNotionItems([]);
+                    }}
+                    placeholder="노션 표를 그대로 붙여넣으세요. 예: 시간, 월요일, 화요일..."
+                    className="sync-input h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-xs font-semibold text-sky-700">
@@ -4788,15 +7425,32 @@ export default function SynchroSPage() {
         </>
       ) : null}
 
-      <section className="grid flex-1 gap-4 xl:grid-cols-[1fr_330px]">
-        <div>
+      {roleView === "student" && studentScheduleInputTab === "availability" ? (
+        selectedStudentId ? (
+          <StudentAvailabilityWorkspace
+            studentId={selectedStudentId}
+            studentName={selectedStudentLabel}
+            studentSecondary={selectedStudentSecondary}
+          />
+        ) : (
+          <div className="sync-surface rounded-xl bg-white p-6 text-center text-sm font-bold text-slate-500">
+            가능 일정을 관리할 학생을 먼저 선택해 주세요.
+          </div>
+        )
+      ) : (
+      <section className="grid flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0">
           {roleView === "student" ? (
-            <div className="mb-3 rounded-2xl border border-white/55 bg-white/55 px-3 py-3 shadow-sm backdrop-blur-md">
+            <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-black text-slate-800">특이사항</p>
+                  <p className="text-sm font-black text-slate-800">시간표 메모</p>
                   <p className="text-[11px] font-semibold text-slate-500">
-                    {isInstructorReadOnly ? "강사 계정은 특이사항을 열람만 할 수 있습니다." : "시간표 편성 시 참고할 요청사항을 대상별로 기록합니다."}
+                    {isInstructorReadOnly
+                      ? "강사 계정은 시간표 메모를 열람만 할 수 있습니다."
+                      : displayedGroup
+                        ? `'${displayedGroup.name}' 저장 그룹에 메모를 기록합니다.`
+                        : "시간표를 DB에 저장한 뒤 저장 그룹별 메모를 기록할 수 있습니다."}
                   </p>
                 </div>
                 <div className="flex min-w-[280px] flex-1 flex-wrap items-center justify-end gap-2">
@@ -4804,14 +7458,14 @@ export default function SynchroSPage() {
                     value={specialNoteInput}
                     onChange={(inputEvent) => setSpecialNoteInput(inputEvent.target.value)}
                     placeholder="예: 수학은 안준성T로만 구성 희망"
-                    disabled={isInstructorReadOnly}
-                    className="min-w-[220px] flex-1 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400"
+                    disabled={isInstructorReadOnly || !displayedGroup}
+                    className="min-w-[220px] flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   />
                   <button
                     type="button"
-                    disabled={isInstructorReadOnly || noteSubmitting || !currentTargetId}
+                    disabled={isInstructorReadOnly || noteSubmitting || !currentTargetId || !displayedGroup}
                     onClick={() => void handleCreateSpecialNote()}
-                    className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="h-8 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {noteSubmitting ? "저장 중..." : "등록"}
                   </button>
@@ -4820,13 +7474,13 @@ export default function SynchroSPage() {
               <div className="mt-3 max-h-36 space-y-1.5 overflow-y-auto pr-1">
                 {notesLoading ? (
                   <p className="text-xs font-semibold text-slate-500">불러오는 중...</p>
-                ) : specialNotes.length === 0 ? (
-                  <p className="text-xs font-semibold text-slate-500">아직 등록된 특이사항이 없습니다.</p>
+                ) : displayedGroupNotes.length === 0 ? (
+                  <p className="text-xs font-semibold text-slate-500">선택한 저장 그룹에 등록된 시간표 메모가 없습니다.</p>
                 ) : (
-                  specialNotes.map((note) => (
+                  displayedGroupNotes.map((note) => (
                     <div
                       key={note.id}
-                      className="flex items-center justify-between gap-3 rounded-2xl border border-white/60 bg-white/65 px-3 py-2"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
                     >
                       <p className="min-w-0 text-xs font-semibold leading-5 text-slate-700">
                         <span className="font-black text-slate-500">[{formatSpecialNoteTimestamp(note.createdAt)}]</span>{" "}
@@ -4836,7 +7490,7 @@ export default function SynchroSPage() {
                         type="button"
                         disabled={isInstructorReadOnly || noteSubmitting}
                         onClick={() => void handleDeleteSpecialNote(note.id)}
-                        className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        className="shrink-0 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                       >
                         X 삭제
                       </button>
@@ -4846,29 +7500,81 @@ export default function SynchroSPage() {
               </div>
             </div>
           ) : null}
-          <div className="mb-3 flex items-center justify-between rounded-2xl border border-white/55 bg-white/55 px-3 py-2 shadow-sm backdrop-blur-md">
+          <div className="sync-surface mb-3 flex items-center justify-between rounded-xl bg-white px-3 py-2">
             <div>
-              <p className="text-sm font-black text-slate-800">시간표 보기 모드</p>
-              <p className="text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환하고 빈 요일을 접을 수 있습니다.</p>
-              <button
-                type="button"
-                onClick={() => setHideEmptyDays((prev) => !prev)}
-                className={`mt-2 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                  hideEmptyDays
-                    ? "border-sky-300 bg-sky-500/15 text-sky-700 shadow-sm shadow-sky-200/70"
-                    : "border-slate-200 bg-white/80 text-slate-600 hover:bg-white"
-                }`}
-              >
-                빈 요일 숨기기 {hideEmptyDays ? "ON" : "OFF"}
-              </button>
+              <p className="sync-heading text-sm font-black text-slate-800">시간표 보기 모드</p>
+              <p className="sync-copy text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환하고 빈 요일이나 시간대를 접을 수 있습니다.</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHideEmptyDays((prev) => !prev)}
+                  className={`sync-pressable sync-focus inline-flex min-h-8 items-center rounded-full border px-3 py-1.5 text-xs font-bold ${
+                    hideEmptyDays
+                      ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100"
+                      : "border-slate-200 bg-white/80 text-slate-600 hover:bg-white"
+                  }`}
+                >
+                  빈 요일 숨기기 {hideEmptyDays ? "ON" : "OFF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHideEmptyTimes((prev) => !prev)}
+                  className={`sync-pressable sync-focus inline-flex min-h-8 items-center rounded-full border px-3 py-1.5 text-xs font-bold ${
+                    hideEmptyTimes
+                      ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100"
+                      : "border-slate-200 bg-white/80 text-slate-600 hover:bg-white"
+                  }`}
+                >
+                  빈 시간 숨기기 {hideEmptyTimes ? "ON" : "OFF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCaptureTimetableImage()}
+                  disabled={capturingTimetable || loading}
+                  title="표시된 시간표를 이미지로 클립보드에 복사"
+                  className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M7 7.5 8.4 5h7.2L17 7.5h2.5A2.5 2.5 0 0 1 22 10v6.5a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 16.5V10a2.5 2.5 0 0 1 2.5-2.5H7Z" strokeLinejoin="round" />
+                    <circle cx="12" cy="13" r="3.2" />
+                  </svg>
+                  {capturingTimetable ? "복사 중" : "시간표 이미지 캡쳐"}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/70 p-1">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {roleView === "instructor" ? (
+                <label className="relative block w-56 max-w-full">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="m16.5 16.5 3.5 3.5" strokeLinecap="round" />
+                    </svg>
+                  </span>
+                  <input
+                    value={instructorStudentSearchKeyword}
+                    onChange={(event) => setInstructorStudentSearchKeyword(event.target.value)}
+                    placeholder="학생명 검색"
+                    className="sync-input h-9 w-full rounded-full border border-slate-200 bg-white pl-9 pr-8 text-xs font-bold text-slate-700 outline-none placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  />
+                  {instructorStudentSearchKeyword ? (
+                    <button
+                      type="button"
+                      onClick={() => setInstructorStudentSearchKeyword("")}
+                      className="sync-pressable sync-focus absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label="학생 검색어 지우기"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </label>
+              ) : null}
+              <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
                 <button
                   type="button"
                   onClick={() => setTimetableViewMode("detailed")}
-                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                    timetableViewMode === "detailed" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                  className={`sync-pressable sync-focus rounded-full px-3 py-1.5 text-xs font-bold ${
+                    timetableViewMode === "detailed" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"
                   }`}
                 >
                   상세
@@ -4876,8 +7582,8 @@ export default function SynchroSPage() {
                 <button
                   type="button"
                   onClick={() => setTimetableViewMode("summary")}
-                  className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-                    timetableViewMode === "summary" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-100"
+                  className={`sync-pressable sync-focus rounded-full px-3 py-1.5 text-xs font-bold ${
+                    timetableViewMode === "summary" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"
                   }`}
                 >
                   심플 뷰
@@ -4886,43 +7592,101 @@ export default function SynchroSPage() {
             </div>
           </div>
           {loading ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
+            <div className="sync-surface rounded-xl bg-white p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
           ) : (
-            <TimetableGrid
-              roleView={roleView}
-              days={DAYS}
-              timeSlots={TIME_SLOTS}
-              events={displayEvents}
-              hideEmptyDays={hideEmptyDays}
-              daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
-              viewMode={timetableViewMode}
-              highlightCellTints={activeHighlightCellTints}
-              onEventMove={!isInstructorReadOnly && roleView === "student" ? handleMoveSchedule : undefined}
-              onEventSave={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
-              onEventDelete={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
-              onCellClick={(ctx) => {
-                if (isInstructorReadOnly) return;
-                setInitialCell(ctx);
-                setModalOpen(true);
-              }}
-            />
+            <>
+              <div
+                ref={timetableCaptureRef}
+                data-timetable-capture="true"
+                className={`inline-block max-w-full rounded-lg p-0 align-top ${isDisplayedGroupInactive ? "bg-slate-200" : "bg-white"}`}
+              >
+                {(roleView === "student" ? selectedStudentLabel !== "학생 선택" : selectedInstructorLabel !== "강사 선택") ? (
+                  <div className={`sync-surface mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 ${isDisplayedGroupInactive ? "bg-slate-200" : "bg-white"}`}>
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                        {roleView === "instructor" ? "Instructor Timetable" : "Student Timetable"}
+                      </p>
+                      <p className="sync-heading mt-1 text-xl font-black text-slate-950">
+                        {roleView === "student" ? selectedStudentLabel : selectedInstructorLabel}
+                        {(roleView === "student" ? selectedStudentSecondary : selectedInstructorSecondary) ? (
+                          <span className="ml-2 text-base font-extrabold text-slate-600">
+                            {roleView === "student" ? selectedStudentSecondary : selectedInstructorSecondary}
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isDisplayedGroupInactive ? (
+                        <span className="inline-flex items-center rounded-full border border-slate-400 bg-slate-700 px-3 py-1.5 text-xs font-black text-white">
+                          비활성 시간표
+                        </span>
+                      ) : null}
+                      <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black ${selectedScheduleTag ? SCHEDULE_TAG_TONES[selectedScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
+                        #{selectedScheduleTagLabel}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                <TimetableGrid
+                  roleView={roleView}
+                  days={DAYS}
+                  timeSlots={TIME_SLOTS}
+                  events={displayEvents}
+                  studentSecondaryLookup={studentSecondaryLookup}
+                  hideEmptyDays={hideEmptyDays}
+                  hideEmptyTimes={hideEmptyTimes}
+                  daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
+                  viewMode={timetableViewMode}
+                  inactive={isDisplayedGroupInactive}
+                  emptyMessage={timetableEmptyMessage}
+                  onEventMove={!isInstructorReadOnly && roleView === "student" ? handleMoveSchedule : undefined}
+                  onEventClick={!isInstructorReadOnly && roleView === "student" ? handleOpenTimeEdit : undefined}
+                  onEventSave={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
+                  onEventDelete={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
+                  onCellClick={(ctx) => {
+                    if (isInstructorReadOnly) return;
+                    if (roleView === "student") {
+                      if (!selectedScheduleTagId) {
+                        setError("학생 시간표를 입력하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
+                        return;
+                      }
+                      if (studentScheduleInputTab === "sync") {
+                        setSyncDraftInitialCell(ctx);
+                        setSyncDraftModalOpen(true);
+                        setError(null);
+                        return;
+                      }
+                      setSelfStudyDraft({
+                        weekday: ctx.weekday,
+                        startTime: ctx.startTime,
+                        endTime: addMinutesToTime(ctx.startTime, 60)
+                      });
+                      setError(null);
+                      return;
+                    }
+                    setInitialCell(ctx);
+                    setModalOpen(true);
+                  }}
+                />
+              </div>
+            </>
           )}
         </div>
 
-        <aside className="rounded-3xl border border-white/40 bg-gradient-to-b from-blue-600/95 to-indigo-600/95 p-4 text-white shadow-[0_20px_45px_rgba(30,64,175,0.45)] backdrop-blur-xl">
+        <aside className="sync-surface min-w-0 rounded-xl bg-white p-3 text-slate-900">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold">{monthLabel}</h2>
             <div className="flex gap-1">
               <button
                 type="button"
-                className="rounded-md bg-white/20 px-2 py-1 text-sm font-bold hover:bg-white/30"
+                className="sync-pressable sync-focus rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-bold text-slate-700 hover:bg-slate-100"
                 onClick={() => setCalendarMonth((prev) => shiftMonth(prev, -1))}
               >
                 ‹
               </button>
               <button
                 type="button"
-                className="rounded-md bg-white/20 px-2 py-1 text-sm font-bold hover:bg-white/30"
+                className="sync-pressable sync-focus rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-bold text-slate-700 hover:bg-slate-100"
                 onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))}
               >
                 ›
@@ -4930,7 +7694,7 @@ export default function SynchroSPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-white/80">
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-500">
             {["월", "화", "수", "목", "금", "토", "일"].map((label) => (
               <div key={label} className="py-1">
                 {label}
@@ -4947,160 +7711,302 @@ export default function SynchroSPage() {
               const hasClass = eventDateSet.has(cell.date);
               return (
                 <div key={cell.date} className="relative flex h-9 items-center justify-center rounded-full text-sm font-semibold">
-                  <span className={hasClass ? "rounded-full bg-white px-2 py-1 text-blue-700 shadow-md" : "text-white/90"}>{cell.day}</span>
-                  {hasClass ? <span className="absolute bottom-0.5 h-1.5 w-1.5 rounded-full bg-amber-300" /> : null}
+                  <span className={hasClass ? "rounded-full bg-blue-600 px-2 py-1 text-white shadow-sm" : "text-slate-700"}>{cell.day}</span>
+                  {hasClass ? <span className="absolute bottom-0.5 h-1.5 w-1.5 rounded-full bg-amber-400" /> : null}
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-5 rounded-2xl bg-white/10 p-3">
-            <p className="text-xs font-semibold text-white/80">월간 수업 현황</p>
-            <p className="mt-1 text-2xl font-extrabold">{displayEvents.length}개</p>
-            <p className="mt-1 text-xs text-white/80">현재 주간/검색 필터 기준 수업 수</p>
+          <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold text-slate-500">월간 수업 현황</p>
+            <p className="sync-tabular mt-1 text-2xl font-extrabold text-blue-700">{displayEvents.length}개</p>
+            <p className="sync-copy mt-1 text-xs text-slate-500">현재 주간/검색 필터 기준 수업 수</p>
           </div>
 
-          <div className="mt-4 rounded-2xl bg-white/12 p-3">
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-white/90">저장된 시간표 그룹</p>
-              <span className="rounded-full border border-white/35 bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/90">
+              <p className="text-xs font-semibold text-slate-700">저장된 시간표 그룹</p>
+              <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                 {roleView === "instructor" ? "강사" : "학생"} / {currentTargetLabel}
               </span>
+            </div>
+            <div className={`mt-2 rounded-md border px-2.5 py-2 text-[11px] font-black ${selectedScheduleTag ? SCHEDULE_TAG_TONES[selectedScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
+              현재 범위 · #{selectedScheduleTagLabel}
             </div>
             <div className="mt-2">
               <button
                 type="button"
                 onClick={() => setShowActiveOnly((prev) => !prev)}
-                className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                className={`sync-pressable sync-focus rounded-full border px-3 py-1 text-[11px] font-semibold ${
                   showActiveOnly
-                    ? "border-emerald-200/75 bg-[linear-gradient(120deg,rgba(255,255,255,0.4),rgba(16,185,129,0.5))] text-white shadow-[0_8px_20px_rgba(16,185,129,0.35)]"
-                    : "border-white/35 bg-white/12 text-white/90 hover:bg-white/20"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
                 }`}
               >
                 활성만 보기 {showActiveOnly ? "ON" : "OFF"}
               </button>
             </div>
             <div className="mt-2 space-y-2">
-              {visibleGroups.length === 0 ? (
-                <p className="text-xs text-white/75">DB 저장 시 월~일 10-22시 한 세트가 그룹으로 저장됩니다.</p>
+              {groupMonthSections.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">DB 저장 시 월~일 10-22시 한 세트가 그룹으로 저장됩니다.</p>
               ) : (
-                visibleGroups.map((group) => (
-                  <div
-                    key={group.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handleSelectGroup(group.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        handleSelectGroup(group.id);
-                      }
-                    }}
-                    className={`w-full rounded-xl border p-2 text-left ${
-                      (selectedGroup?.id ?? activeGroup?.id) === group.id
-                        ? "border-white/70 bg-white/22 shadow-[0_10px_30px_rgba(15,23,42,0.22)]"
-                        : "border-white/25 bg-white/12"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <input
-                        value={group.name}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) => handleRenameGroup(group.id, event.target.value)}
-                        onBlur={(event) => {
-                          void handlePersistGroupName(group.id, event.target.value);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            (event.currentTarget as HTMLInputElement).blur();
-                          }
-                        }}
-                        className="flex-1 rounded-lg border border-white/30 bg-white/15 px-2 py-1 text-xs font-semibold text-white outline-none placeholder:text-white/70"
-                      />
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleActivateGroup(group.id);
-                        }}
-                        className={`rounded-lg border px-2 py-1 text-[11px] font-semibold backdrop-blur-xl ${
-                          group.isActive
-                            ? "border-emerald-200/70 bg-[linear-gradient(140deg,rgba(255,255,255,0.4),rgba(16,185,129,0.45))] text-white shadow-[0_8px_24px_rgba(16,185,129,0.35)]"
-                            : "border-white/35 bg-white/15 text-white/90 hover:bg-white/20"
-                        }`}
-                      >
-                        {group.isActive ? "활성" : "활성화"}
-                      </button>
-                    </div>
-                    <p className="mt-1 text-[11px] text-white/80">
-                      <span className="mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-bold">
-                        {groupNumberById[group.id] ?? 1}
-                      </span>
-                      {group.weekStart} | 수업 {group.classIds.length}개
-                    </p>
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleCopyGroup(group.id);
-                        }}
-                        className="rounded-md border border-white/35 bg-white/15 px-2 py-1 text-[11px] font-semibold text-white/95 hover:bg-white/25"
-                      >
-                        복사
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleOpenDeleteGroupDialog(group.id);
-                        }}
-                        className="rounded-md border border-rose-200/50 bg-rose-400/20 px-2 py-1 text-[11px] font-semibold text-rose-100 hover:bg-rose-400/35"
-                      >
-                        삭제
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="mt-2 flex items-center justify-between text-xs text-white/90">
-              <button
-                type="button"
-                className="rounded-md bg-white/20 px-2 py-1 disabled:opacity-40"
-                disabled={groupPage <= 1}
-                onClick={() => setGroupPage((prev) => Math.max(1, prev - 1))}
-              >
-                ‹
-              </button>
-              <div className="flex items-center gap-1">
-                {Array.from({ length: groupPageCount }).map((_, idx) => {
-                  const page = idx + 1;
+                groupMonthSections.map((section) => {
+                  const isExpanded = expandedGroupMonths[section.sectionKey] ?? (section.isCurrentMonth && section.tagId === selectedScheduleTagId);
                   return (
-                    <button
-                      key={`group-page-${page}`}
-                      type="button"
-                      onClick={() => setGroupPage(page)}
-                      className={`rounded-md px-2 py-1 ${groupPage === page ? "bg-white/35 font-bold" : "bg-white/15"}`}
-                    >
-                      {page}
-                    </button>
+                    <div key={section.sectionKey} className="rounded-lg border border-slate-200 bg-slate-50/70 p-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedGroupMonths((prev) => ({ ...prev, [section.sectionKey]: !isExpanded }))}
+                        className="sync-pressable sync-focus flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-black text-slate-700 hover:bg-white"
+                      >
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                          <span className="text-slate-400">{isExpanded ? "▾" : "▸"}</span>
+                          <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-black ${SCHEDULE_TAG_TONES[section.tagColorKey]}`}>#{section.tagName}</span>
+                          <span className="truncate">{section.label}</span>
+                          {section.isCurrentMonth ? <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[9px] font-black text-blue-700">이번 달</span> : null}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-500">{section.groups.length}</span>
+                      </button>
+                      {isExpanded ? (
+                        <div className="mt-1 space-y-2">
+                          {section.groups.map((group) => {
+                            const isSelectedGroup = (selectedGroup?.id ?? activeGroup?.id) === group.id;
+                            const isEffectiveGroup = effectiveGroupIdSet.has(group.id);
+                            const groupNotes = specialNotesByGroupId.get(group.id) ?? [];
+
+                            return (
+                              <div
+                                key={group.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => handleSelectGroup(group.id)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    handleSelectGroup(group.id);
+                                  }
+                                }}
+                                className={`sync-pressable sync-focus relative w-full overflow-hidden rounded-lg border p-2 text-left ${
+                                  groupActivationPulseId === group.id ? "sync-state-confirm" : ""
+                                } ${
+                                  isSelectedGroup
+                                    ? group.isActive || isEffectiveGroup
+                                      ? "border-blue-600 bg-blue-600 text-white shadow-sm ring-2 ring-blue-100"
+                                      : "border-slate-700 bg-slate-700 text-white shadow-sm ring-2 ring-slate-200"
+                                    : group.isActive || isEffectiveGroup
+                                      ? "border-slate-200 bg-white text-slate-900 hover:border-blue-300 hover:bg-blue-50"
+                                      : "border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:bg-slate-200"
+                                }`}
+                              >
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <input
+                                    value={group.name}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(event) => handleRenameGroup(group.id, event.target.value)}
+                                    onBlur={(event) => {
+                                      void handlePersistGroupName(group.id, event.target.value);
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        (event.currentTarget as HTMLInputElement).blur();
+                                      }
+                                    }}
+                                    className={`sync-input min-w-0 flex-1 rounded-md border bg-white px-2 py-1 text-[11px] font-semibold outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 ${
+                                      isSelectedGroup ? "border-blue-200 text-slate-900" : "border-slate-200 text-slate-800"
+                                    }`}
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={groupActivationPendingId !== null}
+                                    aria-busy={groupActivationPendingId === group.id}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleActivateGroup(group.id);
+                                    }}
+                                    className={`sync-pressable sync-focus inline-flex min-h-7 shrink-0 items-center gap-1 rounded-lg border px-1.5 py-1 text-[10px] font-semibold backdrop-blur-xl disabled:cursor-wait disabled:opacity-70 ${
+                                      group.isActive
+                                        ? isSelectedGroup
+                                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                          : "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                        : isEffectiveGroup
+                                          ? "border-cyan-200 bg-cyan-50 text-cyan-700"
+                                        : isSelectedGroup
+                                          ? "border-white/45 bg-white/12 text-white hover:bg-white/20"
+                                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    <span className="relative h-3 w-3 shrink-0" aria-hidden="true">
+                                      <svg
+                                        viewBox="0 0 16 16"
+                                        className={`sync-state-icon sync-state-spinner absolute inset-0 h-3 w-3 transition-[opacity,filter,scale] duration-300 ease-out ${
+                                          groupActivationPendingId === group.id
+                                            ? "scale-100 opacity-100 blur-0 animate-spin"
+                                            : "scale-[0.25] opacity-0 blur-[4px]"
+                                        }`}
+                                        fill="none"
+                                      >
+                                        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.28" strokeWidth="2" />
+                                        <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                                      </svg>
+                                      <svg
+                                        viewBox="0 0 16 16"
+                                        className={`sync-state-icon absolute inset-0 h-3 w-3 transition-[opacity,filter,scale] duration-300 ease-out ${
+                                          groupActivationPendingId === group.id
+                                            ? "scale-[0.25] opacity-0 blur-[4px]"
+                                            : "scale-100 opacity-100 blur-0"
+                                        }`}
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.8"
+                                      >
+                                        {group.isActive ? (
+                                          <path d="M8 2.5v5M4.5 4.5a5 5 0 1 0 7 0" strokeLinecap="round" />
+                                        ) : (
+                                          <path d="m3.5 8 2.8 2.8L12.5 4.6" strokeLinecap="round" strokeLinejoin="round" />
+                                        )}
+                                      </svg>
+                                    </span>
+                                    {groupActivationPendingId === group.id
+                                      ? "전환 중"
+                                      : group.isActive
+                                        ? "비활성화"
+                                        : isEffectiveGroup
+                                          ? "적용중"
+                                          : "활성화"}
+                                  </button>
+                                </div>
+                                <p className={`mt-1 text-[11px] ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`}>
+                                  <span
+                                    className={`mr-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold ${
+                                      isSelectedGroup ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                                    }`}
+                                  >
+                                    {groupNumberById[group.id] ?? 1}
+                                  </span>
+                                  {group.weekStart} | 수업 {group.classIds.length}개
+                                </p>
+                                <details
+                                  className="group/memo relative mt-2"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  <summary
+                                    className={`sync-focus inline-flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black [&::-webkit-details-marker]:hidden ${
+                                      isSelectedGroup ? "bg-white/15 text-white hover:bg-white/25" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    }`}
+                                    title={groupNotes.length > 0 ? "시간표 메모 보기" : "등록된 시간표 메모 없음"}
+                                  >
+                                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                                      <path d="M5 4.5h14v12H9l-4 3v-15Z" strokeLinejoin="round" />
+                                      <path d="M8 8h8M8 11.5h6" strokeLinecap="round" />
+                                    </svg>
+                                    메모 <span className="sync-tabular">{groupNotes.length}</span>
+                                  </summary>
+                                  <div className="absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-lg border border-slate-200 bg-white p-2 text-left text-slate-700 shadow-[0_12px_30px_-16px_rgba(15,23,42,0.42)] group-hover/memo:block group-open/memo:block">
+                                    {groupNotes.length === 0 ? (
+                                      <p className="text-[10px] font-semibold text-slate-500">등록된 시간표 메모가 없습니다.</p>
+                                    ) : (
+                                      <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                                        {groupNotes.map((note) => (
+                                          <p key={note.id} className="rounded-md bg-slate-50 px-2 py-1.5 text-[10px] font-semibold leading-4 text-slate-700">
+                                            <span className="mr-1 font-black text-slate-400">{formatSpecialNoteTimestamp(note.createdAt)}</span>
+                                            {note.content}
+                                          </p>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </details>
+                                <label className={`mt-2 block text-[10px] font-semibold ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`} onClick={(event) => event.stopPropagation()}>
+                                  시간표 태그
+                                  <select
+                                    value={group.tagId ?? ""}
+                                    onChange={(event) => {
+                                      const tagId = event.target.value || null;
+                                      void updateTimetableGroupTag(group.id, tagId).catch((tagError) => setError(tagError instanceof Error ? tagError.message : "시간표 태그 변경에 실패했습니다."));
+                                    }}
+                                    className="sync-input mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                  >
+                                    <option value="" disabled={roleView === "student"}>미분류{roleView === "student" ? " (새 저장 불가)" : ""}</option>
+                                    {scheduleTags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}{tag.isActive ? "" : " (보관)"}</option>)}
+                                  </select>
+                                </label>
+                                <label
+                                  className={`mt-2 block text-[10px] font-semibold ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  만료일
+                                  <input
+                                    type="date"
+                                    value={group.expiresOn ?? ""}
+                                    min={group.weekStart}
+                                    disabled={!timetableGroupExpirationSupported}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(event) => handleGroupExpirationChange(group.id, event.target.value)}
+                                    onBlur={(event) => {
+                                      if (!timetableGroupExpirationSupported) return;
+                                      void handlePersistGroupExpiration(group.id, event.target.value);
+                                    }}
+                                    className={`sync-input mt-1 w-full rounded-md border px-2 py-1 text-[11px] font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 ${
+                                      !timetableGroupExpirationSupported
+                                        ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                                        : isSelectedGroup
+                                          ? "border-blue-200 bg-white text-slate-900"
+                                          : "border-slate-200 bg-white text-slate-800"
+                                    }`}
+                                  />
+                                  <span className={`mt-1 block text-[10px] ${isSelectedGroup ? "text-blue-100" : "text-slate-400"}`}>
+                                    {timetableGroupExpirationSupported ? getGroupExpirationLabel(group) : "DB 마이그레이션 적용 후 사용 가능"}
+                                  </span>
+                                </label>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleSelectGroup(group.id);
+                                    }}
+                                    className="sync-pressable sync-focus min-h-7 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                  >
+                                    보기
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleCopyGroup(group.id);
+                                    }}
+                                    className="sync-pressable sync-focus min-h-7 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                  >
+                                    복사
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleOpenDeleteGroupDialog(group.id);
+                                    }}
+                                    className="sync-pressable sync-focus min-h-7 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                                  >
+                                    삭제
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
                   );
-                })}
-              </div>
-              <button
-                type="button"
-                className="rounded-md bg-white/20 px-2 py-1 disabled:opacity-40"
-                disabled={groupPage >= groupPageCount}
-                onClick={() => setGroupPage((prev) => Math.min(groupPageCount, prev + 1))}
-              >
-                ›
-              </button>
+                })
+              )}
             </div>
           </div>
         </aside>
       </section>
+      )}
         </>
       ) : null}
 
@@ -5116,7 +8022,12 @@ export default function SynchroSPage() {
               {notice}
             </div>
           ) : null}
-          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+          <section
+            data-testid="schedule-review-workspace"
+            data-server-review-count={scheduleReviews.length}
+            data-mapped-review-count={reviewByStudentId.size}
+            className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md"
+          >
             <div className="rounded-[26px] border border-white/55 bg-white/45 p-3 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -5128,9 +8039,24 @@ export default function SynchroSPage() {
                       : "재원생을 요일/학교/수업 유형 기준으로 묶어 한눈에 파악합니다."}
                   </p>
                 </div>
-                <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-right">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Selected</p>
-                  <p className="text-sm font-black text-slate-800">{currentTargetLabel}</p>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {!isInstructorReadOnly && !showSuspendedRoster ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowRosterActions((prev) => !prev)}
+                      className={`rounded-full border px-3 py-2 text-xs font-black transition ${
+                        showRosterActions
+                          ? "border-amber-200 bg-amber-50 text-amber-800 shadow-[0_8px_20px_rgba(245,158,11,0.12)]"
+                          : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                      }`}
+                    >
+                      {showRosterActions ? "중지 숨김" : "중지 표시"}
+                    </button>
+                  ) : null}
+                  <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Selected</p>
+                    <p className="text-sm font-black text-slate-800">{currentTargetLabel}</p>
+                  </div>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -5145,6 +8071,7 @@ export default function SynchroSPage() {
                       onClick={() => {
                         setOverviewEntity(tab.key);
                         setRoleView(tab.key);
+                        setShowRosterActions(false);
                         if (tab.key === "instructor" && !selectedInstructorId && overviewVisibleInstructors.length > 0) {
                           setSelectedInstructorId(overviewVisibleInstructors[0]!.id);
                         }
@@ -5201,50 +8128,127 @@ export default function SynchroSPage() {
                     );
                   })}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSuspendedRoster((prev) => !prev);
+                    setShowRosterActions(false);
+                  }}
+                  className={`rounded-full border px-4 py-2 text-xs font-black transition ${
+                    showSuspendedRoster
+                      ? "border-rose-200 bg-rose-50 text-rose-700 shadow-[0_8px_20px_rgba(244,63,94,0.12)]"
+                      : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                  }`}
+                >
+                  {showSuspendedRoster ? "활성 명단 보기" : "중지된 명단"}
+                </button>
               </div>
               <div className="mt-4 rounded-3xl border border-white/55 bg-white/40 p-3">
-                <div className="grid gap-3 xl:grid-cols-2">
-                  {overviewDisplayGroups.map((group) => (
-                    <div
-                      key={`overview-group-${overviewEntity}-${group.label}`}
-                      className={`rounded-2xl border px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] ${group.toneClass ?? "border-white/60 bg-white/55"}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
-                          {group.label}
-                        </span>
-                        <span className="text-[11px] font-semibold text-slate-400">{group.items.length}명</span>
+                {showSuspendedRoster ? (
+                  <div>
+                    <div className="flex items-center justify-between gap-3 px-1 pb-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">
+                          중지된 {overviewEntity === "instructor" ? "강사" : "학생"} 명단
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">
+                          복구하면 다시 전체 요약과 시간표 검토 대상에 포함됩니다.
+                        </p>
                       </div>
-                      <div className="mt-2.5 flex flex-wrap gap-1">
-                        {group.items.map((item) => {
-                          const active = overviewEntity === "instructor" ? item.id === selectedInstructorId : item.id === selectedStudentId;
-                          return (
-                            <button
-                              key={`overview-chip-${overviewEntity}-${item.id}`}
-                              type="button"
-                              onClick={() => {
-                                if (overviewEntity === "instructor") {
-                                  setSelectedInstructorId(item.id);
-                                  setRoleView("instructor");
-                                } else {
-                                  setSelectedStudentId(item.id);
-                                  setRoleView("student");
-                                }
-                              }}
-                              className={`rounded-full border px-3 py-1.5 text-sm font-black leading-none transition ${
-                                active
-                                  ? "border-sky-300 bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
-                                  : "border-slate-200/80 bg-white/88 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
-                              }`}
-                            >
-                              {item.name}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <span className="rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-black text-rose-700">
+                        {(overviewEntity === "instructor" ? suspendedInstructors : suspendedStudents).length}명
+                      </span>
                     </div>
-                  ))}
-                </div>
+                    {(overviewEntity === "instructor" ? suspendedInstructors : suspendedStudents).length > 0 ? (
+                      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        {(overviewEntity === "instructor" ? suspendedInstructors : suspendedStudents).map((item) => (
+                          <div
+                            key={`suspended-${overviewEntity}-${item.id}`}
+                            className="flex items-center justify-between gap-3 rounded-2xl border border-rose-100/80 bg-white/75 px-3 py-2.5 shadow-sm"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-black text-slate-800">{item.name}</p>
+                              <p className="truncate text-xs font-semibold text-slate-400">{item.secondary || "추가 정보 없음"}</p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={statusUpdatingId === `${overviewEntity}-${item.id}`}
+                              onClick={() => void handleToggleRosterStatus(overviewEntity, item, true)}
+                              className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                            >
+                              복구
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white/55 px-4 py-8 text-center text-sm font-semibold text-slate-500">
+                        중지된 명단이 없습니다.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    {overviewDisplayGroups.map((group) => (
+                      <div
+                        key={`overview-group-${overviewEntity}-${group.label}`}
+                        className={`rounded-2xl border px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] ${group.toneClass ?? "border-white/60 bg-white/55"}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
+                            {group.label}
+                          </span>
+                          <span className="text-[11px] font-semibold text-slate-400">{group.items.length}명</span>
+                        </div>
+                        <div className="mt-2.5 flex flex-wrap gap-1.5">
+                          {group.items.map((item) => {
+                            const active = overviewEntity === "instructor" ? item.id === selectedInstructorId : item.id === selectedStudentId;
+                            return (
+                              <span
+                                key={`overview-chip-${overviewEntity}-${item.id}`}
+                                className={`inline-flex items-center overflow-hidden rounded-full border text-sm font-black leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition ${
+                                  active
+                                    ? "border-sky-300 bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
+                                    : "border-slate-200/80 bg-white/88 text-slate-700 hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (overviewEntity === "instructor") {
+                                      setSelectedInstructorId(item.id);
+                                      setRoleView("instructor");
+                                    } else {
+                                      setSelectedStudentId(item.id);
+                                      setRoleView("student");
+                                    }
+                                  }}
+                                  className="px-3 py-1.5"
+                                >
+                                  {item.name}
+                                </button>
+                                {!isInstructorReadOnly && showRosterActions ? (
+                                  <button
+                                    type="button"
+                                    disabled={statusUpdatingId === `${overviewEntity}-${item.id}`}
+                                    onClick={() => void handleToggleRosterStatus(overviewEntity, item, false)}
+                                    className={`border-l px-2 py-1.5 text-[11px] font-black ${
+                                      active
+                                        ? "border-white/25 text-white/90 hover:bg-white/10"
+                                        : "border-slate-200/80 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                                    } disabled:opacity-50`}
+                                  >
+                                    중지
+                                  </button>
+                                ) : null}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -5260,7 +8264,6 @@ export default function SynchroSPage() {
                     events={displayEvents}
                     daysOff={overviewEntity === "instructor" ? selectedInstructorDaysOff : []}
                     viewMode="summary"
-                    highlightCellTints={{}}
                     onEventMove={undefined}
                     onCellClick={() => {}}
                   />
@@ -5298,6 +8301,421 @@ export default function SynchroSPage() {
                   </div>
                 </div>
               </aside>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {!showIntroPage && mainTab === "review" ? (
+        <>
+          {error ? (
+            <div className="whitespace-pre-line rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
+          {notice ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+              {notice}
+            </div>
+          ) : null}
+          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+            <div className="rounded-[26px] border border-white/55 bg-white/45 p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Weekly Review</p>
+                  <h2 className="mt-1 text-2xl font-black text-slate-900">시간표 검토</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">
+                    {weekStart} ~ {weekEnd} 주차 학생 시간표를 검토하고 상태와 메모를 저장합니다.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-[11px] font-black ${selectedScheduleTag ? SCHEDULE_TAG_TONES[selectedScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
+                      검토 범위 · #{selectedScheduleTagLabel}
+                    </span>
+                    <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-500">
+                      서버 동기화 · {scheduleReviews.length}건
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  {[
+                    { filter: "all", label: "전체", value: reviewStats.total, className: "border-slate-200 bg-white text-slate-800" },
+                    { filter: "unreviewed", label: "미검토", value: reviewStats.unreviewed, className: "border-slate-200 bg-slate-50 text-slate-700" },
+                    { filter: "normal", label: "정상", value: reviewStats.normal, className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+                    { filter: "needs_check", label: "확인필요", value: reviewStats.needsCheck, className: "border-amber-200 bg-amber-50 text-amber-700" },
+                    { filter: "issue", label: "문제발생", value: reviewStats.issue, className: "border-rose-200 bg-rose-50 text-rose-700" },
+                    { filter: "memo", label: "메모", value: reviewStats.memo, className: "border-sky-200 bg-sky-50 text-sky-700" }
+                  ].map((item) => (
+                    <button
+                      key={`review-stat-${item.label}`}
+                      type="button"
+                      aria-pressed={reviewFilter === item.filter}
+                      onClick={() => setReviewFilter(item.filter as typeof reviewFilter)}
+                      className={`sync-pressable sync-focus min-h-10 rounded-2xl border px-3 py-2 text-right tabular-nums transition-[box-shadow,transform] duration-150 ease-out ${item.className} ${
+                        reviewFilter === item.filter ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-white shadow-sm" : "hover:shadow-md"
+                      }`}
+                    >
+                      <p className="text-[10px] font-black uppercase tracking-[0.16em] opacity-70">{item.label}</p>
+                      <p className="text-xl font-black">{item.value}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <label className="flex min-w-[240px] flex-1 items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-600">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    value={reviewSearchKeyword}
+                    onChange={(event) => setReviewSearchKeyword(event.target.value)}
+                    placeholder="학생명 검색"
+                    className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400"
+                  />
+                </label>
+                <select
+                  value={reviewSortMode}
+                  onChange={(event) => setReviewSortMode(event.target.value as typeof reviewSortMode)}
+                  className="h-10 rounded-full border border-slate-200 bg-white/80 px-4 text-xs font-black text-slate-600 outline-none hover:bg-white"
+                >
+                  <option value="needs_first">미검토/문제 우선</option>
+                  <option value="class_desc">수업 많은 순</option>
+                  <option value="class_asc">수업 적은 순</option>
+                  <option value="name">이름순</option>
+                </select>
+                {([
+                  { key: "all", label: "전체" },
+                  { key: "unreviewed", label: "미검토" },
+                  { key: "normal", label: "정상" },
+                  { key: "needs_check", label: "확인필요" },
+                  { key: "issue", label: "문제발생" },
+                  { key: "memo", label: "메모 있음" }
+                ] as const).map((filter) => (
+                  <button
+                    key={`review-filter-${filter.key}`}
+                    type="button"
+                    onClick={() => setReviewFilter(filter.key)}
+                    className={`sync-pressable sync-focus min-h-10 rounded-full border px-4 py-2 text-xs font-black transition-[background-color,border-color,box-shadow,color,transform] duration-150 ease-out ${
+                      reviewFilter === filter.key
+                        ? "border-blue-500 bg-blue-600 text-white shadow-[0_10px_22px_rgba(37,99,235,0.18)]"
+                        : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => void loadScheduleReviews()}
+                  className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-xs font-black text-slate-600 hover:bg-white"
+                >
+                  검토 데이터 새로고침
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-3xl border border-white/60 bg-white/50 p-3">
+                {reviewLoading ? (
+                  <div className="flex gap-3 overflow-hidden">
+                    {Array.from({ length: 6 }).map((_, index) => (
+                      <div key={`review-skeleton-${index}`} className="h-28 w-64 shrink-0 animate-pulse rounded-2xl bg-slate-100/80" />
+                    ))}
+                  </div>
+                ) : reviewRows.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-10 text-center text-sm font-bold text-slate-500">
+                    조건에 맞는 학생이 없습니다.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto pb-2">
+                    <div className="flex min-w-max gap-3">
+                      {reviewRows.map((row) => {
+                        const status = row.review?.status ?? null;
+                        const active = selectedReviewStudent?.id === row.student.id;
+                        return (
+                          <button
+                            key={`review-row-${row.student.id}`}
+                            type="button"
+                            onClick={() => setSelectedReviewStudentId(row.student.id)}
+                            className={`w-[270px] shrink-0 rounded-2xl border px-4 py-3 text-left transition ${
+                              active
+                                ? "border-blue-300 bg-blue-50/90 shadow-[0_12px_24px_rgba(37,99,235,0.14)]"
+                                : "border-slate-200/80 bg-white/82 hover:border-sky-200 hover:bg-sky-50/50"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-base font-black text-slate-900">{row.student.name}</p>
+                                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                                    {row.events.length}개
+                                  </span>
+                                  {status ? (
+                                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black ${REVIEW_STATUS_META[status].tone}`}>
+                                      {REVIEW_STATUS_META[status].label}
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-black text-slate-400">
+                                      미검토
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-1 truncate text-xs font-semibold text-slate-500">{row.student.secondary || "상세 정보 없음"}</p>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {row.hints.length > 0 ? (
+                                    row.hints.map((hint) => (
+                                      <span key={`review-hint-${row.student.id}-${hint}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                                        {hint}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                                      자동 감지 이상 없음
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {row.review?.memo ? (
+                                <span className="shrink-0 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-black text-sky-700">
+                                  메모
+                                </span>
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="rounded-3xl border border-white/60 bg-white/50 p-3">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Student Timetable</p>
+                      <p className="text-lg font-black text-slate-900">
+                        {selectedReviewStudent ? `${selectedReviewStudent.name} 시간표` : "학생 시간표"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <span className={`rounded-full border px-3 py-1 text-[11px] font-black ${selectedScheduleTag ? SCHEDULE_TAG_TONES[selectedScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
+                        검토 라벨 · #{selectedScheduleTagLabel}
+                      </span>
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-600">
+                        {selectedReviewEvents.length}개 수업
+                      </span>
+                    </div>
+                  </div>
+                  {selectedReviewEvents.length > 0 ? (
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/80">
+                      <div className="grid grid-cols-[62px_repeat(7,minmax(0,1fr))] border-b border-slate-200 bg-slate-50/90">
+                        <div className="flex h-8 items-center justify-center border-r border-slate-200 text-[11px] font-black text-slate-500">
+                          시간
+                        </div>
+                        {DAYS.map((day) => (
+                          <div
+                            key={`review-grid-head-${day.key}`}
+                            className="flex h-8 items-center justify-center border-r border-slate-200 text-[12px] font-black text-blue-700 last:border-r-0"
+                          >
+                            {day.label}
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        {TIME_SLOTS.map((slot) => (
+                          <div
+                            key={`review-grid-row-${slot}`}
+                            className="grid min-h-[44px] grid-cols-[62px_repeat(7,minmax(0,1fr))] border-b border-slate-100 last:border-b-0"
+                          >
+                            <div className="flex items-center justify-center border-r border-slate-100 bg-slate-50/70 px-1 text-[11px] font-black text-slate-600">
+                              {slot.slice(0, 2)}-{String(Number(slot.slice(0, 2)) + 1)}
+                            </div>
+                            {DAYS.map((day) => {
+                              const cellEvents = selectedReviewEvents.filter(
+                                (event) => event.weekday === day.key && event.startTime === slot
+                              );
+                              return (
+                                <div
+                                  key={`review-grid-cell-${day.key}-${slot}`}
+                                  className={`min-h-[44px] border-r border-slate-100 p-1 last:border-r-0 ${
+                                    cellEvents.length > 0 ? "bg-blue-50/40" : "bg-white/60"
+                                  }`}
+                                >
+                                  {cellEvents.slice(0, 2).map((event) => {
+                                    const classKey = getReviewClassKey(event);
+                                    const tone = REVIEW_SUBJECT_TONE_CLASSES[getReviewSubjectTone(event)];
+                                    const classBadge = getReviewClassBadge(event);
+                                    const isHighlighted = selectedReviewClassKey === classKey;
+                                    const progress = selectedReviewProgressByEventKey.get(getReviewEventKey(event)) ?? { index: 1, total: 1 };
+
+                                    return (
+                                      <button
+                                        key={`review-grid-event-${getReviewEventKey(event)}`}
+                                        type="button"
+                                        onClick={() => setSelectedReviewClassKey((prev) => (prev === classKey ? null : classKey))}
+                                        className={`mb-1 w-full rounded-lg border px-2 py-1.5 text-left shadow-sm transition ${
+                                          isHighlighted ? tone.selected : tone.card
+                                        }`}
+                                      >
+                                        <div className="flex min-w-0 items-start justify-between gap-1">
+                                          <p className="min-w-0 truncate text-[12px] font-black leading-tight">
+                                            {event.subjectName} · {event.instructorName}
+                                          </p>
+                                          {classBadge ? (
+                                            <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-black leading-none ${tone.badge}`}>
+                                              {classBadge}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        {!classBadge ? (
+                                          <p className={`mt-0.5 truncate text-[9px] font-bold leading-tight ${tone.label}`}>
+                                            {event.classTypeLabel}
+                                          </p>
+                                        ) : null}
+                                        <div className="mt-1.5 flex items-center justify-between gap-1">
+                                          <span className={`inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-black leading-none ${tone.time}`}>
+                                            {event.startTime}-{event.endTime}
+                                          </span>
+                                          <span className="flex min-w-0 items-center justify-end gap-1">
+                                            {progress.total > 1 ? (
+                                              <span className={`text-[9px] font-black leading-none ${tone.label}`}>
+                                                {progress.index}/{progress.total}
+                                              </span>
+                                            ) : null}
+                                            <span className="flex items-center gap-0.5">
+                                              {Array.from({ length: progress.total }).map((_, idx) => (
+                                                <span
+                                                  key={`review-progress-${getReviewEventKey(event)}-${idx + 1}`}
+                                                  className={`h-1.5 w-2 rounded-sm ${idx + 1 <= progress.index ? tone.segmentOn : tone.segmentOff}`}
+                                                />
+                                              ))}
+                                            </span>
+                                          </span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                  {cellEvents.length > 2 ? (
+                                    <p className="text-[9px] font-black text-slate-500">+{cellEvents.length - 2}</p>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-8 text-center text-sm font-bold text-slate-500">
+                      이번 주 표시할 수업이 없습니다.
+                    </div>
+                  )}
+                </div>
+                <aside className="rounded-3xl border border-white/50 bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(239,246,255,0.62))] p-4 shadow-lg shadow-slate-900/5">
+                  {selectedReviewStudent ? (
+                    <>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Selected Student</p>
+                      <div className="mt-2 flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-2xl font-black text-slate-900">{selectedReviewStudent.name}</h3>
+                          <p className="mt-1 text-sm font-semibold text-slate-500">{selectedReviewStudent.secondary || "상세 정보 없음"}</p>
+                        </div>
+                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-slate-400"}`}>
+                          {selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${selectedScheduleTag ? SCHEDULE_TAG_TONES[selectedScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
+                          #{selectedScheduleTagLabel}
+                        </span>
+                        {selectedReview?.isCarryForward ? (
+                          <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-700">
+                            이전 주 검토 유지
+                          </span>
+                        ) : selectedReview?.isLegacyFallback ? (
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-500">
+                            기존 검토 불러옴
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-4 grid gap-2">
+                        {(["normal", "needs_check", "issue"] as ReviewStatus[]).map((status) => (
+                          <button
+                            key={`review-status-${status}`}
+                            type="button"
+                            disabled={reviewSavingId === selectedReviewStudent.id}
+                            onClick={() => void saveScheduleReview(selectedReviewStudent.id, status, reviewMemoDraft)}
+                            aria-pressed={selectedReview?.status === status}
+                            className={`sync-pressable sync-focus relative min-h-10 rounded-2xl border px-3 py-2.5 text-sm font-black transition-[background-color,border-color,box-shadow,color,opacity,transform] duration-150 ease-out disabled:cursor-wait disabled:opacity-70 ${
+                              selectedReview?.status === status
+                                ? `${REVIEW_STATUS_META[status].button} ring-2 ring-offset-1 ring-offset-white`
+                                : REVIEW_STATUS_META[status].button
+                            }`}
+                          >
+                            <span className="inline-flex items-center justify-center gap-2">
+                              {reviewSavingId === selectedReviewStudent.id && selectedReview?.status === status ? (
+                                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />
+                              ) : selectedReview?.status === status ? (
+                                <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                                  <path d="m5 10 3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              ) : null}
+                              {REVIEW_STATUS_META[status].label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <label className="mt-4 block">
+                        <span className="text-xs font-black text-slate-600">검토 메모</span>
+                        <textarea
+                          value={reviewMemoDraft}
+                          onChange={(event) => setReviewMemoDraft(event.target.value)}
+                          placeholder="예: 금요일 19시 수업 강사 확인 필요"
+                          className="mt-2 min-h-[76px] w-full rounded-2xl border border-slate-200 bg-white/85 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-blue-300"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!selectedReview || reviewSavingId === selectedReviewStudent.id}
+                        onClick={() => selectedReview ? void saveScheduleReview(selectedReviewStudent.id, selectedReview.status, reviewMemoDraft) : undefined}
+                        className="mt-2 w-full rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-black text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        메모 저장
+                      </button>
+
+                      <div className="mt-4 rounded-2xl border border-white/70 bg-white/65 p-3">
+                        <p className="text-xs font-black text-slate-500">자동 점검</p>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {selectedReviewHints.length > 0 ? (
+                            selectedReviewHints.map((hint) => (
+                              <span key={`selected-review-hint-${hint}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">
+                                {hint}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">
+                              자동 감지 이상 없음
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {selectedReview?.reviewedAt ? (
+                        <p className="mt-4 text-xs font-semibold text-slate-400">
+                          최근 저장: {formatConflictLogTimestamp(selectedReview.reviewedAt)}
+                          {selectedReview.reviewedByName ? ` · ${selectedReview.reviewedByName}` : ""}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-10 text-center text-sm font-bold text-slate-500">
+                      검토할 학생을 선택해 주세요.
+                    </div>
+                  )}
+                </aside>
+              </div>
             </div>
           </section>
         </>
@@ -5357,7 +8775,10 @@ export default function SynchroSPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {filteredConflictLogs.map((item) => (
+                    {filteredConflictLogs.map((item) => {
+                      const storedDetails = formatStoredConflictDetails(item.details);
+                      const normalizedReason = normalizeConflictReasonText(item.reason);
+                      return (
                       <article
                         key={item.id}
                         className="rounded-2xl border border-white/60 bg-[linear-gradient(135deg,rgba(255,255,255,0.92),rgba(254,243,199,0.38))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]"
@@ -5381,8 +8802,23 @@ export default function SynchroSPage() {
                             <p className="text-sm font-semibold text-slate-600">
                               강사: {item.instructorName || "미지정"}{item.targetName ? ` · 대상: ${item.targetName}` : ""}
                             </p>
-                            <p className="text-sm font-bold text-rose-700">{item.reason}</p>
-                            {item.details ? <p className="whitespace-pre-line text-xs font-semibold text-slate-500">{item.details}</p> : null}
+                            <div className="rounded-xl border border-rose-100 bg-rose-50/70 px-3 py-2">
+                              <p className="text-[11px] font-black text-rose-500">충돌 이유</p>
+                              <p className="mt-1 text-sm font-bold text-rose-700">{normalizedReason}</p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-white/85 px-3 py-2.5">
+                              <p className="text-[11px] font-black text-slate-500">구체적인 오류 사항</p>
+                              <p className="sync-tabular mt-1.5 text-xs font-bold text-slate-700">
+                                입력 시도: {weekdayLabel(item.weekday)}요일 {item.startTime}-{item.endTime} · {item.instructorName || "강사 미지정"}
+                              </p>
+                              {storedDetails ? (
+                                <p className="sync-copy mt-2 whitespace-pre-line text-xs font-semibold leading-5 text-slate-600">{storedDetails}</p>
+                              ) : (
+                                <p className="sync-copy mt-2 text-xs font-semibold text-slate-500">
+                                  과거 기록에는 겹친 기존 수업의 상세 정보가 저장되지 않았습니다. 같은 분류의 활성 시간표에서 위 요일과 시간대를 확인해 주세요.
+                                </p>
+                              )}
+                            </div>
                             {item.rawText ? (
                               <p className="rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-500">
                                 원본: {item.rawText}
@@ -5395,7 +8831,8 @@ export default function SynchroSPage() {
                           </div>
                         </div>
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -5416,13 +8853,22 @@ export default function SynchroSPage() {
               {notice}
             </div>
           ) : null}
-          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+          <ScheduleCreationWorkspace
+            weekStart={weekStart}
+            students={students}
+            instructors={instructors}
+            subjects={subjects}
+            classTypes={classTypes}
+            onDataChanged={async () => {
+              await loadTimetableGroups();
+            }}
+          />
+          <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
-              <div className="rounded-[26px] border border-white/55 bg-white/45 p-4 shadow-sm">
-                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">New Placement</p>
-                <h2 className="mt-2 text-2xl font-black text-slate-900">신규 시간표 추천</h2>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h2 className="text-xl font-black text-slate-900">배정 추천 도구</h2>
                 <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
-                  희망 과목, 수업 유형, 등원 가능 요일과 시간을 선택하면 현재 저장된 시간표 그룹 기준으로 가능한 배정 후보를 추천합니다.
+                  희망 과목, 수업 유형, 등원 가능 요일과 시간을 선택해 편성 후보를 확인한 뒤 위 격자에 입력할 수 있습니다.
                 </p>
 
                 <div className="mt-5 grid gap-4">
@@ -5608,120 +9054,102 @@ export default function SynchroSPage() {
       ) : null}
 
       {showIntroPage ? (
-        <section className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-          <div className="rounded-[32px] border border-white/45 bg-white/38 p-6 shadow-xl shadow-slate-900/5 backdrop-blur-md">
-            <div className="inline-flex rounded-full border border-sky-200/80 bg-white/55 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.24em] text-sky-700">
-              Synchro-S Guide
-            </div>
-            <h2 className="mt-5 text-4xl font-black tracking-tight text-slate-900">시간표 입력, 그룹 관리, 저장 흐름을 한 화면에서 정리합니다.</h2>
-            <p className="mt-4 max-w-3xl text-base font-semibold leading-8 text-slate-500">
-              Synchro-S는 강사/학생 시간표 조회, 노션 붙여넣기 반영, DB 저장, 그룹 버전 관리까지 연결하는 운영용 시간표 DB입니다.
-              로그인 직후에는 바로 편집보다 홈화면에서 전체 흐름을 확인하고, 필요한 작업으로 진입하는 구성이 더 안전합니다.
-            </p>
-
-            <div className="mt-6 grid gap-3 md:grid-cols-3">
-              {[
-                ["1", "탭 선택", "강사/학생 기준으로 대상 시야를 먼저 고릅니다."],
-                ["2", "노션 반영", "붙여넣은 텍스트를 미리보기로 검수하고 수정합니다."],
-                ["3", "DB 저장", "검토한 시간표를 그룹과 함께 서버에 저장합니다."]
-              ].map(([step, title, body]) => (
-                <div key={step} className="rounded-3xl border border-white/55 bg-white/42 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500 text-sm font-black text-white">{step}</div>
-                  <p className="mt-4 text-lg font-black text-slate-800">{title}</p>
-                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{body}</p>
+        isInstructorReadOnly ? (
+          <section className="grid gap-4 xl:grid-cols-[1fr_320px]">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-blue-600">My Timetable</p>
+                  <h2 className="mt-1 text-2xl font-black text-slate-900">{selectedInstructorLabel} 강사 시간표</h2>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{weekStart} ~ {weekEnd} 기준 본인 수업입니다.</p>
                 </div>
-              ))}
-            </div>
-
-            <div className="mt-6 rounded-[28px] border border-white/55 bg-white/35 p-5">
-              <p className="text-lg font-black text-slate-800">실무 체크 포인트</p>
-              <div className="mt-4 space-y-3">
-                {[
-                  "강사 탭은 조회 중심이며, 실제 드래그 이동은 학생 탭에서만 수행합니다.",
-                  "노션 붙여넣기 후 '시간표에 반영'으로 미리보고, 필요하면 '되돌리기'로 직전 상태를 복구할 수 있습니다.",
-                  "저장된 시간표 그룹은 주간 버전 관리용이며, 삭제 전에는 전용 확인 UI가 표시됩니다."
-                ].map((item, index) => (
-                  <div key={item} className="flex items-start gap-3 rounded-2xl bg-white/45 px-4 py-3">
-                    <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[11px] font-black text-white">
-                      {index + 1}
-                    </span>
-                    <p className="text-sm font-semibold leading-6 text-slate-600">{item}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-[32px] border border-white/45 bg-[linear-gradient(160deg,rgba(37,99,235,0.88),rgba(59,130,246,0.78),rgba(103,232,249,0.45))] p-6 text-white shadow-xl shadow-blue-500/20 backdrop-blur-md">
-            <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/70">Quick Infographic</p>
-            <div className="mt-5 rounded-[28px] border border-white/20 bg-white/10 p-5">
-              <div className="grid grid-cols-[80px_1fr] gap-3 text-[11px] font-bold text-white/85">
-                <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">시간</div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">강사</div>
-                  <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">학생</div>
-                  <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">저장</div>
-                </div>
-                {[
-                  ["10-11", "조회", "편집", "저장"],
-                  ["11-12", "검색", "드래그", "그룹"],
-                  ["12-13", "검토", "반영", "복원"]
-                ].map((row) => (
-                  <Fragment key={row.join("-")}>
-                    <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[0]}</div>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[1]}</div>
-                      <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[2]}</div>
-                      <div className="rounded-2xl bg-white/10 px-3 py-3 text-center">{row[3]}</div>
-                    </div>
-                  </Fragment>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              <div className="rounded-[26px] border border-white/20 bg-white/10 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/65">주요 버튼</p>
-                <div className="mt-4 space-y-3 text-sm font-semibold text-white/90">
-                  <p>노션 붙여넣기 복사</p>
-                  <p>시간표에 반영</p>
-                  <p>DB 저장</p>
-                  <p>되돌리기</p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">This Week</p>
+                  <p className="text-2xl font-black text-slate-900">{displayEvents.length}개</p>
                 </div>
               </div>
-              <div className="rounded-[26px] border border-white/20 bg-white/10 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/65">권장 순서</p>
-                <p className="mt-4 text-sm font-semibold leading-7 text-white/90">
-                  검색으로 대상 확인 → 노션 반영 → 미리보기 검토 → 저장 또는 그룹 관리
+              {loading ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
+              ) : (
+                <TimetableGrid
+                  roleView="instructor"
+                  days={DAYS}
+                  timeSlots={TIME_SLOTS}
+                  events={displayEvents}
+                  hideEmptyDays={hideEmptyDays}
+                  hideEmptyTimes={hideEmptyTimes}
+                  daysOff={selectedInstructorDaysOff}
+                  viewMode="summary"
+                  onEventMove={undefined}
+                  onCellClick={() => {}}
+                />
+              )}
+            </div>
+            <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Quick Read</p>
+              <p className="mt-2 text-xl font-black text-slate-900">{selectedInstructorLabel}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-500">{selectedInstructorSecondary || "상세 정보 없음"}</p>
+              <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
+                <p className="text-xs font-bold text-blue-700">오늘 {todayLabel}요일 수업</p>
+                <p className="mt-2 text-3xl font-black text-slate-900">
+                  {displayEvents.filter((event) => event.weekday === todayWeekday).length}개
                 </p>
               </div>
-            </div>
-
-            <div className="mt-5 rounded-[26px] border border-white/20 bg-white/10 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/65">바로 시작</p>
-              <p className="mt-3 text-sm font-semibold leading-7 text-white/90">
-                홈화면에서 전체 흐름을 확인한 뒤, 아래 버튼으로 실제 시간표 작업 화면으로 이동하세요.
-              </p>
               <button
                 type="button"
                 onClick={() => setShowIntroPage(false)}
-                className="mt-5 w-full rounded-3xl border border-white/35 bg-white/80 px-4 py-3 text-sm font-black text-slate-900 shadow-lg shadow-slate-900/10"
+                className="mt-4 w-full rounded-md border border-blue-600 bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700"
               >
-                시간표 작업 시작
+                상세 작업 화면 열기
               </button>
-            </div>
-          </div>
-        </section>
+            </aside>
+          </section>
+        ) : (
+          <HomeInstructorFolderDashboard
+            relativeLabel={homeDashboardRelativeLabel}
+            weekdayLabel={homeDashboardWeekdayLabel}
+            dateISO={homeDashboardDateISO}
+            selectedTagLabel={selectedScheduleTagLabel}
+            dayOffset={homeDashboardDayOffset}
+            dateOptions={[
+              { offset: -1, label: "어제", date: shiftDate(todayISO, -1), weekdayLabel: weekdayLabel(dayOf(shiftDate(todayISO, -1))) },
+              { offset: 0, label: "오늘", date: todayISO, weekdayLabel: weekdayLabel(dayOf(todayISO)) },
+              { offset: 1, label: "내일", date: shiftDate(todayISO, 1), weekdayLabel: weekdayLabel(dayOf(shiftDate(todayISO, 1))) }
+            ]}
+            events={homeTodayEvents}
+            instructorSummaries={homeTodayInstructorSummaries}
+            studentSummaries={homeTodayStudentSummaries}
+            loading={isHomeDashboardLoading}
+            onSelectDate={(offset, date) => {
+              setHomeDashboardDayOffset(offset);
+              setWeekStart(mondayOfDate(date));
+            }}
+            onOpenInstructor={(id) => {
+              setSelectedInstructorId(id);
+              setMainTab("overview");
+              setOverviewEntity("instructor");
+              setRoleView("instructor");
+              setShowIntroPage(false);
+            }}
+            onOpenStudent={(id) => {
+              setSelectedStudentId(id);
+              setMainTab("overview");
+              setOverviewEntity("student");
+              setRoleView("student");
+              setShowIntroPage(false);
+            }}
+          />
+        )
       ) : null}
 
       {importProgress.active ? (
         <div className="fixed inset-0 z-[340] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-white/70 bg-[linear-gradient(145deg,rgba(255,255,255,0.72),rgba(219,234,254,0.65),rgba(167,243,208,0.45))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] backdrop-blur-2xl">
-            <p className="text-base font-extrabold text-slate-800">노션 시간표 저장 중...</p>
+            <p className="text-base font-extrabold text-slate-800">시간표 저장 중...</p>
             <p className="mt-1 text-xs font-semibold text-slate-600">{importProgress.label || "데이터를 처리하고 있습니다."}</p>
             <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-white/60">
               <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#60a5fa,#a78bfa)] transition-all duration-300"
+                className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#60a5fa,#a78bfa)] transition-[width] duration-300 ease-out"
                 style={{
                   width: `${Math.max(
                     6,
@@ -5904,6 +9332,154 @@ export default function SynchroSPage() {
         </div>
       ) : null}
 
+      {selfStudyDraft ? (
+        <div className="fixed inset-0 z-[325] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-black text-slate-900">자기주도학습 추가</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  {selectedStudentLabel} · {weekdayLabel(selfStudyDraft.weekday)}요일
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={selfStudySaving}
+                onClick={() => setSelfStudyDraft(null)}
+                className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1 text-xs font-semibold text-slate-700">
+                시작
+                <select
+                  value={selfStudyDraft.startTime}
+                  onChange={(event) => setSelfStudyDraft((prev) => (prev ? { ...prev, startTime: event.target.value } : prev))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-800"
+                >
+                  {TIME_EDIT_OPTIONS.slice(0, -1).map((time) => (
+                    <option key={`self-study-start-${time}`} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs font-semibold text-slate-700">
+                종료
+                <select
+                  value={selfStudyDraft.endTime}
+                  onChange={(event) => setSelfStudyDraft((prev) => (prev ? { ...prev, endTime: event.target.value } : prev))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-800"
+                >
+                  {TIME_EDIT_OPTIONS.filter((time) => timeToMinutes(time) > timeToMinutes(selfStudyDraft.startTime)).map((time) => (
+                    <option key={`self-study-end-${time}`} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+              강사 없이 학생 시간표 안내용 그룹에만 저장됩니다. 기존 수업 데이터는 변경하지 않습니다.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={selfStudySaving}
+                onClick={() => setSelfStudyDraft(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={selfStudySaving}
+                onClick={() => void handleSaveSelfStudy()}
+                className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {selfStudySaving ? "저장 중..." : "추가"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {timeEditEvent ? (
+        <div className="fixed inset-0 z-[325] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-black text-slate-900">수업 시간 수정</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  {timeEditEvent.instructorName ? `${timeEditEvent.subjectName} · ${timeEditEvent.instructorName}` : timeEditEvent.subjectName}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={timeEditSaving}
+                onClick={() => setTimeEditEvent(null)}
+                className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1 text-xs font-semibold text-slate-700">
+                시작
+                <select
+                  value={timeEditForm.startTime}
+                  onChange={(event) => setTimeEditForm((prev) => ({ ...prev, startTime: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-800"
+                >
+                  {TIME_EDIT_OPTIONS.slice(0, -1).map((time) => (
+                    <option key={`edit-start-${time}`} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs font-semibold text-slate-700">
+                종료
+                <select
+                  value={timeEditForm.endTime}
+                  onChange={(event) => setTimeEditForm((prev) => ({ ...prev, endTime: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-800"
+                >
+                  {TIME_EDIT_OPTIONS.filter((time) => timeToMinutes(time) > timeToMinutes(timeEditForm.startTime)).map((time) => (
+                    <option key={`edit-end-${time}`} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+              30분 단위 시간도 저장됩니다. 저장 시 현재 선택된 주차 기준으로 시간표에 반영됩니다.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={timeEditSaving}
+                onClick={() => setTimeEditEvent(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={timeEditSaving}
+                onClick={() => void handleSaveTimeEdit()}
+                className="rounded-lg border border-blue-600 bg-blue-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+              >
+                {timeEditSaving ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <ScheduleModal
         open={modalOpen}
         initialCell={initialCell}
@@ -5920,6 +9496,44 @@ export default function SynchroSPage() {
         }))}
         onClose={() => setModalOpen(false)}
         onSubmit={handleCreate}
+      />
+      <SyncScheduleDraftModal
+        open={syncDraftModalOpen}
+        initialCell={syncDraftInitialCell}
+        instructors={instructors}
+        subjects={subjects.map((subject) => ({ code: subject.code, label: subject.label }))}
+        classTypes={classTypes.map((type) => ({
+          code: type.code,
+          label: type.label,
+          badgeText: type.badgeText,
+          maxStudents: type.maxStudents
+        }))}
+        onSubmit={handleAddSyncDraft}
+        onClose={() => setSyncDraftModalOpen(false)}
+      />
+      <ScheduleTagManager
+        open={scheduleTagManagerOpen}
+        tags={scheduleTags}
+        busy={scheduleTagsBusy}
+        onClose={() => setScheduleTagManagerOpen(false)}
+        onCreate={async (input) => {
+          try {
+            await createScheduleTag(input);
+          } catch (tagError) {
+            setError(tagError instanceof Error ? tagError.message : "태그 저장에 실패했습니다.");
+          }
+        }}
+        onUpdate={async (id, input) => {
+          try {
+            await updateScheduleTag(id, input);
+            if (input.isCurrent === true) {
+              const tagName = scheduleTags.find((tag) => tag.id === id)?.name ?? "선택한 분류";
+              setNotice(`#${tagName}을 현재 분류로 설정했습니다.`);
+            }
+          } catch (tagError) {
+            setError(tagError instanceof Error ? tagError.message : "태그 수정에 실패했습니다.");
+          }
+        }}
       />
       </div>
     </main>

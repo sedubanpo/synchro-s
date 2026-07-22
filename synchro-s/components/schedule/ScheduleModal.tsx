@@ -1,6 +1,6 @@
 "use client";
 
-import { DAYS, TIME_SLOTS } from "@/lib/constants";
+import { DAYS } from "@/lib/constants";
 import type { ScheduleFormInput, Weekday } from "@/types/schedule";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -18,7 +18,24 @@ type ScheduleModalProps = {
   onClose: () => void;
 };
 
-const END_TIME_OPTIONS = [...TIME_SLOTS, "22:00"];
+const HALF_HOUR_TIME_OPTIONS = Array.from({ length: 31 }, (_, index) => {
+  const totalMinutes = 9 * 60 + index * 30;
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+});
+const START_TIME_OPTIONS = HALF_HOUR_TIME_OPTIONS.slice(0, -1);
+const END_TIME_OPTIONS = HALF_HOUR_TIME_OPTIONS.slice(1);
+
+function timeToMinutes(time: string): number {
+  const [hour, minute] = time.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function getNextTimeOption(startTime: string): string {
+  const startMinutes = timeToMinutes(startTime);
+  return END_TIME_OPTIONS.find((time) => timeToMinutes(time) > startMinutes) ?? END_TIME_OPTIONS[END_TIME_OPTIONS.length - 1] ?? "24:00";
+}
 
 function getTodayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -71,7 +88,7 @@ export function ScheduleModal({
       weekday: initialCell?.weekday ?? 1,
       classDate: getTodayISO(),
       startTime: initialCell?.startTime ?? "10:00",
-      endTime: END_TIME_OPTIONS[Math.min(TIME_SLOTS.indexOf(initialCell?.startTime ?? "10:00") + 1, END_TIME_OPTIONS.length - 1)]
+      endTime: getNextTimeOption(initialCell?.startTime ?? "10:00")
     });
     setError(null);
   }, [open, initialCell, instructors, preferredInstructorId, preferredStudentId, subjects, classTypes]);
@@ -102,6 +119,10 @@ export function ScheduleModal({
       setError("메모는 필수입니다.");
       return;
     }
+    if (timeToMinutes(form.endTime) <= timeToMinutes(form.startTime)) {
+      setError("종료 시간은 시작 시간보다 늦어야 합니다.");
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -116,13 +137,13 @@ export function ScheduleModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+      <div className="sync-surface w-full max-w-xl rounded-2xl bg-white p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-extrabold text-slate-900">새 수업 등록</h2>
+          <h2 className="sync-heading text-lg font-extrabold text-slate-900">새 수업 등록</h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+            className="sync-pressable sync-focus rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
           >
             닫기
           </button>
@@ -133,7 +154,7 @@ export function ScheduleModal({
             <label className="space-y-1 text-xs font-semibold text-slate-700">
               수업유형
               <select
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 value={form.scheduleMode}
                 onChange={(e) => setForm((prev) => ({ ...prev, scheduleMode: e.target.value as "recurring" | "one_off" }))}
               >
@@ -145,7 +166,7 @@ export function ScheduleModal({
             <label className="space-y-1 text-xs font-semibold text-slate-700">
               강사
               <select
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 value={form.instructorId}
                 onChange={(e) => setForm((prev) => ({ ...prev, instructorId: e.target.value }))}
               >
@@ -162,7 +183,7 @@ export function ScheduleModal({
             <label className="space-y-1 text-xs font-semibold text-slate-700">
               과목
               <select
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 value={form.subjectCode}
                 onChange={(e) => setForm((prev) => ({ ...prev, subjectCode: e.target.value }))}
               >
@@ -177,7 +198,7 @@ export function ScheduleModal({
             <label className="space-y-1 text-xs font-semibold text-slate-700">
               수업 타입
               <select
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 value={form.classTypeCode}
                 onChange={(e) =>
                   setForm((prev) => ({
@@ -204,7 +225,7 @@ export function ScheduleModal({
               <label className="space-y-1 text-xs font-semibold text-slate-700">
                 요일
                 <select
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   value={form.weekday}
                   onChange={(e) => setForm((prev) => ({ ...prev, weekday: Number(e.target.value) as Weekday }))}
                 >
@@ -219,7 +240,7 @@ export function ScheduleModal({
               <label className="space-y-1 text-xs font-semibold text-slate-700">
                 날짜
                 <input
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   type="date"
                   value={form.classDate}
                   onChange={(e) => setForm((prev) => ({ ...prev, classDate: e.target.value }))}
@@ -231,11 +252,20 @@ export function ScheduleModal({
               <label className="space-y-1 text-xs font-semibold text-slate-700">
                 시작
                 <select
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="sync-input sync-tabular w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   value={form.startTime}
-                  onChange={(e) => setForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((prev) => {
+                      const startTime = e.target.value;
+                      return {
+                        ...prev,
+                        startTime,
+                        endTime: timeToMinutes(prev.endTime) > timeToMinutes(startTime) ? prev.endTime : getNextTimeOption(startTime)
+                      };
+                    })
+                  }
                 >
-                  {TIME_SLOTS.map((time) => (
+                  {START_TIME_OPTIONS.map((time) => (
                     <option key={time} value={time}>
                       {time}
                     </option>
@@ -246,11 +276,11 @@ export function ScheduleModal({
               <label className="space-y-1 text-xs font-semibold text-slate-700">
                 종료
                 <select
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="sync-input sync-tabular w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   value={form.endTime}
                   onChange={(e) => setForm((prev) => ({ ...prev, endTime: e.target.value }))}
                 >
-                  {END_TIME_OPTIONS.map((time) => (
+                  {END_TIME_OPTIONS.filter((time) => timeToMinutes(time) > timeToMinutes(form.startTime)).map((time) => (
                     <option key={time} value={time}>
                       {time}
                     </option>
@@ -264,7 +294,7 @@ export function ScheduleModal({
             <legend className="text-xs font-semibold text-slate-700">
               학생 선택 ({form.studentIds.length}/{maxStudents === Number.MAX_SAFE_INTEGER ? "∞" : maxStudents})
             </legend>
-            <div className="mt-2 max-h-36 space-y-2 overflow-auto rounded-lg border border-slate-200 p-3">
+            <div className="mt-2 max-h-36 space-y-2 overflow-auto rounded-lg border border-slate-200 bg-slate-50/70 p-3">
               {students.map((student) => {
                 const checked = form.studentIds.includes(student.id);
                 const disabled = !checked && form.studentIds.length >= maxStudents;
@@ -272,7 +302,9 @@ export function ScheduleModal({
                 return (
                   <label
                     key={student.id}
-                    className={`flex items-center justify-between rounded px-2 py-1 text-sm ${disabled ? "text-slate-400" : "text-slate-700"}`}
+                    className={`sync-pressable flex min-h-9 items-center justify-between rounded-md px-2 py-1 text-sm ${
+                      disabled ? "text-slate-400" : checked ? "bg-blue-50 text-blue-800" : "text-slate-700 hover:bg-white"
+                    }`}
                   >
                     <span>{student.name}</span>
                     <input
@@ -294,7 +326,7 @@ export function ScheduleModal({
               required
               onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))}
               placeholder="특이사항/주의사항을 입력하세요."
-              className="h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="sync-input h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
             />
           </label>
 
@@ -304,14 +336,14 @@ export function ScheduleModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+              className="sync-pressable sync-focus rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               취소
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              className="sync-pressable sync-focus rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               {submitting ? "저장 중..." : "저장"}
             </button>

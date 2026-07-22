@@ -20,8 +20,10 @@ export async function getAuthenticatedProfile() {
         id: sheetSession.instructorId ?? `sheet-profile:${sheetSession.fullName}`,
         role: sheetSession.role as AppUserRole,
         full_name: sheetSession.fullName,
-        auth_source: "sheet",
-        instructor_id: sheetSession.instructorId ?? null
+        auth_source: sheetSession.authSource ?? "sheet",
+        firebase_uid: sheetSession.firebaseUid ?? null,
+        instructor_id: sheetSession.instructorId ?? null,
+        student_id: sheetSession.studentId ?? null
       },
       profileError: null
     } as const;

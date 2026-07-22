@@ -13,6 +13,9 @@ export async function GET() {
     authenticated: true,
     role: session.role,
     fullName: session.fullName,
-    instructorId: session.instructorId
+    instructorId: session.instructorId,
+    studentId: session.studentId,
+    firebaseUid: session.firebaseUid,
+    authSource: session.authSource ?? "sheet"
   });
 }

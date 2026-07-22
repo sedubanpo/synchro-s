@@ -8,6 +8,9 @@ type SessionPayload = {
   role: AppUserRole;
   fullName: string;
   instructorId?: string | null;
+  studentId?: string | null;
+  firebaseUid?: string | null;
+  authSource?: "firebase" | "sheet";
   issuedAt: number;
   expiresAt: number;
 };
@@ -32,12 +35,22 @@ export function getSessionCookieName(): string {
   return COOKIE_NAME;
 }
 
-export function buildSessionToken(input: { fullName: string; role: AppUserRole; instructorId?: string | null }): string {
+export function buildSessionToken(input: {
+  fullName: string;
+  role: AppUserRole;
+  instructorId?: string | null;
+  studentId?: string | null;
+  firebaseUid?: string | null;
+  authSource?: "firebase" | "sheet";
+}): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
     role: input.role,
     fullName: input.fullName,
     instructorId: input.instructorId ?? null,
+    studentId: input.studentId ?? null,
+    firebaseUid: input.firebaseUid ?? null,
+    authSource: input.authSource ?? "sheet",
     issuedAt: now,
     expiresAt: now + DEFAULT_TTL_SECONDS
   };
