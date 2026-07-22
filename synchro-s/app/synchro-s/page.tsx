@@ -1429,7 +1429,7 @@ export default function SynchroSPage() {
   const [viewerRole, setViewerRole] = useState<"admin" | "coordinator" | "instructor" | "student">("admin");
   const [viewerRoleResolved, setViewerRoleResolved] = useState(false);
   const [overviewEvents, setOverviewEvents] = useState<ScheduleEvent[]>([]);
-  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewLoading, setOverviewLoading] = useState(true);
   const [reviewEvents, setReviewEvents] = useState<ScheduleEvent[]>([]);
   const [scheduleReviews, setScheduleReviews] = useState<ScheduleReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -1520,7 +1520,7 @@ export default function SynchroSPage() {
   const [selectedScheduleTagId, setSelectedScheduleTagId] = useState<string | null>(null);
   const [scheduleTagManagerOpen, setScheduleTagManagerOpen] = useState(false);
   const [scheduleTagsBusy, setScheduleTagsBusy] = useState(false);
-  const [timetableGroupsLoading, setTimetableGroupsLoading] = useState(false);
+  const [timetableGroupsLoading, setTimetableGroupsLoading] = useState(true);
   const [timetableGroupExpirationSupported, setTimetableGroupExpirationSupported] = useState(true);
   const [expandedGroupMonths, setExpandedGroupMonths] = useState<Record<string, boolean>>({});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -1913,7 +1913,7 @@ export default function SynchroSPage() {
   const isHomeDashboardLoading =
     showIntroPage &&
     !isInstructorReadOnly &&
-    (overviewLoading || timetableGroupsLoading);
+    (!viewerRoleResolved || overviewLoading || timetableGroupsLoading);
   const selectedSubjectForPlacement = useMemo(
     () => subjects.find((subject) => subject.code === newPlacementDraft.subjectCode) ?? null,
     [newPlacementDraft.subjectCode, subjects]
@@ -6397,9 +6397,11 @@ export default function SynchroSPage() {
   );
 
   useEffect(() => {
-    void loadOptions().catch((loadError) => {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load options");
-    });
+    void loadOptions()
+      .catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load options");
+      })
+      .finally(() => setViewerRoleResolved(true));
   }, [loadOptions]);
 
   useEffect(() => {
@@ -9118,16 +9120,18 @@ export default function SynchroSPage() {
             }}
             onOpenInstructor={(id) => {
               setSelectedInstructorId(id);
-              setMainTab("overview");
-              setOverviewEntity("instructor");
+              setSelectedGroupId(null);
+              setMainTab("instructor");
               setRoleView("instructor");
+              setInstructorWorkspaceTab("schedule");
               setShowIntroPage(false);
             }}
             onOpenStudent={(id) => {
               setSelectedStudentId(id);
-              setMainTab("overview");
-              setOverviewEntity("student");
+              setSelectedGroupId(null);
+              setMainTab("student");
               setRoleView("student");
+              setStudentScheduleInputTab("sync");
               setShowIntroPage(false);
             }}
           />
