@@ -1,6 +1,6 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
-import { getBearerIdToken, loadFirebaseRoster, type FirebaseInstructorRosterItem, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
+import { getBearerIdToken, loadFirebaseRoster, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
 import { NextResponse } from "next/server";
 
 function normalizeName(value: string): string {
@@ -32,22 +32,12 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
     return { available: false, error: roster.studentError ?? roster.error };
   }
 
-  const [{ data: existingInstructors, error: instructorReadError }, { data: existingStudents, error: studentReadError }] =
-    await Promise.all([
-      supabase.from("instructors").select("id,instructor_name,is_active,firebase_instructor_id,firebase_uid"),
-      supabase.from("students").select("id,student_name,is_active,firebase_student_id,firebase_uid")
-    ]);
+  const { data: existingStudents, error: studentReadError } = await supabase
+    .from("students")
+    .select("id,student_name,is_active,firebase_student_id,firebase_uid");
 
-  if (instructorReadError) throw instructorReadError;
   if (studentReadError) throw studentReadError;
 
-  type ExistingInstructor = {
-    id: string;
-    instructor_name: string;
-    is_active: boolean | null;
-    firebase_instructor_id?: string | null;
-    firebase_uid?: string | null;
-  };
   type ExistingStudent = {
     id: string;
     student_name: string;
@@ -56,28 +46,15 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
     firebase_uid?: string | null;
   };
 
-  const instructorRows = ((existingInstructors ?? []) as ExistingInstructor[]);
   const studentRows = ((existingStudents ?? []) as ExistingStudent[]);
-  const instructorsById = new Map(instructorRows.map((row) => [row.id, row]));
   const studentsById = new Map(studentRows.map((row) => [row.id, row]));
-  const instructorsByFirebaseId = new Map(instructorRows.filter((row) => row.firebase_instructor_id).map((row) => [row.firebase_instructor_id as string, row]));
   const studentsByFirebaseId = new Map(studentRows.filter((row) => row.firebase_student_id).map((row) => [row.firebase_student_id as string, row]));
-  const instructorsByName = buildUniqueNameMap(instructorRows, (row) => row.instructor_name);
   const studentsByName = buildUniqueNameMap(studentRows, (row) => row.student_name);
   const syncedAt = new Date().toISOString();
 
-  let teachersInserted = 0;
-  let teachersUpdated = 0;
   let studentsInserted = 0;
   let studentsUpdated = 0;
-
-  const resolveInstructor = (item: FirebaseInstructorRosterItem) =>
-    (item.supabaseInstructorId ? instructorsById.get(item.supabaseInstructorId) : undefined) ??
-    instructorsById.get(item.instructorId) ??
-    instructorsById.get(item.id) ??
-    instructorsByFirebaseId.get(item.instructorId) ??
-    instructorsByFirebaseId.get(item.id) ??
-    instructorsByName.get(normalizeMatchKey(item.name));
+  let studentsNeedsReview = 0;
 
   const resolveStudent = (item: FirebaseStudentRosterItem) => {
     const identityIds = Array.from(new Set([
@@ -91,31 +68,8 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
       const existing = studentsById.get(identityId) ?? studentsByFirebaseId.get(identityId);
       if (existing) return existing;
     }
-    return studentsByName.get(normalizeMatchKey(item.name));
+    return undefined;
   };
-
-  for (const item of roster.instructors) {
-    const existing = resolveInstructor(item);
-    const firebaseInstructorId = item.instructorId || item.id;
-    const payload = {
-      instructor_name: item.name,
-      is_active: item.active,
-      firebase_instructor_id: firebaseInstructorId,
-      firebase_uid: item.firebaseUid || null,
-      firebase_match_key: normalizeMatchKey(item.name),
-      firebase_sync_status: "matched",
-      firebase_synced_at: syncedAt
-    };
-    if (existing) {
-      const { error } = await supabase.from("instructors").update(payload).eq("id", existing.id);
-      if (error) throw error;
-      teachersUpdated += 1;
-    } else {
-      const { error } = await supabase.from("instructors").insert(payload);
-      if (error) throw error;
-      teachersInserted += 1;
-    }
-  }
 
   for (const item of roster.students) {
     const existing = resolveStudent(item);
@@ -134,6 +88,10 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
       if (error) throw error;
       studentsUpdated += 1;
     } else {
+      if (studentsByName.has(normalizeMatchKey(item.name))) {
+        studentsNeedsReview += 1;
+        continue;
+      }
       const preferredId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(firebaseStudentId)
         ? firebaseStudentId
         : undefined;
@@ -146,16 +104,18 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
   return {
     available: true,
     studentsAvailable: roster.studentsAvailable,
-    instructorsAvailable: roster.instructorsAvailable,
-    warning: roster.instructorsAvailable
-      ? undefined
-      : `학생 명단은 동기화했지만 강사 명단은 권한상 기존 Synchro-S 값을 유지했습니다. (${roster.instructorError ?? "원인 미상"})`,
-    teachersFetched: roster.instructors.length,
+    instructorSource: "supabase-account-projection",
+    warning:
+      studentsNeedsReview > 0
+        ? `동명이인 또는 기존 ID 연결이 없는 학생 ${studentsNeedsReview}명은 자동 연결하지 않았습니다. 계정 관리에서 대표 ID를 확인해 주세요.`
+        : undefined,
+    teachersFetched: 0,
     studentsFetched: roster.students.length,
-    teachersInserted,
-    teachersUpdated,
+    teachersInserted: 0,
+    teachersUpdated: 0,
     studentsInserted,
-    studentsUpdated
+    studentsUpdated,
+    studentsNeedsReview
   };
 }
 

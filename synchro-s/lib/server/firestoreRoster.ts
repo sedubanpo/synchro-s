@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 type FirestoreValue =
   | { stringValue: string }
   | { integerValue: string }
@@ -33,32 +35,22 @@ export type FirebaseStudentRosterItem = {
   firebaseUid?: string;
 };
 
-export type FirebaseInstructorRosterItem = {
-  id: string;
-  instructorId: string;
-  name: string;
-  subject: string;
-  status: string;
-  active: boolean;
-  supabaseInstructorId?: string;
-  firebaseUid?: string;
-};
-
 export type FirebaseRoster = {
   available: boolean;
   studentsAvailable: boolean;
-  instructorsAvailable: boolean;
   students: FirebaseStudentRosterItem[];
-  instructors: FirebaseInstructorRosterItem[];
   studentError?: string;
-  instructorError?: string;
   error?: string;
 };
 
 const DEFAULT_FIREBASE_PROJECT_ID = "fir-lms-prod";
 const CACHE_TTL_MS = 60 * 1000;
 
-let rosterCache: { value: FirebaseRoster; expiresAt: number } | null = null;
+const rosterCache = new Map<string, { value: FirebaseRoster; expiresAt: number }>();
+
+function rosterCacheKey(idToken: string): string {
+  return createHash("sha256").update(idToken).digest("hex");
+}
 
 function firebaseProjectId(): string {
   return process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
@@ -186,76 +178,47 @@ function normalizeStudent(id: string, data: Record<string, unknown>): FirebaseSt
   };
 }
 
-function normalizeInstructor(id: string, data: Record<string, unknown>): FirebaseInstructorRosterItem | null {
-  const name = asString(data.name) || asString(data.instructorName) || asString(data.displayName);
-  if (!name) return null;
-  const instructorId = asString(data.instructorId) || asString(data.id) || id;
-  const active = isRosterActive(data);
-  return {
-    id,
-    instructorId,
-    name,
-    subject: asString(data.subject) || asString(data.department),
-    status: normalizeStatus(data.status, active),
-    active,
-    supabaseInstructorId: asString(data.supabaseInstructorId),
-    firebaseUid: asString(data.uid) || asString(data.firebaseUid)
-  };
-}
-
 export async function loadFirebaseRoster(idToken: string | null, options?: { forceRefresh?: boolean }): Promise<FirebaseRoster> {
   if (!idToken) {
     return {
       available: false,
       studentsAvailable: false,
-      instructorsAvailable: false,
       students: [],
-      instructors: [],
       error: "missing-firebase-id-token"
     };
   }
 
   const now = Date.now();
-  if (!options?.forceRefresh && rosterCache && rosterCache.expiresAt > now) {
-    return rosterCache.value;
+  for (const [key, entry] of rosterCache.entries()) {
+    if (entry.expiresAt <= now) rosterCache.delete(key);
+  }
+  const cacheKey = rosterCacheKey(idToken);
+  const cached = rosterCache.get(cacheKey);
+  if (!options?.forceRefresh && cached && cached.expiresAt > now) {
+    return cached.value;
   }
 
-  const [studentResult, instructorResult] = await Promise.allSettled([
-    listFirestoreCollection(idToken, "students"),
-    listFirestoreCollection(idToken, "instructors")
-  ]);
-  const studentsAvailable = studentResult.status === "fulfilled";
-  const instructorsAvailable = instructorResult.status === "fulfilled";
-  const studentError =
-    studentResult.status === "rejected"
-      ? studentResult.reason instanceof Error
-        ? studentResult.reason.message
-        : "Firestore students 원장을 불러오지 못했습니다."
-      : undefined;
-  const instructorError =
-    instructorResult.status === "rejected"
-      ? instructorResult.reason instanceof Error
-        ? instructorResult.reason.message
-        : "Firestore instructors 원장을 불러오지 못했습니다."
-      : undefined;
-  const value: FirebaseRoster = {
-    available: studentsAvailable || instructorsAvailable,
-    studentsAvailable,
-    instructorsAvailable,
-    students:
-      studentResult.status === "fulfilled"
-        ? studentResult.value.map((doc) => normalizeStudent(doc.id, doc.data)).filter((item): item is FirebaseStudentRosterItem => Boolean(item))
-        : [],
-    instructors:
-      instructorResult.status === "fulfilled"
-        ? instructorResult.value
-            .map((doc) => normalizeInstructor(doc.id, doc.data))
-            .filter((item): item is FirebaseInstructorRosterItem => Boolean(item))
-        : [],
-    studentError,
-    instructorError,
-    error: !studentsAvailable && !instructorsAvailable ? [studentError, instructorError].filter(Boolean).join(" / ") : undefined
-  };
-  rosterCache = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
+  try {
+    const studentDocuments = await listFirestoreCollection(idToken, "students");
+    const value: FirebaseRoster = {
+      available: true,
+      studentsAvailable: true,
+      students: studentDocuments
+        .map((doc) => normalizeStudent(doc.id, doc.data))
+        .filter((item): item is FirebaseStudentRosterItem => Boolean(item))
+    };
+    rosterCache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
+    return value;
+  } catch (error) {
+    const studentError = error instanceof Error ? error.message : "Firestore students 원장을 불러오지 못했습니다.";
+    const value: FirebaseRoster = {
+      available: false,
+      studentsAvailable: false,
+      students: [],
+      studentError,
+      error: studentError
+    };
+    rosterCache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
+    return value;
+  }
 }

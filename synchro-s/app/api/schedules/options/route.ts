@@ -1,11 +1,7 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { getAuthenticatedProfile } from "@/lib/server/auth";
-import { getBearerIdToken, loadFirebaseRoster, type FirebaseInstructorRosterItem, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
-import { planMissingFirebaseInstructorInserts } from "@/lib/server/firebaseInstructorMirror";
-import {
-  planMissingFirebaseStudentInserts,
-  type SupabaseStudentMirrorRow
-} from "@/lib/server/firebaseStudentMirror";
+import { getBearerIdToken, loadFirebaseRoster, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
+import { type SupabaseStudentMirrorRow } from "@/lib/server/firebaseStudentMirror";
 import { NextResponse } from "next/server";
 
 const DEFAULT_SPREADSHEET_ID = "1ByPeH0bZZrZDvW_yPkCpQCIuk724_Gt7uudUj_Ue8Ho";
@@ -66,21 +62,6 @@ function normalizeName(value: string): string {
 
 function normalizeNameToken(value: string): string {
   return normalizeName(value).replace(/\s+/g, "").toLowerCase();
-}
-
-function buildUniqueTokenMap<T>(items: T[], getName: (item: T) => string): Map<string, T> {
-  const counts = new Map<string, number>();
-  const first = new Map<string, T>();
-  for (const item of items) {
-    const token = normalizeNameToken(getName(item));
-    if (!token) continue;
-    counts.set(token, (counts.get(token) ?? 0) + 1);
-    if (!first.has(token)) first.set(token, item);
-  }
-  for (const [token, count] of counts.entries()) {
-    if (count > 1) first.delete(token);
-  }
-  return first;
 }
 
 function findColumnIndex(headers: string[], candidates: string[]): number {
@@ -429,18 +410,7 @@ export async function GET(req: Request) {
         502
       );
     }
-    const firebaseInstructorById = new Map<string, FirebaseInstructorRosterItem>();
     const firebaseStudentById = new Map<string, FirebaseStudentRosterItem>();
-    const firebaseInstructorByName = buildUniqueTokenMap(firebaseRoster.instructors, (item) => item.name);
-    const firebaseStudentByName = buildUniqueTokenMap(firebaseRoster.students, (item) => item.name);
-
-    if (firebaseRoster.instructorsAvailable) {
-      for (const instructor of firebaseRoster.instructors) {
-        for (const key of [instructor.id, instructor.instructorId, instructor.supabaseInstructorId].filter(Boolean) as string[]) {
-          firebaseInstructorById.set(key, instructor);
-        }
-      }
-    }
     if (firebaseRoster.studentsAvailable) {
       for (const student of firebaseRoster.students) {
         for (const key of [
@@ -456,16 +426,10 @@ export async function GET(req: Request) {
       }
     }
 
-    const resolveFirebaseInstructor = (row: InstructorRow) =>
-      firebaseInstructorById.get(row.id) ??
-      (row.firebase_instructor_id ? firebaseInstructorById.get(row.firebase_instructor_id) : undefined) ??
-      (row.firebase_uid ? firebaseInstructorById.get(row.firebase_uid) : undefined) ??
-      firebaseInstructorByName.get(normalizeNameToken(row.instructor_name));
     const resolveFirebaseStudent = (row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) =>
       firebaseStudentById.get(row.id) ??
       (row.firebase_student_id ? firebaseStudentById.get(row.firebase_student_id) : undefined) ??
-      (row.firebase_uid ? firebaseStudentById.get(row.firebase_uid) : undefined) ??
-      firebaseStudentByName.get(normalizeNameToken(row.student_name));
+      (row.firebase_uid ? firebaseStudentById.get(row.firebase_uid) : undefined);
 
     let instructors: {
       id: string;
@@ -496,73 +460,22 @@ export async function GET(req: Request) {
       if (instructorRes.error) throw instructorRes.error;
       if (initialStudentRes.error) throw initialStudentRes.error;
 
-      let instructorRows = instructorRes.data ?? [];
-      let studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
-      const studentIdsToReactivate = new Set<string>();
-      if (firebaseRoster.studentsAvailable) {
-        studentRows.forEach((row) => {
-          if (row.is_active === false && resolveFirebaseStudent(row)?.active) {
-            studentIdsToReactivate.add(row.id);
-          }
-        });
-      }
-      if (firebaseRoster.available) {
-        const missingInstructors = firebaseRoster.instructorsAvailable
-          ? planMissingFirebaseInstructorInserts(instructorRows, firebaseRoster.instructors)
-          : [];
-        const missingStudents = firebaseRoster.studentsAvailable
-          ? planMissingFirebaseStudentInserts(studentRows, firebaseRoster.students)
-          : [];
-        if (missingInstructors.length > 0 || missingStudents.length > 0 || studentIdsToReactivate.size > 0) {
-          const [instructorMirrorResults, studentMirrorResults, studentReactivationResults] = await Promise.all([
-            Promise.all(missingInstructors.map((instructor) => supabase.from("instructors").insert(instructor))),
-            Promise.all(missingStudents.map((student) => supabase.from("students").insert(student))),
-            Promise.all([...studentIdsToReactivate].map((studentId) => supabase.from("students").update({ is_active: true }).eq("id", studentId)))
-          ]);
-          const mirrorInsertError = [...instructorMirrorResults, ...studentMirrorResults, ...studentReactivationResults].find(
-            (result) => result.error && result.error.code !== "23505"
-          )?.error;
-          if (mirrorInsertError) throw mirrorInsertError;
-
-          const [refreshedInstructorResult, refreshedStudentResult] = await Promise.all([
-            selectInstructorRows(supabase, false),
-            supabase.from("students").select("id,student_name,is_active,firebase_student_id,firebase_uid").order("student_name")
-          ]);
-          if (refreshedInstructorResult.error) throw refreshedInstructorResult.error;
-          const { data: refreshedStudents, error: refreshedStudentsError } = refreshedStudentResult;
-          if (refreshedStudentsError) throw refreshedStudentsError;
-          instructorRows = (refreshedInstructorResult.data ?? []).sort((a, b) =>
-            a.instructor_name.localeCompare(b.instructor_name, "ko")
-          );
-          studentRows = (refreshedStudents ?? []) as SupabaseStudentMirrorRow[];
-        }
-      } else if (studentIdsToReactivate.size > 0) {
-        const studentReactivationResults = await Promise.all(
-          [...studentIdsToReactivate].map((studentId) => supabase.from("students").update({ is_active: true }).eq("id", studentId))
-        );
-        const reactivationError = studentReactivationResults.find((result) => result.error)?.error;
-        if (reactivationError) throw reactivationError;
-        studentRows = studentRows.map((row) => (studentIdsToReactivate.has(row.id) ? { ...row, is_active: true } : row));
-      }
+      const instructorRows = instructorRes.data ?? [];
+      const studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
 
       const toInstructorOption = (row: InstructorRow, isActive: boolean) => {
         const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(row.available_time_slots_by_day);
-        const firebaseInstructor = firebaseRoster.instructorsAvailable ? resolveFirebaseInstructor(row) : undefined;
         return {
           id: row.id,
-          name: firebaseInstructor?.name || row.instructor_name,
-          secondary: firebaseInstructor?.subject || teacherSubjectByName.get(normalizeName(row.instructor_name)),
+          name: row.instructor_name,
+          secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
           isActive,
           daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7),
           availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, row.available_time_slots),
           availableTimeSlotsByDay
         };
       };
-      const isInstructorRosterActive = (row: InstructorRow) => {
-        const firebaseInstructor = firebaseRoster.instructorsAvailable ? resolveFirebaseInstructor(row) : undefined;
-        if (firebaseInstructor) return firebaseInstructor.active;
-        return row.is_active !== false;
-      };
+      const isInstructorRosterActive = (row: InstructorRow) => row.is_active !== false;
       instructors = instructorRows
         .filter(isInstructorRosterActive)
         .map((row: InstructorRow) => toInstructorOption(row, true));
