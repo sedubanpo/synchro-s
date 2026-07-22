@@ -28,7 +28,7 @@ import type {
   TimetableViewMode,
   Weekday
 } from "@/types/schedule";
-import { getIdToken, onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
+import { getIdToken } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -158,28 +158,14 @@ function isSyncDraftEventId(id: string): boolean {
   return id.startsWith(SYNC_DRAFT_EVENT_ID_PREFIX);
 }
 
-async function getFirebaseIdTokenForApi(): Promise<string | null> {
+async function getFirebaseIdTokenForApi(forceRefresh = false): Promise<string | null> {
   const auth = getSynchroFirebaseAuth();
-  const user =
-    auth.currentUser ??
-    (await new Promise<FirebaseUser | null>((resolve) => {
-      let unsubscribe = () => {};
-      const timer = window.setTimeout(() => {
-        unsubscribe();
-        resolve(null);
-      }, 1200);
-      unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-        window.clearTimeout(timer);
-        unsubscribe();
-        resolve(nextUser);
-      });
-    }));
-
-  return user ? getIdToken(user) : null;
+  await auth.authStateReady();
+  return auth.currentUser ? getIdToken(auth.currentUser, forceRefresh) : null;
 }
 
-async function getFirebaseAuthHeaders(extra?: HeadersInit): Promise<HeadersInit> {
-  const token = await getFirebaseIdTokenForApi();
+async function getFirebaseAuthHeaders(extra?: HeadersInit, forceRefresh = false): Promise<HeadersInit> {
+  const token = await getFirebaseIdTokenForApi(forceRefresh);
   return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
 }
 
@@ -2917,7 +2903,11 @@ export default function SynchroSPage() {
     }
     const queryString = query.toString();
     const url = queryString ? `/api/schedules/options?${queryString}` : "/api/schedules/options";
-    const res = await fetch(url, { method: "GET", cache: "no-store", headers: await getFirebaseAuthHeaders() });
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: await getFirebaseAuthHeaders(undefined, Boolean(opts?.refreshSheets))
+    });
 
     if (res.status === 401) {
       moveToLogin();
@@ -6066,7 +6056,7 @@ export default function SynchroSPage() {
     try {
       const res = await fetch("/api/sheets/sync", {
         method: "POST",
-        headers: await getFirebaseAuthHeaders({ "Content-Type": "application/json" }),
+        headers: await getFirebaseAuthHeaders({ "Content-Type": "application/json" }, true),
         body: JSON.stringify({})
       });
 

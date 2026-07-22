@@ -4,7 +4,6 @@ import { getBearerIdToken, loadFirebaseRoster, type FirebaseInstructorRosterItem
 import { planMissingFirebaseInstructorInserts } from "@/lib/server/firebaseInstructorMirror";
 import {
   planMissingFirebaseStudentInserts,
-  planRegisteredStudentReactivationIds,
   type SupabaseStudentMirrorRow
 } from "@/lib/server/firebaseStudentMirror";
 import { NextResponse } from "next/server";
@@ -21,43 +20,6 @@ type InstructorRow = {
   firebase_instructor_id?: string | null;
   firebase_uid?: string | null;
 };
-
-function parseChecked(raw: string): boolean {
-  const v = raw.trim().toLowerCase();
-  if (
-    !v ||
-    v === "false" ||
-    v === "0" ||
-    v === "n" ||
-    v === "no" ||
-    v === "unchecked" ||
-    v === "☐" ||
-    v === "미등록" ||
-    v === "퇴원" ||
-    v === "퇴사" ||
-    v === "휴직" ||
-    v === "중지" ||
-    v === "비활성"
-  ) {
-    return false;
-  }
-  return (
-    v === "true" ||
-    v === "1" ||
-    v === "y" ||
-    v === "yes" ||
-    v === "✓" ||
-    v === "☑" ||
-    v === "✅" ||
-    v === "v" ||
-    v === "checked" ||
-    v === "등록" ||
-    v === "재원" ||
-    v === "수강" ||
-    v === "재직" ||
-    v === "활성"
-  );
-}
 
 function parseCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -341,11 +303,7 @@ async function selectSingleInstructorWithFallback(runQuery: (selectClause: strin
 
 type SheetMetaMap = {
   teacherSubjectByName: Map<string, string>;
-  activeTeacherNames: Set<string>;
-  teacherActiveColumnFound: boolean;
   studentSchoolByName: Map<string, string>;
-  activeStudentNames: Set<string>;
-  studentSheetLoaded: boolean;
 };
 
 const SHEET_META_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -353,11 +311,7 @@ const sheetMetaCache = new Map<string, { value?: SheetMetaMap; expiresAt: number
 
 async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
   const teacherSubjectByName = new Map<string, string>();
-  const activeTeacherNames = new Set<string>();
-  let teacherActiveColumnFound = false;
   const studentSchoolByName = new Map<string, string>();
-  const activeStudentNames = new Set<string>();
-  let studentSheetLoaded = false;
 
   try {
     const teachersCsv = await fetchSheetCsv(spreadsheetId, "Teachers");
@@ -366,8 +320,6 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
       const headers = teacherRows[0];
       const nameIdx = findColumnIndex(headers, ["선생님성함", "강사명", "teacher", "name"]);
       const subjectIdx = findColumnIndex(headers, ["과목", "subject"]);
-      const activeIdx = findColumnIndex(headers, ["재직", "재직상태", "is_active", "active"]);
-      teacherActiveColumnFound = activeIdx >= 0;
       const safeNameIdx = nameIdx >= 0 ? nameIdx : 1;
       for (const row of teacherRows.slice(1)) {
         const name = normalizeName(row[safeNameIdx] ?? "");
@@ -375,9 +327,6 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
         const subject = (row[subjectIdx] ?? "").trim();
         if (subject) {
           teacherSubjectByName.set(name, subject);
-        }
-        if (teacherActiveColumnFound && parseChecked((row[activeIdx] ?? "").toString())) {
-          activeTeacherNames.add(name);
         }
       }
     }
@@ -389,25 +338,17 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
     const studentsCsv = await fetchSheetCsv(spreadsheetId, "student");
     const studentRows = parseCsv(studentsCsv);
     if (studentRows.length > 0) {
-      studentSheetLoaded = true;
       const headers = studentRows[0];
       const nameIdxFound = findColumnIndex(headers, ["이름 필드", "이름", "학생명", "student", "name"]);
       const schoolIdxFound = findColumnIndex(headers, ["학교 필드", "학교", "school"]);
       const gradeIdxFound = findColumnIndex(headers, ["학년 필드", "학년", "grade"]);
-      const statusIdxFound = findColumnIndex(headers, ["등록 상태", "등록상태", "status", "active"]);
       const nameIdx = nameIdxFound >= 0 ? nameIdxFound : 0;
       const schoolIdx = schoolIdxFound >= 0 ? schoolIdxFound : 1;
       const gradeIdx = gradeIdxFound >= 0 ? gradeIdxFound : 2;
-      const statusIdx = statusIdxFound >= 0 ? statusIdxFound : 3;
 
       for (const row of studentRows.slice(1)) {
         const name = normalizeName(row[nameIdx] ?? "");
         if (!name) continue;
-
-        const statusRaw = (row[statusIdx] ?? "").toString();
-        if (parseChecked(statusRaw)) {
-          activeStudentNames.add(name);
-        }
 
         const school = (row[schoolIdx] ?? "").trim();
         const gradeRaw = (row[gradeIdx] ?? "").toString().trim().replace("@", "");
@@ -422,7 +363,7 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
     console.error("[options] student 시트 메타 로드 실패", error);
   }
 
-  return { teacherSubjectByName, activeTeacherNames, teacherActiveColumnFound, studentSchoolByName, activeStudentNames, studentSheetLoaded };
+  return { teacherSubjectByName, studentSchoolByName };
 }
 
 async function loadSheetMetaMapCached(spreadsheetId: string, forceRefresh: boolean): Promise<SheetMetaMap> {
@@ -479,13 +420,15 @@ export async function GET(req: Request) {
     const spreadsheetId = process.env.GOOGLE_SHEETS_SYNC_ID || DEFAULT_SPREADSHEET_ID;
     const {
       teacherSubjectByName,
-      activeTeacherNames,
-      teacherActiveColumnFound,
-      studentSchoolByName,
-      activeStudentNames,
-      studentSheetLoaded
+      studentSchoolByName
     } = await loadSheetMetaMapCached(spreadsheetId, forceSheetRefresh);
     const firebaseRoster = await loadFirebaseRoster(getBearerIdToken(req), { forceRefresh: forceSheetRefresh });
+    if (forceSheetRefresh && (profile.role === "admin" || profile.role === "coordinator") && !firebaseRoster.available) {
+      return jsonError(
+        `Firebase 명단을 새로고침하지 못했습니다. 기존 Synchro-S 명단은 유지되었습니다. (${firebaseRoster.error ?? "원인 미상"})`,
+        502
+      );
+    }
     const firebaseInstructorById = new Map<string, FirebaseInstructorRosterItem>();
     const firebaseStudentById = new Map<string, FirebaseStudentRosterItem>();
     const firebaseInstructorByName = buildUniqueTokenMap(firebaseRoster.instructors, (item) => item.name);
@@ -553,9 +496,7 @@ export async function GET(req: Request) {
 
       let instructorRows = instructorRes.data ?? [];
       let studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
-      const studentIdsToReactivate = new Set(
-        studentSheetLoaded ? planRegisteredStudentReactivationIds(studentRows, activeStudentNames) : []
-      );
+      const studentIdsToReactivate = new Set<string>();
       if (firebaseRoster.available) {
         studentRows.forEach((row) => {
           if (row.is_active === false && resolveFirebaseStudent(row)?.active) {
@@ -614,9 +555,7 @@ export async function GET(req: Request) {
       const isInstructorRosterActive = (row: InstructorRow) => {
         const firebaseInstructor = firebaseRoster.available ? resolveFirebaseInstructor(row) : undefined;
         if (firebaseInstructor) return firebaseInstructor.active;
-        if (row.is_active === false) return false;
-        if (teacherActiveColumnFound) return activeTeacherNames.has(normalizeName(row.instructor_name));
-        return true;
+        return row.is_active !== false;
       };
       instructors = instructorRows
         .filter(isInstructorRosterActive)
@@ -628,8 +567,6 @@ export async function GET(req: Request) {
       const isStudentRosterActive = (row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
         const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
         if (firebaseStudent) return firebaseStudent.active;
-        const normalized = normalizeName(row.student_name);
-        if (studentSheetLoaded) return activeStudentNames.has(normalized);
         return row.is_active !== false;
       };
       students = studentRows
@@ -705,18 +642,17 @@ export async function GET(req: Request) {
         if (studentIds.length > 0) {
           const { data: studentRows, error: studentRowsError } = await supabase
             .from("students")
-            .select("id,student_name,firebase_student_id,firebase_uid")
+            .select("id,student_name,is_active,firebase_student_id,firebase_uid")
             .in("id", studentIds)
             .order("student_name");
 
           if (studentRowsError) throw studentRowsError;
 
           students = (studentRows ?? [])
-            .filter((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
+            .filter((row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
               const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
               if (firebaseStudent) return firebaseStudent.active;
-              const normalized = normalizeName(row.student_name);
-              return studentSheetLoaded ? activeStudentNames.has(normalized) : true;
+              return row.is_active !== false;
             })
             .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
               const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
@@ -731,7 +667,7 @@ export async function GET(req: Request) {
     } else {
       const { data: ownStudent, error: ownStudentError } = await supabase
         .from("students")
-        .select("id,student_name,default_instructor_id,firebase_student_id,firebase_uid")
+        .select("id,student_name,default_instructor_id,is_active,firebase_student_id,firebase_uid")
         .eq(profileStudentId ? "id" : "user_id", profileStudentId || user.id)
         .single();
 
@@ -741,7 +677,7 @@ export async function GET(req: Request) {
 
       const ownStudentName = normalizeName(ownStudent.student_name);
       const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(ownStudent) : undefined;
-      const ownStudentActive = firebaseStudent ? firebaseStudent.active : activeStudentNames.size === 0 || activeStudentNames.has(ownStudentName);
+      const ownStudentActive = firebaseStudent ? firebaseStudent.active : ownStudent.is_active !== false;
       if (ownStudentActive) {
         students = [
           {
