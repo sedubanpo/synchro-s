@@ -6072,6 +6072,7 @@ export default function SynchroSPage() {
         teachersUpdated?: number;
         studentsInserted?: number;
         studentsUpdated?: number;
+        warning?: string;
       };
 
       if (!res.ok) {
@@ -6079,10 +6080,11 @@ export default function SynchroSPage() {
       }
 
       const sourceLabel = payload.source === "firebase" ? "Firebase 명단" : "시트";
+      const warningSuffix = payload.warning ? ` · ${payload.warning}` : "";
       setNotice(
         `${sourceLabel} 동기화 완료: 강사 ${payload.teachersInserted ?? 0}명 추가, ${payload.teachersUpdated ?? 0}명 갱신 / 학생 ${
           payload.studentsInserted ?? 0
-        }명 추가, ${payload.studentsUpdated ?? 0}명 갱신`
+        }명 추가, ${payload.studentsUpdated ?? 0}명 갱신${warningSuffix}`
       );
       await loadOptions({ refreshSheets: true });
     } catch (syncError) {

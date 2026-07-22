@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { planMissingFirebaseStudentInserts } from "../lib/server/firebaseStudentMirror";
-import type { FirebaseStudentRosterItem } from "../lib/server/firestoreRoster";
+import { loadFirebaseRoster, type FirebaseStudentRosterItem } from "../lib/server/firestoreRoster";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -41,6 +41,48 @@ const alreadyMirrored = planMissingFirebaseStudentInserts(
 );
 assert.equal(alreadyMirrored.length, 0, "An already mirrored Firebase student must not be duplicated.");
 
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  if (url.includes("/documents/students")) {
+    return new Response(
+      JSON.stringify({
+        documents: [
+          {
+            name: `projects/fir-lms-prod/databases/(default)/documents/students/${studentId}`,
+            fields: {
+              studentId: { stringValue: studentId },
+              canonicalStudentId: { stringValue: studentId },
+              studentIdAliases: { arrayValue: { values: [{ stringValue: studentId }] } },
+              name: { stringValue: "하지민" },
+              school: { stringValue: "세화여고" },
+              grade: { stringValue: "2" },
+              status: { stringValue: "ACTIVE" },
+              active: { booleanValue: true }
+            }
+          }
+        ]
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  if (url.includes("/documents/instructors")) {
+    return new Response("permission denied", { status: 403 });
+  }
+  throw new Error(`Unexpected Firestore URL: ${url}`);
+};
+
+try {
+  const partialRoster = await loadFirebaseRoster("student-readable-token", { forceRefresh: true });
+  assert.equal(partialRoster.available, true, "One readable Firebase collection must keep the roster usable.");
+  assert.equal(partialRoster.studentsAvailable, true, "Students must remain available when instructors return 403.");
+  assert.equal(partialRoster.instructorsAvailable, false, "Instructor permission failure must be isolated.");
+  assert.equal(partialRoster.students[0]?.secondary, "세화여고 · 2학년", "Student details must survive an instructor 403.");
+  assert.match(partialRoster.instructorError ?? "", /403/, "The isolated instructor error must remain actionable.");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 const syncRoute = fs.readFileSync(path.join(repoRoot, "app/api/sheets/sync/route.ts"), "utf8");
 assert.match(syncRoute, /loadFirebaseRoster\(idToken, \{ forceRefresh: true \}\)/, "Manual roster sync must bypass stale roster cache.");
 assert.doesNotMatch(syncRoute, /docs\.google\.com|source:\s*["']sheets["']/, "Manual roster sync must not silently fall back to Sheets.");
@@ -54,9 +96,11 @@ assert.doesNotMatch(
 );
 assert.match(
   optionsRoute,
-  /Firebase 명단을 새로고침하지 못했습니다/,
+  /Firebase 학생 명단을 새로고침하지 못했습니다/,
   "A failed canonical roster refresh must return a truthful error."
 );
+assert.match(optionsRoute, /firebaseRoster\.studentsAvailable/, "Student roster behavior must not depend on instructor permissions.");
+assert.match(syncRoute, /강사 명단은 권한상 기존 Synchro-S 값을 유지했습니다/, "Partial sync must explain preserved instructor data.");
 
 const pageSource = fs.readFileSync(path.join(repoRoot, "app/synchro-s/page.tsx"), "utf8");
 assert.match(pageSource, /await auth\.authStateReady\(\)/, "Client requests must wait for Firebase auth restoration.");
@@ -66,4 +110,4 @@ assert.match(
   "Manual roster sync must refresh the Firebase ID token."
 );
 
-console.log("Firebase roster sync verification passed: canonical insert, duplicate guard, fresh roster, no silent Sheets fallback.");
+console.log("Firebase roster sync verification passed: partial permissions, student details, canonical insert, and no silent Sheets fallback.");

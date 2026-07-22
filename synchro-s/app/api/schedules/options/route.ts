@@ -423,9 +423,9 @@ export async function GET(req: Request) {
       studentSchoolByName
     } = await loadSheetMetaMapCached(spreadsheetId, forceSheetRefresh);
     const firebaseRoster = await loadFirebaseRoster(getBearerIdToken(req), { forceRefresh: forceSheetRefresh });
-    if (forceSheetRefresh && (profile.role === "admin" || profile.role === "coordinator") && !firebaseRoster.available) {
+    if (forceSheetRefresh && (profile.role === "admin" || profile.role === "coordinator") && !firebaseRoster.studentsAvailable) {
       return jsonError(
-        `Firebase 명단을 새로고침하지 못했습니다. 기존 Synchro-S 명단은 유지되었습니다. (${firebaseRoster.error ?? "원인 미상"})`,
+        `Firebase 학생 명단을 새로고침하지 못했습니다. 기존 Synchro-S 학생 명단은 유지되었습니다. (${firebaseRoster.studentError ?? firebaseRoster.error ?? "원인 미상"})`,
         502
       );
     }
@@ -434,12 +434,14 @@ export async function GET(req: Request) {
     const firebaseInstructorByName = buildUniqueTokenMap(firebaseRoster.instructors, (item) => item.name);
     const firebaseStudentByName = buildUniqueTokenMap(firebaseRoster.students, (item) => item.name);
 
-    if (firebaseRoster.available) {
+    if (firebaseRoster.instructorsAvailable) {
       for (const instructor of firebaseRoster.instructors) {
         for (const key of [instructor.id, instructor.instructorId, instructor.supabaseInstructorId].filter(Boolean) as string[]) {
           firebaseInstructorById.set(key, instructor);
         }
       }
+    }
+    if (firebaseRoster.studentsAvailable) {
       for (const student of firebaseRoster.students) {
         for (const key of [
           student.id,
@@ -497,7 +499,7 @@ export async function GET(req: Request) {
       let instructorRows = instructorRes.data ?? [];
       let studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
       const studentIdsToReactivate = new Set<string>();
-      if (firebaseRoster.available) {
+      if (firebaseRoster.studentsAvailable) {
         studentRows.forEach((row) => {
           if (row.is_active === false && resolveFirebaseStudent(row)?.active) {
             studentIdsToReactivate.add(row.id);
@@ -505,8 +507,12 @@ export async function GET(req: Request) {
         });
       }
       if (firebaseRoster.available) {
-        const missingInstructors = planMissingFirebaseInstructorInserts(instructorRows, firebaseRoster.instructors);
-        const missingStudents = planMissingFirebaseStudentInserts(studentRows, firebaseRoster.students);
+        const missingInstructors = firebaseRoster.instructorsAvailable
+          ? planMissingFirebaseInstructorInserts(instructorRows, firebaseRoster.instructors)
+          : [];
+        const missingStudents = firebaseRoster.studentsAvailable
+          ? planMissingFirebaseStudentInserts(studentRows, firebaseRoster.students)
+          : [];
         if (missingInstructors.length > 0 || missingStudents.length > 0 || studentIdsToReactivate.size > 0) {
           const [instructorMirrorResults, studentMirrorResults, studentReactivationResults] = await Promise.all([
             Promise.all(missingInstructors.map((instructor) => supabase.from("instructors").insert(instructor))),
@@ -541,7 +547,7 @@ export async function GET(req: Request) {
 
       const toInstructorOption = (row: InstructorRow, isActive: boolean) => {
         const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(row.available_time_slots_by_day);
-        const firebaseInstructor = firebaseRoster.available ? resolveFirebaseInstructor(row) : undefined;
+        const firebaseInstructor = firebaseRoster.instructorsAvailable ? resolveFirebaseInstructor(row) : undefined;
         return {
           id: row.id,
           name: firebaseInstructor?.name || row.instructor_name,
@@ -553,7 +559,7 @@ export async function GET(req: Request) {
         };
       };
       const isInstructorRosterActive = (row: InstructorRow) => {
-        const firebaseInstructor = firebaseRoster.available ? resolveFirebaseInstructor(row) : undefined;
+        const firebaseInstructor = firebaseRoster.instructorsAvailable ? resolveFirebaseInstructor(row) : undefined;
         if (firebaseInstructor) return firebaseInstructor.active;
         return row.is_active !== false;
       };
@@ -565,14 +571,14 @@ export async function GET(req: Request) {
         .map((row: InstructorRow) => toInstructorOption(row, false));
 
       const isStudentRosterActive = (row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
-        const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+        const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(row) : undefined;
         if (firebaseStudent) return firebaseStudent.active;
         return row.is_active !== false;
       };
       students = studentRows
         .filter(isStudentRosterActive)
         .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
-          const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+          const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(row) : undefined;
           return {
           id: row.id,
           name: firebaseStudent?.name || row.student_name,
@@ -583,7 +589,7 @@ export async function GET(req: Request) {
       suspendedStudents = studentRows
         .filter((row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => !isStudentRosterActive(row))
         .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
-          const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+          const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(row) : undefined;
           return {
           id: row.id,
           name: firebaseStudent?.name || row.student_name,
@@ -650,12 +656,12 @@ export async function GET(req: Request) {
 
           students = (studentRows ?? [])
             .filter((row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
-              const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+              const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(row) : undefined;
               if (firebaseStudent) return firebaseStudent.active;
               return row.is_active !== false;
             })
             .map((row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
-              const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(row) : undefined;
+              const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(row) : undefined;
               return {
               id: row.id,
               name: firebaseStudent?.name || row.student_name,
@@ -676,7 +682,7 @@ export async function GET(req: Request) {
       }
 
       const ownStudentName = normalizeName(ownStudent.student_name);
-      const firebaseStudent = firebaseRoster.available ? resolveFirebaseStudent(ownStudent) : undefined;
+      const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(ownStudent) : undefined;
       const ownStudentActive = firebaseStudent ? firebaseStudent.active : ownStudent.is_active !== false;
       if (ownStudentActive) {
         students = [

@@ -28,8 +28,8 @@ function buildUniqueNameMap<T>(rows: T[], getName: (row: T) => string): Map<stri
 
 async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
   const roster = await loadFirebaseRoster(idToken, { forceRefresh: true });
-  if (!roster.available) {
-    return { available: false, error: roster.error };
+  if (!roster.studentsAvailable) {
+    return { available: false, error: roster.studentError ?? roster.error };
   }
 
   const [{ data: existingInstructors, error: instructorReadError }, { data: existingStudents, error: studentReadError }] =
@@ -145,6 +145,11 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
 
   return {
     available: true,
+    studentsAvailable: roster.studentsAvailable,
+    instructorsAvailable: roster.instructorsAvailable,
+    warning: roster.instructorsAvailable
+      ? undefined
+      : `학생 명단은 동기화했지만 강사 명단은 권한상 기존 Synchro-S 값을 유지했습니다. (${roster.instructorError ?? "원인 미상"})`,
     teachersFetched: roster.instructors.length,
     studentsFetched: roster.students.length,
     teachersInserted,
