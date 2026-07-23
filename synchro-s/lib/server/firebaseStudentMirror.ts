@@ -20,7 +20,11 @@ export type FirebaseStudentPayload = {
 };
 
 export type FirebaseStudentSyncPlan = {
-  updates: Array<{ id: string; payload: Omit<FirebaseStudentPayload, "id"> }>;
+  updates: Array<{
+    id: string;
+    payload: Omit<FirebaseStudentPayload, "id">;
+    identityChanged: boolean;
+  }>;
   inserts: FirebaseStudentPayload[];
   needsReview: number;
   duplicateRosterEntries: number;
@@ -191,7 +195,8 @@ export function planFirebaseStudentSync(
   const { students, duplicateCount } = deduplicateFirebaseStudents(firebaseStudents, existingByFirebaseId);
   const uniqueFirebaseNameKeys = buildUniqueFirebaseNameKeys(students);
 
-  const updates: FirebaseStudentSyncPlan["updates"] = [];
+  const updatesByTargetId = new Map<string, FirebaseStudentSyncPlan["updates"][number]>();
+  const blockedTargetIds = new Set<string>();
   const inserts: FirebaseStudentSyncPlan["inserts"] = [];
   let needsReview = 0;
   let identityConflictsResolved = 0;
@@ -238,7 +243,34 @@ export function planFirebaseStudentSync(
     };
 
     if (existing) {
-      updates.push({ id: existing.id, payload });
+      if (blockedTargetIds.has(existing.id)) {
+        needsReview += 1;
+        continue;
+      }
+
+      const plannedUpdate = {
+        id: existing.id,
+        payload,
+        identityChanged: existing.firebase_student_id !== canonicalId
+      };
+      const previousUpdate = updatesByTargetId.get(existing.id);
+      if (previousUpdate && previousUpdate.payload.firebase_student_id !== canonicalId) {
+        const currentIdentity = existing.firebase_student_id;
+        if (currentIdentity === canonicalId) {
+          updatesByTargetId.set(existing.id, plannedUpdate);
+          needsReview += 1;
+        } else if (currentIdentity === previousUpdate.payload.firebase_student_id) {
+          needsReview += 1;
+        } else {
+          updatesByTargetId.delete(existing.id);
+          blockedTargetIds.add(existing.id);
+          needsReview += 2;
+        }
+        identityConflictsResolved += 1;
+        continue;
+      }
+
+      updatesByTargetId.set(existing.id, plannedUpdate);
       existingByFirebaseId.set(canonicalId, existing);
       continue;
     }
@@ -254,7 +286,7 @@ export function planFirebaseStudentSync(
   }
 
   return {
-    updates,
+    updates: [...updatesByTargetId.values()],
     inserts,
     needsReview,
     duplicateRosterEntries: duplicateCount,

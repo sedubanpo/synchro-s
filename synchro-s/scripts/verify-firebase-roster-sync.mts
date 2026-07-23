@@ -93,6 +93,7 @@ const uniqueNamePlan = planFirebaseStudentSync(
   [hongJaebeom]
 );
 assert.equal(uniqueNamePlan.updates[0]?.id, "44444444-4444-4444-8444-444444444444");
+assert.equal(uniqueNamePlan.updates[0]?.identityChanged, true);
 assert.equal(
   uniqueNamePlan.updates[0]?.payload.firebase_student_id,
   hongJaebeom.canonicalStudentId,
@@ -142,6 +143,39 @@ const ambiguousNamePlan = planFirebaseStudentSync(
 );
 assert.equal(ambiguousNamePlan.needsReview, 1, "True same-name ambiguity must still require review.");
 assert.equal(ambiguousNamePlan.updates.length, 0);
+
+const sharedLegacyRowId = "77777777-7777-4777-8777-777777777777";
+const competingTargetPlan = planFirebaseStudentSync(
+  [
+    {
+      id: sharedLegacyRowId,
+      student_name: "공유 대상",
+      is_active: true,
+      firebase_student_id: null,
+      firebase_uid: null
+    }
+  ],
+  [
+    {
+      ...hongJaebeom,
+      supabaseStudentId: sharedLegacyRowId
+    },
+    {
+      ...hajimin,
+      supabaseStudentId: sharedLegacyRowId
+    }
+  ]
+);
+assert.equal(
+  competingTargetPlan.updates.length,
+  0,
+  "Two Firebase identities must never be written onto the same unresolved Supabase row."
+);
+assert.equal(
+  competingTargetPlan.needsReview,
+  2,
+  "Every student in an unresolved target-row collision must be routed to review."
+);
 
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input) => {
@@ -228,11 +262,20 @@ assert.doesNotMatch(optionsRoute, /studentIdsToReactivate/, "Options GET must no
 assert.doesNotMatch(syncRoute, /FirebaseInstructorRosterItem|roster\.instructors/, "Manual sync must not depend on Firestore instructors.");
 assert.match(syncRoute, /studentsNeedsReview/, "Unlinked same-name students must be routed to review instead of name-matched.");
 assert.match(syncRoute, /planFirebaseStudentSync/, "Manual sync must use the collision-safe Firebase student reconciliation plan.");
-assert.match(syncRoute, /\.upsert\(updateRows, \{ onConflict: "id" \}\)/, "Roster updates must be sent as one batched upsert.");
-assert.doesNotMatch(
+assert.match(
   syncRoute,
-  /for \(const update of plan\.updates\)/,
-  "Roster updates must not issue one sequential Supabase request per student."
+  /stableUpdates\.map[\s\S]*\.upsert\(updateRows, \{ onConflict: "id" \}\)/,
+  "Identity-stable roster updates must stay batched for performance."
+);
+assert.match(
+  syncRoute,
+  /for \(const update of identityChangingUpdates\)/,
+  "Firebase ID assignments must use the collision-aware write path."
+);
+assert.match(
+  syncRoute,
+  /findStudentByFirebaseId[\s\S]*isFirebaseStudentIdConflict/,
+  "A concurrent automatic projection must be reconciled instead of surfacing a raw unique-key error."
 );
 
 const rosterSource = fs.readFileSync(path.join(repoRoot, "lib/server/firestoreRoster.ts"), "utf8");
