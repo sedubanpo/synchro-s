@@ -212,6 +212,16 @@ assert.match(
   "A failed canonical roster refresh must return a truthful error."
 );
 assert.match(optionsRoute, /firebaseRoster\.studentsAvailable/, "Student roster behavior must not depend on instructor permissions.");
+assert.match(
+  optionsRoute,
+  /firebaseStudentByUniqueName/,
+  "A unique active account name must restore school and grade details before a manual sync mutates Supabase."
+);
+assert.match(
+  optionsRoute,
+  /uniqueSupabaseStudentNameKeys/,
+  "Name fallback must be disabled for duplicate Supabase student names."
+);
 assert.doesNotMatch(optionsRoute, /planMissingFirebaseInstructorInserts/, "Options GET must not mirror an unmaintained Firestore instructor collection.");
 assert.doesNotMatch(optionsRoute, /\.from\(["'](?:students|instructors)["']\)\.insert/, "Options GET must not create identity rows as a read side effect.");
 assert.doesNotMatch(optionsRoute, /studentIdsToReactivate/, "Options GET must not reactivate roster rows as a read side effect.");

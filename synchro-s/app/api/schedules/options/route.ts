@@ -411,8 +411,15 @@ export async function GET(req: Request) {
       );
     }
     const firebaseStudentById = new Map<string, FirebaseStudentRosterItem>();
+    const firebaseStudentNameCounts = new Map<string, number>();
+    const firebaseStudentByUniqueName = new Map<string, FirebaseStudentRosterItem>();
     if (firebaseRoster.studentsAvailable) {
       for (const student of firebaseRoster.students) {
+        const nameKey = normalizeName(student.name).replace(/\s+/g, "").toLowerCase();
+        if (nameKey) {
+          firebaseStudentNameCounts.set(nameKey, (firebaseStudentNameCounts.get(nameKey) ?? 0) + 1);
+          if (!firebaseStudentByUniqueName.has(nameKey)) firebaseStudentByUniqueName.set(nameKey, student);
+        }
         for (const key of [
           student.id,
           student.studentId,
@@ -424,12 +431,19 @@ export async function GET(req: Request) {
           firebaseStudentById.set(key, student);
         }
       }
+      for (const [nameKey, count] of firebaseStudentNameCounts) {
+        if (count > 1) firebaseStudentByUniqueName.delete(nameKey);
+      }
     }
+    let uniqueSupabaseStudentNameKeys = new Set<string>();
 
     const resolveFirebaseStudent = (row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) =>
       firebaseStudentById.get(row.id) ??
       (row.firebase_student_id ? firebaseStudentById.get(row.firebase_student_id) : undefined) ??
-      (row.firebase_uid ? firebaseStudentById.get(row.firebase_uid) : undefined);
+      (row.firebase_uid ? firebaseStudentById.get(row.firebase_uid) : undefined) ??
+      (uniqueSupabaseStudentNameKeys.has(normalizeName(row.student_name).replace(/\s+/g, "").toLowerCase())
+        ? firebaseStudentByUniqueName.get(normalizeName(row.student_name).replace(/\s+/g, "").toLowerCase())
+        : undefined);
 
     let instructors: {
       id: string;
@@ -462,6 +476,14 @@ export async function GET(req: Request) {
 
       const instructorRows = instructorRes.data ?? [];
       const studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
+      const supabaseStudentNameCounts = new Map<string, number>();
+      for (const row of studentRows) {
+        const nameKey = normalizeName(row.student_name).replace(/\s+/g, "").toLowerCase();
+        if (nameKey) supabaseStudentNameCounts.set(nameKey, (supabaseStudentNameCounts.get(nameKey) ?? 0) + 1);
+      }
+      uniqueSupabaseStudentNameKeys = new Set(
+        [...supabaseStudentNameCounts.entries()].filter(([, count]) => count === 1).map(([nameKey]) => nameKey)
+      );
 
       const toInstructorOption = (row: InstructorRow, isActive: boolean) => {
         const availableTimeSlotsByDay = normalizeAvailableTimeSlotsByDay(row.available_time_slots_by_day);
