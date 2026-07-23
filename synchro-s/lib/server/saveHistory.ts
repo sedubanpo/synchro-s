@@ -1,3 +1,5 @@
+import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
+
 type SupabaseLike = {
   from: (table: string) => any;
 };
@@ -76,16 +78,30 @@ export async function fetchRecentSaveHistory(supabase: SupabaseLike, limit = 20)
 
   const rows = (data ?? []) as SaveHistoryRow[];
 
-  const [studentResult, instructorResult] = await Promise.all([
-    supabase.from("students").select("id,student_name"),
-    supabase.from("instructors").select("id,instructor_name")
+  // Target resolution is supplemental metadata. Preserve save-history rendering
+  // even when either roster lookup is temporarily unavailable.
+  const [studentRows, instructorRows] = await Promise.all([
+    fetchAllSupabaseRows<{ id: string; student_name: string }>(async (from, to) => {
+      const result = await supabase.from("students").select("id,student_name").order("id").range(from, to);
+      return {
+        data: (result.data ?? []) as { id: string; student_name: string }[],
+        error: result.error
+      };
+    }).catch(() => []),
+    fetchAllSupabaseRows<{ id: string; instructor_name: string }>(async (from, to) => {
+      const result = await supabase.from("instructors").select("id,instructor_name").order("id").range(from, to);
+      return {
+        data: (result.data ?? []) as { id: string; instructor_name: string }[],
+        error: result.error
+      };
+    }).catch(() => [])
   ]);
 
-  const studentTargets = ((studentResult.data ?? []) as { id: string; student_name: string }[]).map((row) => ({
+  const studentTargets = studentRows.map((row) => ({
     id: row.id,
     name: row.student_name
   }));
-  const instructorTargets = ((instructorResult.data ?? []) as { id: string; instructor_name: string }[]).map((row) => ({
+  const instructorTargets = instructorRows.map((row) => ({
     id: row.id,
     name: row.instructor_name
   }));

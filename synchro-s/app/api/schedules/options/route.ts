@@ -2,6 +2,7 @@ import { errorMessage, jsonError } from "@/lib/http";
 import { getAuthenticatedProfile } from "@/lib/server/auth";
 import { getBearerIdToken, loadFirebaseRoster, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
 import { type SupabaseStudentMirrorRow } from "@/lib/server/firebaseStudentMirror";
+import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
 import { NextResponse } from "next/server";
 
 const DEFAULT_SPREADSHEET_ID = "1ByPeH0bZZrZDvW_yPkCpQCIuk724_Gt7uudUj_Ue8Ho";
@@ -461,21 +462,30 @@ export async function GET(req: Request) {
     const profileStudentId = (profile as { student_id?: string | null }).student_id ?? null;
 
     if (profile.role === "admin" || profile.role === "coordinator") {
-      const [instructorRes, initialStudentRes] = await Promise.all([
+      const [instructorRes, studentRows] = await Promise.all([
         selectInstructorRows(supabase, false).then((result) => ({
           ...result,
           data: (result.data ?? []).sort((a: { instructor_name: string }, b: { instructor_name: string }) =>
             a.instructor_name.localeCompare(b.instructor_name, "ko")
           )
         })),
-        supabase.from("students").select("id,student_name,is_active,firebase_student_id,firebase_uid").order("student_name")
+        fetchAllSupabaseRows<SupabaseStudentMirrorRow>(async (from, to) => {
+          const result = await supabase
+            .from("students")
+            .select("id,student_name,is_active,firebase_student_id,firebase_uid")
+            .order("student_name")
+            .order("id")
+            .range(from, to);
+          return {
+            data: (result.data ?? []) as SupabaseStudentMirrorRow[],
+            error: result.error
+          };
+        })
       ]);
 
       if (instructorRes.error) throw instructorRes.error;
-      if (initialStudentRes.error) throw initialStudentRes.error;
 
       const instructorRows = instructorRes.data ?? [];
-      const studentRows = (initialStudentRes.data ?? []) as SupabaseStudentMirrorRow[];
       const supabaseStudentNameCounts = new Map<string, number>();
       for (const row of studentRows) {
         const nameKey = normalizeName(row.student_name).replace(/\s+/g, "").toLowerCase();

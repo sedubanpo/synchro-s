@@ -9,6 +9,7 @@ import {
   loadFirebaseRoster,
   type FirebaseStudentRosterItem
 } from "../lib/server/firestoreRoster";
+import { fetchAllSupabaseRows } from "../lib/server/supabasePagination";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -177,6 +178,33 @@ assert.equal(
   "Every student in an unresolved target-row collision must be routed to review."
 );
 
+const rosterRows = Array.from({ length: 1005 }, (_, index) => ({
+  id: `student-${String(index).padStart(4, "0")}`,
+  student_name: index === 1004 ? "한윤진" : `학생${index}`
+}));
+const requestedRosterPages: Array<[number, number]> = [];
+const pagedRosterRows = await fetchAllSupabaseRows(
+  async (from, to) => {
+    requestedRosterPages.push([from, to]);
+    return {
+      data: rosterRows.slice(from, to + 1),
+      error: null
+    };
+  },
+  500
+);
+assert.equal(pagedRosterRows.length, 1005, "Roster reads must not stop at the first Supabase response page.");
+assert.equal(pagedRosterRows.at(-1)?.student_name, "한윤진", "Students after row 1,000 must remain selectable.");
+assert.deepEqual(
+  requestedRosterPages,
+  [
+    [0, 499],
+    [500, 999],
+    [1000, 1499]
+  ],
+  "Roster pagination must continue until a short final page is returned."
+);
+
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input) => {
   const url = String(input);
@@ -256,12 +284,22 @@ assert.match(
   /uniqueSupabaseStudentNameKeys/,
   "Name fallback must be disabled for duplicate Supabase student names."
 );
+assert.match(
+  optionsRoute,
+  /fetchAllSupabaseRows<SupabaseStudentMirrorRow>/,
+  "Options must page through the complete Supabase student roster."
+);
 assert.doesNotMatch(optionsRoute, /planMissingFirebaseInstructorInserts/, "Options GET must not mirror an unmaintained Firestore instructor collection.");
 assert.doesNotMatch(optionsRoute, /\.from\(["'](?:students|instructors)["']\)\.insert/, "Options GET must not create identity rows as a read side effect.");
 assert.doesNotMatch(optionsRoute, /studentIdsToReactivate/, "Options GET must not reactivate roster rows as a read side effect.");
 assert.doesNotMatch(syncRoute, /FirebaseInstructorRosterItem|roster\.instructors/, "Manual sync must not depend on Firestore instructors.");
 assert.match(syncRoute, /studentsNeedsReview/, "Unlinked same-name students must be routed to review instead of name-matched.");
 assert.match(syncRoute, /planFirebaseStudentSync/, "Manual sync must use the collision-safe Firebase student reconciliation plan.");
+assert.match(
+  syncRoute,
+  /fetchAllSupabaseRows<ExistingStudent>/,
+  "Manual synchronization must reconcile against every Supabase student row."
+);
 assert.match(
   syncRoute,
   /stableUpdates\.map[\s\S]*\.upsert\(updateRows, \{ onConflict: "id" \}\)/,

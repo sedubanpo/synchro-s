@@ -2,6 +2,7 @@ import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { planFirebaseStudentSync } from "@/lib/server/firebaseStudentMirror";
 import { getBearerIdToken, loadFirebaseRoster } from "@/lib/server/firestoreRoster";
+import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
 import { NextResponse } from "next/server";
 
 function isFirebaseStudentIdConflict(error: unknown): boolean {
@@ -71,12 +72,6 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
     return { available: false, error: roster.studentError ?? roster.error };
   }
 
-  const { data: existingStudents, error: studentReadError } = await supabase
-    .from("students")
-    .select("id,student_name,is_active,firebase_student_id,firebase_uid");
-
-  if (studentReadError) throw studentReadError;
-
   type ExistingStudent = {
     id: string;
     student_name: string;
@@ -85,7 +80,17 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
     firebase_uid?: string | null;
   };
 
-  const studentRows = ((existingStudents ?? []) as ExistingStudent[]);
+  const studentRows = await fetchAllSupabaseRows<ExistingStudent>(async (from, to) => {
+    const result = await supabase
+      .from("students")
+      .select("id,student_name,is_active,firebase_student_id,firebase_uid")
+      .order("id")
+      .range(from, to);
+    return {
+      data: (result.data ?? []) as ExistingStudent[],
+      error: result.error
+    };
+  });
   const syncedAt = new Date().toISOString();
   const plan = planFirebaseStudentSync(studentRows, roster.students, syncedAt);
 
@@ -120,7 +125,9 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
     warningParts.push(`Firebase 중복 명단 ${duplicateRosterEntries}건을 대표 ID로 통합했습니다.`);
   }
   if (plan.needsReview > 0) {
-    warningParts.push(`동명이인 ${plan.needsReview}명은 자동 연결하지 않았습니다. 계정 관리에서 대표 ID를 확인해 주세요.`);
+    warningParts.push(
+      `학생 계정 ${plan.needsReview}건은 동명이인 또는 ID 충돌로 자동 연결하지 않았습니다. 계정 관리에서 대표 ID를 확인해 주세요.`
+    );
   }
   return {
     available: true,
