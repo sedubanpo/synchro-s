@@ -6052,12 +6052,15 @@ export default function SynchroSPage() {
     setSyncingSheets(true);
     setNotice(null);
     setError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 45_000);
 
     try {
       const res = await fetch("/api/sheets/sync", {
         method: "POST",
         headers: await getFirebaseAuthHeaders({ "Content-Type": "application/json" }, true),
-        body: JSON.stringify({})
+        body: JSON.stringify({}),
+        signal: controller.signal
       });
 
       if (res.status === 401) {
@@ -6088,8 +6091,15 @@ export default function SynchroSPage() {
       );
       await loadOptions({ refreshSheets: true });
     } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "시트 동기화에 실패했습니다.");
+      const message =
+        syncError instanceof DOMException && syncError.name === "AbortError"
+          ? "명단 동기화 응답이 지연되어 중단했습니다. 계정 관리의 변경은 자동 반영되며, 잠시 후 새로고침해 확인해 주세요."
+          : syncError instanceof Error
+            ? syncError.message
+            : "명단 동기화에 실패했습니다.";
+      setError(message);
     } finally {
+      window.clearTimeout(timeoutId);
       setSyncingSheets(false);
     }
   }, [loadOptions, moveToLogin]);
@@ -7019,7 +7029,7 @@ export default function SynchroSPage() {
                     onClick={() => void handleSyncSheets()}
                   >
                     <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                    {syncingSheets ? "시트 동기화 중..." : "명단 동기화"}
+                    {syncingSheets ? "명단 동기화 중..." : "명단 동기화"}
                   </button>
                   <button
                     type="button"

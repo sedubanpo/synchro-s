@@ -28,12 +28,13 @@ async function syncFirebaseRosterToSupabase(supabase: any, idToken: string) {
   const syncedAt = new Date().toISOString();
   const plan = planFirebaseStudentSync(studentRows, roster.students, syncedAt);
 
-  for (const update of plan.updates) {
-    const { error } = await supabase.from("students").update(update.payload).eq("id", update.id);
+  if (plan.updates.length > 0) {
+    const updateRows = plan.updates.map((update) => ({ id: update.id, ...update.payload }));
+    const { error } = await supabase.from("students").upsert(updateRows, { onConflict: "id" });
     if (error) throw error;
   }
-  for (const insert of plan.inserts) {
-    const { error } = await supabase.from("students").insert(insert);
+  if (plan.inserts.length > 0) {
+    const { error } = await supabase.from("students").insert(plan.inserts);
     if (error) throw error;
   }
 

@@ -228,6 +228,12 @@ assert.doesNotMatch(optionsRoute, /studentIdsToReactivate/, "Options GET must no
 assert.doesNotMatch(syncRoute, /FirebaseInstructorRosterItem|roster\.instructors/, "Manual sync must not depend on Firestore instructors.");
 assert.match(syncRoute, /studentsNeedsReview/, "Unlinked same-name students must be routed to review instead of name-matched.");
 assert.match(syncRoute, /planFirebaseStudentSync/, "Manual sync must use the collision-safe Firebase student reconciliation plan.");
+assert.match(syncRoute, /\.upsert\(updateRows, \{ onConflict: "id" \}\)/, "Roster updates must be sent as one batched upsert.");
+assert.doesNotMatch(
+  syncRoute,
+  /for \(const update of plan\.updates\)/,
+  "Roster updates must not issue one sequential Supabase request per student."
+);
 
 const rosterSource = fs.readFileSync(path.join(repoRoot, "lib/server/firestoreRoster.ts"), "utf8");
 assert.doesNotMatch(rosterSource, /listFirestoreCollection\(idToken, ["']instructors["']\)/, "The runtime roster must not request Firestore instructors.");
@@ -240,5 +246,8 @@ assert.match(
   /getFirebaseAuthHeaders\(\{ "Content-Type": "application\/json" \}, true\)/,
   "Manual roster sync must refresh the Firebase ID token."
 );
+assert.match(pageSource, /controller\.abort\(\), 45_000/, "Manual roster sync must time out instead of leaving an indefinite spinner.");
+assert.match(pageSource, /window\.clearTimeout\(timeoutId\)/, "Manual roster sync must always release its timeout.");
+assert.match(pageSource, /명단 동기화 중\.\.\./, "The pending label must describe roster synchronization truthfully.");
 
 console.log("Firebase roster sync verification passed: student authority, ID-first review guard, side-effect-free options, and no Firestore instructor dependency.");
