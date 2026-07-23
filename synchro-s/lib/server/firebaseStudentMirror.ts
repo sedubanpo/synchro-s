@@ -8,7 +8,7 @@ export type SupabaseStudentMirrorRow = {
   firebase_uid?: string | null;
 };
 
-type FirebaseStudentInsert = {
+export type FirebaseStudentPayload = {
   id?: string;
   student_name: string;
   is_active: boolean;
@@ -17,6 +17,14 @@ type FirebaseStudentInsert = {
   firebase_match_key: string;
   firebase_sync_status: "matched";
   firebase_synced_at: string;
+};
+
+export type FirebaseStudentSyncPlan = {
+  updates: Array<{ id: string; payload: Omit<FirebaseStudentPayload, "id"> }>;
+  inserts: FirebaseStudentPayload[];
+  needsReview: number;
+  duplicateRosterEntries: number;
+  identityConflictsResolved: number;
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -52,7 +60,7 @@ export function planMissingFirebaseStudentInserts(
   existingRows: SupabaseStudentMirrorRow[],
   firebaseStudents: FirebaseStudentRosterItem[],
   syncedAt = new Date().toISOString()
-): FirebaseStudentInsert[] {
+): FirebaseStudentPayload[] {
   const existingByIdentity = new Map<string, SupabaseStudentMirrorRow>();
   for (const row of existingRows) {
     for (const identity of [row.id, row.firebase_student_id, row.firebase_uid]) {
@@ -61,7 +69,7 @@ export function planMissingFirebaseStudentInserts(
   }
   const existingByUniqueName = buildUniqueNameMap(existingRows);
   const plannedIdentities = new Set<string>();
-  const inserts: FirebaseStudentInsert[] = [];
+  const inserts: FirebaseStudentPayload[] = [];
 
   for (const student of firebaseStudents) {
     const identities = Array.from(
@@ -99,6 +107,159 @@ export function planMissingFirebaseStudentInserts(
   }
 
   return inserts;
+}
+
+function firebaseStudentId(student: FirebaseStudentRosterItem): string {
+  return student.canonicalStudentId || student.studentId || student.id;
+}
+
+function firebaseStudentIdentityIds(student: FirebaseStudentRosterItem): string[] {
+  return Array.from(
+    new Set(
+      [
+        firebaseStudentId(student),
+        student.studentId,
+        student.id,
+        ...(student.studentIdAliases ?? []),
+        student.firebaseUid,
+        student.supabaseStudentId
+      ].filter((value): value is string => Boolean(value))
+    )
+  );
+}
+
+function buildUniqueFirebaseNameKeys(students: FirebaseStudentRosterItem[]): Set<string> {
+  const counts = new Map<string, number>();
+  for (const student of students) {
+    const key = normalizeMatchKey(student.name);
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return new Set([...counts.entries()].filter(([, count]) => count === 1).map(([key]) => key));
+}
+
+function deduplicateFirebaseStudents(
+  students: FirebaseStudentRosterItem[],
+  existingByFirebaseId: Map<string, SupabaseStudentMirrorRow>
+): { students: FirebaseStudentRosterItem[]; duplicateCount: number } {
+  const grouped = new Map<string, FirebaseStudentRosterItem[]>();
+  for (const student of students) {
+    const key = firebaseStudentId(student);
+    const group = grouped.get(key) ?? [];
+    group.push(student);
+    grouped.set(key, group);
+  }
+
+  let duplicateCount = 0;
+  const deduplicated = [...grouped.entries()].map(([identity, group]) => {
+    duplicateCount += group.length - 1;
+    const currentOwner = existingByFirebaseId.get(identity);
+    const selected =
+      (currentOwner ? group.find((student) => student.supabaseStudentId === currentOwner.id) : undefined) ??
+      group.find((student) => student.active) ??
+      group[0];
+    return {
+      ...selected,
+      studentIdAliases: Array.from(new Set(group.flatMap((student) => firebaseStudentIdentityIds(student))))
+    };
+  });
+
+  return { students: deduplicated, duplicateCount };
+}
+
+/**
+ * Build an ID-first synchronization plan.
+ *
+ * The row that already owns firebase_student_id always wins over a stale
+ * supabaseStudentId pointer. This preserves timetable foreign keys and avoids
+ * moving the same unique Firebase ID onto a second row. A unique name is used
+ * only when both rosters contain exactly one student with that name.
+ */
+export function planFirebaseStudentSync(
+  existingRows: SupabaseStudentMirrorRow[],
+  firebaseStudents: FirebaseStudentRosterItem[],
+  syncedAt = new Date().toISOString()
+): FirebaseStudentSyncPlan {
+  const existingById = new Map(existingRows.map((row) => [row.id, row]));
+  const existingByFirebaseId = new Map(
+    existingRows.filter((row) => row.firebase_student_id).map((row) => [row.firebase_student_id as string, row])
+  );
+  const existingByFirebaseUid = new Map(
+    existingRows.filter((row) => row.firebase_uid).map((row) => [row.firebase_uid as string, row])
+  );
+  const existingByUniqueName = buildUniqueNameMap(existingRows);
+  const existingNameKeys = new Set(existingRows.map((row) => normalizeMatchKey(row.student_name)).filter(Boolean));
+  const { students, duplicateCount } = deduplicateFirebaseStudents(firebaseStudents, existingByFirebaseId);
+  const uniqueFirebaseNameKeys = buildUniqueFirebaseNameKeys(students);
+
+  const updates: FirebaseStudentSyncPlan["updates"] = [];
+  const inserts: FirebaseStudentSyncPlan["inserts"] = [];
+  let needsReview = 0;
+  let identityConflictsResolved = 0;
+
+  for (const student of students) {
+    const canonicalId = firebaseStudentId(student);
+    const currentOwner = existingByFirebaseId.get(canonicalId);
+    const preferredRow = student.supabaseStudentId ? existingById.get(student.supabaseStudentId) : undefined;
+    if (currentOwner && preferredRow && currentOwner.id !== preferredRow.id) {
+      identityConflictsResolved += 1;
+    }
+
+    let existing = currentOwner ?? (student.firebaseUid ? existingByFirebaseUid.get(student.firebaseUid) : undefined);
+    if (!existing) {
+      for (const identity of firebaseStudentIdentityIds(student)) {
+        existing = existingById.get(identity) ?? existingByFirebaseId.get(identity);
+        if (existing) break;
+      }
+    }
+    existing ??= preferredRow;
+
+    const nameKey = normalizeMatchKey(student.name);
+    if (!existing && uniqueFirebaseNameKeys.has(nameKey)) {
+      existing = existingByUniqueName.get(nameKey);
+    }
+
+    const firebaseUidOwner = student.firebaseUid ? existingByFirebaseUid.get(student.firebaseUid) : undefined;
+    const safeFirebaseUid =
+      !student.firebaseUid || !firebaseUidOwner || firebaseUidOwner.id === existing?.id ? student.firebaseUid || null : null;
+    if (student.firebaseUid && firebaseUidOwner && firebaseUidOwner.id !== existing?.id) {
+      identityConflictsResolved += 1;
+    }
+
+    const payload: Omit<FirebaseStudentPayload, "id"> = {
+      student_name: student.name,
+      is_active: student.active,
+      firebase_student_id: canonicalId,
+      firebase_uid: safeFirebaseUid,
+      firebase_match_key: [nameKey, normalizeMatchKey(student.school), student.grade.replace(/[^0-9]/g, "")]
+        .filter(Boolean)
+        .join("|"),
+      firebase_sync_status: "matched",
+      firebase_synced_at: syncedAt
+    };
+
+    if (existing) {
+      updates.push({ id: existing.id, payload });
+      existingByFirebaseId.set(canonicalId, existing);
+      continue;
+    }
+
+    if (!uniqueFirebaseNameKeys.has(nameKey) || (existingNameKeys.has(nameKey) && !existingByUniqueName.has(nameKey))) {
+      needsReview += 1;
+      continue;
+    }
+
+    const preferredId =
+      student.supabaseStudentId || (UUID_PATTERN.test(canonicalId) && !existingById.has(canonicalId) ? canonicalId : undefined);
+    inserts.push({ ...(preferredId ? { id: preferredId } : {}), ...payload });
+  }
+
+  return {
+    updates,
+    inserts,
+    needsReview,
+    duplicateRosterEntries: duplicateCount,
+    identityConflictsResolved
+  };
 }
 
 /**

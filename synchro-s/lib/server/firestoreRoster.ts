@@ -39,6 +39,7 @@ export type FirebaseRoster = {
   available: boolean;
   studentsAvailable: boolean;
   students: FirebaseStudentRosterItem[];
+  duplicateStudentDocuments?: number;
   studentError?: string;
   error?: string;
 };
@@ -178,6 +179,59 @@ function normalizeStudent(id: string, data: Record<string, unknown>): FirebaseSt
   };
 }
 
+function rosterItemScore(student: FirebaseStudentRosterItem): number {
+  return (
+    (student.active ? 16 : 0) +
+    (student.school ? 8 : 0) +
+    (student.grade ? 4 : 0) +
+    (student.supabaseStudentId ? 2 : 0) +
+    (student.firebaseUid ? 1 : 0)
+  );
+}
+
+export function deduplicateFirebaseRosterStudents(students: FirebaseStudentRosterItem[]): {
+  students: FirebaseStudentRosterItem[];
+  duplicateCount: number;
+} {
+  const grouped = new Map<string, FirebaseStudentRosterItem[]>();
+  for (const student of students) {
+    const key = student.canonicalStudentId || student.studentId || student.id;
+    const group = grouped.get(key) ?? [];
+    group.push(student);
+    grouped.set(key, group);
+  }
+
+  let duplicateCount = 0;
+  const uniqueStudents = [...grouped.values()].map((group) => {
+    duplicateCount += group.length - 1;
+    const selected = [...group].sort((a, b) => rosterItemScore(b) - rosterItemScore(a))[0];
+    const school = selected.school || group.find((student) => student.school)?.school || "";
+    const grade = selected.grade || group.find((student) => student.grade)?.grade || "";
+    return {
+      ...selected,
+      school,
+      grade,
+      secondary: formatStudentSecondary(school, grade),
+      active: group.some((student) => student.active),
+      supabaseStudentId:
+        selected.supabaseStudentId || group.find((student) => student.supabaseStudentId)?.supabaseStudentId,
+      firebaseUid: selected.firebaseUid || group.find((student) => student.firebaseUid)?.firebaseUid,
+      studentIdAliases: Array.from(
+        new Set(
+          group.flatMap((student) => [
+            student.id,
+            student.studentId,
+            student.canonicalStudentId,
+            ...(student.studentIdAliases ?? [])
+          ])
+        )
+      )
+    };
+  });
+
+  return { students: uniqueStudents, duplicateCount };
+}
+
 export async function loadFirebaseRoster(idToken: string | null, options?: { forceRefresh?: boolean }): Promise<FirebaseRoster> {
   if (!idToken) {
     return {
@@ -200,12 +254,15 @@ export async function loadFirebaseRoster(idToken: string | null, options?: { for
 
   try {
     const studentDocuments = await listFirestoreCollection(idToken, "students");
+    const normalizedStudents = studentDocuments
+      .map((doc) => normalizeStudent(doc.id, doc.data))
+      .filter((item): item is FirebaseStudentRosterItem => Boolean(item));
+    const deduplicated = deduplicateFirebaseRosterStudents(normalizedStudents);
     const value: FirebaseRoster = {
       available: true,
       studentsAvailable: true,
-      students: studentDocuments
-        .map((doc) => normalizeStudent(doc.id, doc.data))
-        .filter((item): item is FirebaseStudentRosterItem => Boolean(item))
+      students: deduplicated.students,
+      duplicateStudentDocuments: deduplicated.duplicateCount
     };
     rosterCache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
     return value;

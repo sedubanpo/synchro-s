@@ -3,8 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { planMissingFirebaseStudentInserts } from "../lib/server/firebaseStudentMirror";
-import { loadFirebaseRoster, type FirebaseStudentRosterItem } from "../lib/server/firestoreRoster";
+import { planFirebaseStudentSync, planMissingFirebaseStudentInserts } from "../lib/server/firebaseStudentMirror";
+import {
+  deduplicateFirebaseRosterStudents,
+  loadFirebaseRoster,
+  type FirebaseStudentRosterItem
+} from "../lib/server/firestoreRoster";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -41,6 +45,104 @@ const alreadyMirrored = planMissingFirebaseStudentInserts(
 );
 assert.equal(alreadyMirrored.length, 0, "An already mirrored Firebase student must not be duplicated.");
 
+const stalePreferredRowId = "11111111-1111-4111-8111-111111111111";
+const existingFirebaseOwnerId = "22222222-2222-4222-8222-222222222222";
+const conflictingHajimin = { ...hajimin, supabaseStudentId: stalePreferredRowId };
+const conflictPlan = planFirebaseStudentSync(
+  [
+    {
+      id: stalePreferredRowId,
+      student_name: "하지민",
+      is_active: true,
+      firebase_student_id: null,
+      firebase_uid: null
+    },
+    {
+      id: existingFirebaseOwnerId,
+      student_name: "하지민(기존)",
+      is_active: true,
+      firebase_student_id: studentId,
+      firebase_uid: null
+    }
+  ],
+  [conflictingHajimin],
+  "2026-07-23T00:00:00.000Z"
+);
+assert.equal(conflictPlan.identityConflictsResolved, 1, "A stale Supabase pointer must be recognized as an identity conflict.");
+assert.equal(conflictPlan.updates.length, 1, "An identity conflict must produce one update.");
+assert.equal(
+  conflictPlan.updates[0]?.id,
+  existingFirebaseOwnerId,
+  "The row already owning firebase_student_id must be updated so the unique ID is never moved onto a second row."
+);
+assert.equal(conflictPlan.inserts.length, 0, "An identity conflict must not create another student row.");
+
+const hongJaebeom: FirebaseStudentRosterItem = {
+  ...hajimin,
+  id: "33333333-3333-4333-8333-333333333333",
+  studentId: "33333333-3333-4333-8333-333333333333",
+  canonicalStudentId: "33333333-3333-4333-8333-333333333333",
+  studentIdAliases: ["33333333-3333-4333-8333-333333333333"],
+  name: "홍재범",
+  school: "상문고",
+  grade: "3",
+  secondary: "상문고 · 3학년"
+};
+const uniqueNamePlan = planFirebaseStudentSync(
+  [{ id: "44444444-4444-4444-8444-444444444444", student_name: "홍재범", is_active: true }],
+  [hongJaebeom]
+);
+assert.equal(uniqueNamePlan.updates[0]?.id, "44444444-4444-4444-8444-444444444444");
+assert.equal(
+  uniqueNamePlan.updates[0]?.payload.firebase_student_id,
+  hongJaebeom.canonicalStudentId,
+  "A single unambiguous legacy name must be linked to its Firebase ID instead of being left without account details."
+);
+
+const duplicateRosterPlan = planFirebaseStudentSync(
+  [],
+  [
+    hongJaebeom,
+    {
+      ...hongJaebeom,
+      id: "legacy-hong-jaebeom",
+      studentIdAliases: [...hongJaebeom.studentIdAliases, "legacy-hong-jaebeom"]
+    }
+  ]
+);
+assert.equal(duplicateRosterPlan.duplicateRosterEntries, 1, "Duplicate Firebase documents with one canonical ID must be collapsed.");
+assert.equal(duplicateRosterPlan.inserts.length, 1, "A duplicated Firebase identity must create at most one Supabase row.");
+
+const deduplicatedRoster = deduplicateFirebaseRosterStudents([
+  hongJaebeom,
+  {
+    ...hongJaebeom,
+    id: "legacy-hong-jaebeom",
+    school: "",
+    grade: "",
+    secondary: "",
+    supabaseStudentId: undefined,
+    studentIdAliases: [...hongJaebeom.studentIdAliases, "legacy-hong-jaebeom"]
+  }
+]);
+assert.equal(deduplicatedRoster.duplicateCount, 1);
+assert.equal(deduplicatedRoster.students.length, 1);
+assert.equal(
+  deduplicatedRoster.students[0]?.secondary,
+  "상문고 · 3학년",
+  "The user-facing roster must keep the richest canonical school and grade when duplicate Firebase documents exist."
+);
+
+const ambiguousNamePlan = planFirebaseStudentSync(
+  [
+    { id: "55555555-5555-4555-8555-555555555555", student_name: "한윤진", is_active: true },
+    { id: "66666666-6666-4666-8666-666666666666", student_name: "한윤진", is_active: true }
+  ],
+  [{ ...hongJaebeom, name: "한윤진" }]
+);
+assert.equal(ambiguousNamePlan.needsReview, 1, "True same-name ambiguity must still require review.");
+assert.equal(ambiguousNamePlan.updates.length, 0);
+
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input) => {
   const url = String(input);
@@ -60,6 +162,19 @@ globalThis.fetch = async (input) => {
               status: { stringValue: "ACTIVE" },
               active: { booleanValue: true }
             }
+          },
+          {
+            name: `projects/fir-lms-prod/databases/(default)/documents/students/legacy-${studentId}`,
+            fields: {
+              studentId: { stringValue: `legacy-${studentId}` },
+              canonicalStudentId: { stringValue: studentId },
+              studentIdAliases: {
+                arrayValue: { values: [{ stringValue: studentId }, { stringValue: `legacy-${studentId}` }] }
+              },
+              name: { stringValue: "하지민" },
+              status: { stringValue: "ACTIVE" },
+              active: { booleanValue: true }
+            }
           }
         ]
       }),
@@ -73,6 +188,8 @@ try {
   const studentRoster = await loadFirebaseRoster("student-readable-token", { forceRefresh: true });
   assert.equal(studentRoster.available, true, "A readable Firebase student collection must keep the roster usable.");
   assert.equal(studentRoster.studentsAvailable, true, "The canonical student roster must remain available.");
+  assert.equal(studentRoster.students.length, 1, "Duplicate Firebase documents must not leak into the user-facing roster.");
+  assert.equal(studentRoster.duplicateStudentDocuments, 1);
   assert.equal(studentRoster.students[0]?.secondary, "세화여고 · 2학년", "Canonical student details must be preserved.");
 } finally {
   globalThis.fetch = originalFetch;
@@ -100,6 +217,7 @@ assert.doesNotMatch(optionsRoute, /\.from\(["'](?:students|instructors)["']\)\.i
 assert.doesNotMatch(optionsRoute, /studentIdsToReactivate/, "Options GET must not reactivate roster rows as a read side effect.");
 assert.doesNotMatch(syncRoute, /FirebaseInstructorRosterItem|roster\.instructors/, "Manual sync must not depend on Firestore instructors.");
 assert.match(syncRoute, /studentsNeedsReview/, "Unlinked same-name students must be routed to review instead of name-matched.");
+assert.match(syncRoute, /planFirebaseStudentSync/, "Manual sync must use the collision-safe Firebase student reconciliation plan.");
 
 const rosterSource = fs.readFileSync(path.join(repoRoot, "lib/server/firestoreRoster.ts"), "utf8");
 assert.doesNotMatch(rosterSource, /listFirestoreCollection\(idToken, ["']instructors["']\)/, "The runtime roster must not request Firestore instructors.");
