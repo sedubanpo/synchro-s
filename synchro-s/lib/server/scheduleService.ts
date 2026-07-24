@@ -9,6 +9,10 @@ import type {
   Weekday
 } from "@/types/schedule";
 import { addDays, dateToWeekday, fromSqlTime, rangesOverlap, timeToMinutes, toSqlTime, weekRange } from "@/lib/time";
+import {
+  selectEffectiveStudentTimetableGroup,
+  type EffectiveStudentTimetableGroup
+} from "@/lib/timetableGroupSelection";
 import { validateSchedulePayload } from "@/lib/validators";
 
 type SupabaseLike = {
@@ -69,6 +73,7 @@ type EnrollmentStudentStatusRow = {
 };
 
 type ActiveStudentTimetableGroupRow = {
+  id: string;
   target_id: string;
   week_start: string;
   expires_on: string | null;
@@ -155,30 +160,19 @@ function isMissingColumnError(error: unknown, columnName: string): boolean {
   return code === "42703" || message.includes(columnName);
 }
 
-function formatDateISOInKST(date: Date): string {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(date);
-}
-
-function getGroupExpirationReferenceDate(weekStart?: string): string | undefined {
-  if (!weekStart) {
-    return undefined;
-  }
-  const today = formatDateISOInKST(new Date());
-  const weekEnd = addDays(weekStart, 6);
-  return today >= weekStart && today <= weekEnd ? today : weekStart;
-}
-
-function compareEffectiveStudentGroup(a: ActiveStudentTimetableGroupRow, b: ActiveStudentTimetableGroupRow): number {
-  if (a.week_start !== b.week_start) return b.week_start.localeCompare(a.week_start);
-  if ((a.is_active === true) !== (b.is_active === true)) return a.is_active === true ? -1 : 1;
-  return b.created_at.localeCompare(a.created_at);
-}
-
-function isStudentTimetableGroupExpired(
-  row: ActiveStudentTimetableGroupRow,
-  expirationReferenceDate: string | undefined
-): boolean {
-  return Boolean(expirationReferenceDate && row.expires_on && row.expires_on <= expirationReferenceDate);
+function mapStudentTimetableGroupRow(
+  row: ActiveStudentTimetableGroupRow
+): EffectiveStudentTimetableGroup {
+  return {
+    id: row.id,
+    roleView: "student",
+    targetId: row.target_id,
+    weekStart: row.week_start,
+    expiresOn: row.expires_on ?? null,
+    tagId: row.tag_id ?? null,
+    isActive: row.is_active === true,
+    createdAt: row.created_at
+  };
 }
 
 async function loadEffectiveStudentTimetableGroupClassIds(
@@ -197,8 +191,8 @@ async function loadEffectiveStudentTimetableGroupClassIds(
       .from("timetable_groups")
       .select(
         includeExpiration
-          ? "target_id,week_start,expires_on,tag_id,is_active,class_ids,snapshot_events,created_at"
-          : "target_id,week_start,tag_id,is_active,class_ids,snapshot_events,created_at"
+          ? "id,target_id,week_start,expires_on,tag_id,is_active,class_ids,snapshot_events,created_at"
+          : "id,target_id,week_start,tag_id,is_active,class_ids,snapshot_events,created_at"
       )
       .eq("role_view", "student")
       .in("target_id", uniqueStudentIds)
@@ -217,7 +211,6 @@ async function loadEffectiveStudentTimetableGroupClassIds(
     throw error;
   }
 
-  const expirationReferenceDate = getGroupExpirationReferenceDate(weekStart);
   const studentsWithAnyGroup = new Set<string>();
   const rowsByStudent = new Map<string, ActiveStudentTimetableGroupRow[]>();
   for (const row of (data ?? []) as ActiveStudentTimetableGroupRow[]) {
@@ -229,8 +222,12 @@ async function loadEffectiveStudentTimetableGroupClassIds(
 
   const map = new Map<string, Set<string>>();
   for (const [studentId, rows] of rowsByStudent) {
-    const availableRows = rows.filter((row) => !isStudentTimetableGroupExpired(row, expirationReferenceDate));
-    const activeRow = availableRows.filter((row) => row.is_active === true).sort(compareEffectiveStudentGroup)[0];
+    const effectiveGroup = selectEffectiveStudentTimetableGroup(
+      rows.map(mapStudentTimetableGroupRow),
+      weekStart ?? "9999-12-31",
+      scheduleTagId ?? null
+    );
+    const activeRow = effectiveGroup ? rows.find((row) => row.id === effectiveGroup.id) : null;
     if (!activeRow) continue;
     const classIds = new Set<string>([
       ...((Array.isArray(activeRow.class_ids) ? activeRow.class_ids : []).filter(Boolean)),

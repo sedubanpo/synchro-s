@@ -13,6 +13,12 @@ import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
 import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
+import {
+  compareEffectiveTimetableGroups,
+  getEffectiveStudentTimetableGroupMap,
+  isTimetableGroupExpired,
+  selectEffectiveStudentTimetableGroup
+} from "@/lib/timetableGroupSelection";
 import { normalizeInstructorAlias, parseNotionClassCell } from "@/lib/notionScheduleParser";
 import type {
   AvailableTimeSlotsByDay,
@@ -565,39 +571,21 @@ function shiftDate(dateISO: string, days: number): string {
   return addDays(dateISO, days);
 }
 
-function getGroupExpirationReferenceDate(targetWeekStart: string): string {
-  const today = formatDateISOInKST(new Date());
-  const targetWeekEnd = shiftDate(targetWeekStart, 6);
-  return today >= targetWeekStart && today <= targetWeekEnd ? today : targetWeekStart;
-}
-
-function isGroupEffectiveForWeek(group: TimetableGroup, targetWeekStart: string): boolean {
-  const referenceDate = getGroupExpirationReferenceDate(targetWeekStart);
-  return group.weekStart <= targetWeekStart && (!group.expiresOn || group.expiresOn > referenceDate);
+function isGroupEffectiveForWeek(group: TimetableGroup, targetWeekStart: string, todayISO?: string): boolean {
+  return group.weekStart <= targetWeekStart && !isTimetableGroupExpired(group, targetWeekStart, todayISO);
 }
 
 function compareEffectiveTimetableGroup(a: TimetableGroup, b: TimetableGroup): number {
-  if (a.weekStart !== b.weekStart) return b.weekStart.localeCompare(a.weekStart);
-  if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-  return b.createdAt.localeCompare(a.createdAt);
+  return compareEffectiveTimetableGroups(a, b);
 }
 
-function getEffectiveStudentGroupMap(groups: TimetableGroup[], targetWeekStart: string, tagId: string | null): Map<string, TimetableGroup> {
-  const grouped = new Map<string, TimetableGroup[]>();
-  for (const group of groups) {
-    if (group.roleView !== "student" || group.weekStart > targetWeekStart || (group.tagId ?? null) !== tagId) continue;
-    const bucket = grouped.get(group.targetId) ?? [];
-    bucket.push(group);
-    grouped.set(group.targetId, bucket);
-  }
-
-  const effective = new Map<string, TimetableGroup>();
-  for (const [targetId, bucket] of grouped) {
-    const availableGroups = bucket.filter((group) => isGroupEffectiveForWeek(group, targetWeekStart));
-    const activeGroup = availableGroups.filter((group) => group.isActive).sort(compareEffectiveTimetableGroup)[0];
-    if (activeGroup) effective.set(targetId, activeGroup);
-  }
-  return effective;
+function getEffectiveStudentGroupMap(
+  groups: TimetableGroup[],
+  targetWeekStart: string,
+  tagId: string | null,
+  todayISO?: string
+): Map<string, TimetableGroup> {
+  return getEffectiveStudentTimetableGroupMap(groups, targetWeekStart, tagId, todayISO);
 }
 
 function getStudentGroupTargetSetForWeek(groups: TimetableGroup[], targetWeekStart: string, tagId: string | null): Set<string> {
@@ -613,19 +601,14 @@ function getLatestActiveStudentGroup(
   groups: TimetableGroup[],
   targetId: string,
   tagId: string | null,
-  latestWeekStart: string
+  latestWeekStart: string,
+  todayISO?: string
 ): TimetableGroup | null {
-  return (
-    groups
-      .filter(
-        (group) =>
-          group.roleView === "student" &&
-          group.targetId === targetId &&
-          (group.tagId ?? null) === tagId &&
-          group.weekStart <= latestWeekStart &&
-          group.isActive
-      )
-      .sort(compareEffectiveTimetableGroup)[0] ?? null
+  return selectEffectiveStudentTimetableGroup(
+    groups.filter((group) => group.targetId === targetId),
+    latestWeekStart,
+    tagId,
+    todayISO
   );
 }
 
@@ -654,7 +637,7 @@ function getLatestActiveStudentGroupForInstructor(
 }
 
 function getGroupExpirationLabel(group: TimetableGroup): string {
-  return group.expiresOn ? `${group.expiresOn}부터 만료` : "만료일 없음";
+  return group.expiresOn ? `${group.expiresOn}까지 적용` : "만료일 없음";
 }
 
 function getTimetableGroupMonthKey(group: TimetableGroup): string {
@@ -1658,8 +1641,8 @@ export default function SynchroSPage() {
     return [...byId.values()];
   }, [overviewEvents, students]);
   const effectiveStudentGroupByTargetId = useMemo(
-    () => getEffectiveStudentGroupMap(timetableGroups, weekStart, selectedScheduleTagId),
-    [selectedScheduleTagId, timetableGroups, weekStart]
+    () => getEffectiveStudentGroupMap(timetableGroups, weekStart, selectedScheduleTagId, todayISO),
+    [selectedScheduleTagId, timetableGroups, todayISO, weekStart]
   );
   const studentGroupTargetIdsForWeek = useMemo(
     () => getStudentGroupTargetSetForWeek(timetableGroups, weekStart, selectedScheduleTagId),
@@ -2127,7 +2110,7 @@ export default function SynchroSPage() {
               group.targetId === currentTargetId &&
               (group.tagId ?? null) === selectedScheduleTagId &&
               group.isActive &&
-              isGroupEffectiveForWeek(group, weekStart)
+              isGroupEffectiveForWeek(group, weekStart, todayISO)
           )
           .sort((a, b) => {
             if (a.weekStart !== b.weekStart) return b.weekStart.localeCompare(a.weekStart);
@@ -2135,7 +2118,7 @@ export default function SynchroSPage() {
           })[0] ?? null
       );
     },
-    [currentTargetId, effectiveStudentGroupByTargetId, roleView, selectedScheduleTagId, timetableGroups, weekStart]
+    [currentTargetId, effectiveStudentGroupByTargetId, roleView, selectedScheduleTagId, timetableGroups, todayISO, weekStart]
   );
   const selectedGroup = useMemo(
     () =>
@@ -2151,7 +2134,11 @@ export default function SynchroSPage() {
     [currentTargetId, roleView, selectedGroupId, selectedScheduleTagId, timetableGroups]
   );
   const displayedGroup = selectedGroup ?? activeGroup;
-  const isDisplayedGroupInactive = Boolean(displayedGroup && !displayedGroup.isActive);
+  const isDisplayedGroupInactive = Boolean(
+    displayedGroup &&
+      !displayedGroup.isActive &&
+      displayedGroup.id !== activeGroup?.id
+  );
   const activeStudentEventsForInstructor = useMemo(() => {
     if (roleView !== "instructor" || !selectedInstructorId) return [];
     const selectedInstructorKey = normalizePersonName(selectedInstructorLabel);
@@ -6582,7 +6569,13 @@ export default function SynchroSPage() {
 
     const preferredGroup =
       roleView === "student"
-        ? getLatestActiveStudentGroup(timetableGroups, currentTargetId, selectedScheduleTagId, shiftDate(weekStart, 7))
+        ? getLatestActiveStudentGroup(
+            timetableGroups,
+            currentTargetId,
+            selectedScheduleTagId,
+            shiftDate(weekStart, 7),
+            todayISO
+          )
         : getLatestActiveStudentGroupForInstructor(
             timetableGroups,
             currentTargetId,
@@ -6605,6 +6598,7 @@ export default function SynchroSPage() {
     selectedScheduleTagId,
     timetableGroups,
     timetableGroupsLoading,
+    todayISO,
     weekStart
   ]);
 

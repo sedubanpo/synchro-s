@@ -1,6 +1,8 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { fetchEventsForClassIdsInWeek } from "@/lib/server/scheduleService";
+import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
+import { selectEffectiveStudentTimetableGroup } from "@/lib/timetableGroupSelection";
 import { NextResponse } from "next/server";
 
 type GroupMutationPayload =
@@ -180,7 +182,8 @@ export async function GET(req: Request) {
       return jsonError("Instructor profile not found", 400);
     }
 
-    const createQuery = (includeExpiration: boolean) => {
+    const includeStandbyCandidates = activeOnly && Boolean(effectiveWeekStart);
+    const createQuery = (includeExpiration: boolean, includeStandby: boolean) => {
       const query = supabase
         .from("timetable_groups")
         .select(
@@ -205,7 +208,7 @@ export async function GET(req: Request) {
         query.eq("target_id", ownStudentId);
       }
 
-      if (activeOnly) {
+      if (activeOnly && !includeStandby) {
         query.eq("is_active", true);
       }
       if (hasTagFilter) {
@@ -224,16 +227,49 @@ export async function GET(req: Request) {
     }
 
     let supportsExpiration = true;
-    let { data, error } = await createQuery(true);
-    if (error && isMissingColumnError(error, "expires_on")) {
+    let rows: any[];
+    try {
+      rows = await fetchAllSupabaseRows<any>((from, to) =>
+        createQuery(true, includeStandbyCandidates).range(from, to)
+      );
+    } catch (error) {
+      if (!isMissingColumnError(error, "expires_on")) throw error;
       supportsExpiration = false;
-      const fallback = await createQuery(false);
-      data = fallback.data;
-      error = fallback.error;
+      rows = await fetchAllSupabaseRows<any>((from, to) =>
+        createQuery(false, false).range(from, to)
+      );
     }
-    if (error) throw error;
 
-    const rows = data ?? [];
+    if (includeStandbyCandidates && supportsExpiration && effectiveWeekStart) {
+      const rowsByScope = new Map<string, any[]>();
+      for (const row of rows) {
+        const key = `${row.target_id}:${row.tag_id ?? ""}`;
+        const bucket = rowsByScope.get(key) ?? [];
+        bucket.push(row);
+        rowsByScope.set(key, bucket);
+      }
+
+      const standbyIds = new Set<string>();
+      for (const bucket of rowsByScope.values()) {
+        const selected = selectEffectiveStudentTimetableGroup(
+          bucket.map((row) => ({
+            id: row.id,
+            roleView: row.role_view,
+            targetId: row.target_id,
+            weekStart: row.week_start,
+            expiresOn: row.expires_on ?? null,
+            tagId: row.tag_id ?? null,
+            isActive: row.is_active === true,
+            createdAt: row.created_at
+          })),
+          effectiveWeekStart,
+          bucket[0]?.tag_id ?? null,
+          effectiveWeekStart
+        );
+        if (selected && !selected.isActive) standbyIds.add(selected.id);
+      }
+      rows = rows.filter((row) => row.is_active === true || standbyIds.has(row.id));
+    }
     const missingSnapshotClassIds = includeSnapshots && effectiveWeekStart
       ? Array.from(new Set(rows.flatMap((row: any) => {
           const snapshotEvents = Array.isArray(row.snapshot_events) ? row.snapshot_events : [];
