@@ -1,6 +1,11 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { getAuthenticatedProfile } from "@/lib/server/auth";
-import { getBearerIdToken, loadFirebaseRoster, type FirebaseStudentRosterItem } from "@/lib/server/firestoreRoster";
+import {
+  getBearerIdToken,
+  isStudentActiveFromCanonicalRoster,
+  loadFirebaseRoster,
+  type FirebaseStudentRosterItem
+} from "@/lib/server/firestoreRoster";
 import { type SupabaseStudentMirrorRow } from "@/lib/server/firebaseStudentMirror";
 import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
 import { NextResponse } from "next/server";
@@ -517,8 +522,7 @@ export async function GET(req: Request) {
 
       const isStudentRosterActive = (row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
         const firebaseStudent = firebaseRoster.studentsAvailable ? resolveFirebaseStudent(row) : undefined;
-        if (firebaseStudent) return firebaseStudent.active;
-        return row.is_active !== false;
+        return isStudentActiveFromCanonicalRoster(firebaseRoster.studentsAvailable, firebaseStudent, row.is_active);
       };
       students = studentRows
         .filter(isStudentRosterActive)

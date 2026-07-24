@@ -7,6 +7,7 @@ import { planFirebaseStudentSync, planMissingFirebaseStudentInserts } from "../l
 import {
   deduplicateFirebaseRosterStudents,
   isFirebaseRosterStudentActive,
+  isStudentActiveFromCanonicalRoster,
   loadFirebaseRoster,
   type FirebaseStudentRosterItem
 } from "../lib/server/firestoreRoster";
@@ -28,7 +29,7 @@ const hajimin: FirebaseStudentRosterItem = {
   active: true
 };
 
-for (const status of ["중지", "보류", "퇴원", "휴원", "미등록", "비활성", "PAUSED", "STOPPED", "INACTIVE"]) {
+for (const status of ["중지", "보류", "퇴원", "휴원", "미등록", "비활성", "PAUSED", "STOPPED", "INACTIVE", "RETURNING", "HOLD"]) {
   assert.equal(
     isFirebaseRosterStudentActive({ status }),
     false,
@@ -46,6 +47,21 @@ assert.equal(
   isFirebaseRosterStudentActive({ status: "등록", active: false }),
   false,
   "An explicit inactive flag must win even when a legacy status label says 등록."
+);
+assert.equal(
+  isStudentActiveFromCanonicalRoster(true, undefined, true),
+  false,
+  "A stale Supabase-only student must be excluded when the canonical Firebase roster is available."
+);
+assert.equal(
+  isStudentActiveFromCanonicalRoster(true, hajimin, false),
+  true,
+  "A current Firebase student must remain active even when the Supabase mirror is stale."
+);
+assert.equal(
+  isStudentActiveFromCanonicalRoster(false, undefined, true),
+  true,
+  "The Supabase mirror may be used only as a degraded fallback when Firebase is unavailable."
 );
 
 const planned = planMissingFirebaseStudentInserts([], [hajimin], "2026-07-22T00:00:00.000Z");
@@ -295,6 +311,11 @@ assert.match(
   "A failed canonical roster refresh must return a truthful error."
 );
 assert.match(optionsRoute, /firebaseRoster\.studentsAvailable/, "Student roster behavior must not depend on instructor permissions.");
+assert.match(
+  optionsRoute,
+  /isStudentActiveFromCanonicalRoster\(firebaseRoster\.studentsAvailable, firebaseStudent, row\.is_active\)/,
+  "When Firebase is readable, an unmatched Supabase-only student must not leak into the active roster."
+);
 assert.match(
   optionsRoute,
   /firebaseStudentByUniqueName/,

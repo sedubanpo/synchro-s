@@ -107,6 +107,8 @@ const INACTIVE_ROSTER_STATUSES = new Set([
   "INACTIVE",
   "SUSPENDED",
   "WITHDRAWN",
+  "RETURNING",
+  "HOLD",
   "중지",
   "보류",
   "퇴원",
@@ -119,6 +121,17 @@ export function isFirebaseRosterStudentActive(data: Record<string, unknown>): bo
   const explicitActive = data.active !== false && data.isActive !== false;
   const status = normalizeStatus(data.status, explicitActive).replace(/\s+/g, "");
   return explicitActive && !INACTIVE_ROSTER_STATUSES.has(status);
+}
+
+export function isStudentActiveFromCanonicalRoster(
+  firebaseRosterAvailable: boolean,
+  firebaseStudent: FirebaseStudentRosterItem | undefined,
+  legacySupabaseActive: boolean | null
+): boolean {
+  if (firebaseRosterAvailable) {
+    return firebaseStudent?.active === true;
+  }
+  return legacySupabaseActive !== false;
 }
 
 function formatStudentSecondary(school: string, grade: string): string {
