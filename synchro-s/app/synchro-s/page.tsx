@@ -2495,7 +2495,10 @@ export default function SynchroSPage() {
       const canonicalStudent =
         reviewStudentAlias.idToCanonical.get(item.studentId) ??
         (item.studentName ? reviewStudentAlias.nameToCanonical.get(normalizePersonName(item.studentName)) : undefined);
-      const canonicalId = canonicalStudent?.id ?? item.studentId;
+      if (!canonicalStudent) {
+        continue;
+      }
+      const canonicalId = canonicalStudent.id;
       const existing = map.get(canonicalId);
       if (!existing || (item.reviewedAt ?? "") > (existing.reviewedAt ?? "")) {
         map.set(canonicalId, { ...item, studentId: canonicalId });

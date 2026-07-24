@@ -100,10 +100,25 @@ function normalizeStatus(value: unknown, fallbackActive: boolean): string {
   return fallbackActive ? "ACTIVE" : "PAUSED";
 }
 
-function isRosterActive(data: Record<string, unknown>): boolean {
+const INACTIVE_ROSTER_STATUSES = new Set([
+  "PAUSED",
+  "STOPPED",
+  "DISABLED",
+  "INACTIVE",
+  "SUSPENDED",
+  "WITHDRAWN",
+  "중지",
+  "보류",
+  "퇴원",
+  "휴원",
+  "미등록",
+  "비활성"
+]);
+
+export function isFirebaseRosterStudentActive(data: Record<string, unknown>): boolean {
   const explicitActive = data.active !== false && data.isActive !== false;
-  const status = normalizeStatus(data.status, explicitActive);
-  return explicitActive && !["PAUSED", "STOPPED", "DISABLED", "INACTIVE", "SUSPENDED"].includes(status);
+  const status = normalizeStatus(data.status, explicitActive).replace(/\s+/g, "");
+  return explicitActive && !INACTIVE_ROSTER_STATUSES.has(status);
 }
 
 function formatStudentSecondary(school: string, grade: string): string {
@@ -162,7 +177,7 @@ function normalizeStudent(id: string, data: Record<string, unknown>): FirebaseSt
   );
   const school = asString(data.school);
   const grade = asString(data.grade);
-  const active = isRosterActive(data);
+  const active = isFirebaseRosterStudentActive(data);
   return {
     id: canonicalStudentId,
     studentId: canonicalStudentId,

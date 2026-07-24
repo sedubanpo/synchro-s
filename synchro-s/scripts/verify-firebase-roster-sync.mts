@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { planFirebaseStudentSync, planMissingFirebaseStudentInserts } from "../lib/server/firebaseStudentMirror";
 import {
   deduplicateFirebaseRosterStudents,
+  isFirebaseRosterStudentActive,
   loadFirebaseRoster,
   type FirebaseStudentRosterItem
 } from "../lib/server/firestoreRoster";
@@ -26,6 +27,26 @@ const hajimin: FirebaseStudentRosterItem = {
   status: "ACTIVE",
   active: true
 };
+
+for (const status of ["중지", "보류", "퇴원", "휴원", "미등록", "비활성", "PAUSED", "STOPPED", "INACTIVE"]) {
+  assert.equal(
+    isFirebaseRosterStudentActive({ status }),
+    false,
+    `Firebase roster status '${status}' must be excluded from the active Synchro-S roster.`
+  );
+}
+for (const status of ["등록", "복귀", "ACTIVE"]) {
+  assert.equal(
+    isFirebaseRosterStudentActive({ status }),
+    true,
+    `Firebase roster status '${status}' must remain in the active Synchro-S roster.`
+  );
+}
+assert.equal(
+  isFirebaseRosterStudentActive({ status: "등록", active: false }),
+  false,
+  "An explicit inactive flag must win even when a legacy status label says 등록."
+);
 
 const planned = planMissingFirebaseStudentInserts([], [hajimin], "2026-07-22T00:00:00.000Z");
 assert.equal(planned.length, 1, "A canonical Firebase student must be planned for Supabase mirroring.");
@@ -321,6 +342,25 @@ assert.doesNotMatch(rosterSource, /listFirestoreCollection\(idToken, ["']instruc
 assert.match(rosterSource, /createHash\(["']sha256["']\)/, "Roster cache entries must be isolated by a non-reversible token fingerprint.");
 
 const pageSource = fs.readFileSync(path.join(repoRoot, "app/synchro-s/page.tsx"), "utf8");
+const reviewStudentScopeSource = pageSource.slice(
+  pageSource.indexOf("const reviewStudents = useMemo"),
+  pageSource.indexOf("const reviewStudentAlias = useMemo")
+);
+assert.match(
+  reviewStudentScopeSource,
+  /for \(const student of students\)/,
+  "Every current roster student must remain reviewable even when the student has no timetable."
+);
+assert.doesNotMatch(
+  reviewStudentScopeSource,
+  /suspendedStudents/,
+  "Suspended students must not be added to the review target universe."
+);
+assert.match(
+  pageSource,
+  /if \(!canonicalStudent\) \{\s*continue;\s*\}/,
+  "Saved review records for students outside the current roster must be preserved but excluded from review rows and statistics."
+);
 assert.match(pageSource, /await auth\.authStateReady\(\)/, "Client requests must wait for Firebase auth restoration.");
 assert.match(
   pageSource,
