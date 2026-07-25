@@ -3,6 +3,7 @@
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
+import { resolveSubjectOption } from "@/lib/subjectResolver";
 import type { ClassTypeOption, ScheduleEvent, SelectOption, SubjectOption, Weekday } from "@/types/schedule";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -42,10 +43,6 @@ function shiftDate(date: string, days: number): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(parsed);
 }
 
-function normalized(value: string): string {
-  return value.replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
-}
-
 function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
   return aStart < bEnd && aEnd > bStart;
 }
@@ -81,6 +78,8 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hideEmptyDays, setHideEmptyDays] = useState(false);
+  const [hideEmptyTimes, setHideEmptyTimes] = useState(false);
 
   const activeStudents = useMemo(() => students.filter((student) => student.isActive !== false), [students]);
   const activeInstructors = useMemo(() => instructors.filter((instructor) => instructor.isActive !== false), [instructors]);
@@ -147,15 +146,20 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
     });
   }, [selectedProspect]);
 
-  const addDraft = (input: SyncScheduleDraftInput) => {
+  const addDraft = (input: SyncScheduleDraftInput): boolean => {
     const instructor = activeInstructors.find((item) => item.id === input.instructorId);
-    const subject = subjects.find((item) => normalized(item.label) === normalized(input.subjectLabel));
+    const subject = resolveSubjectOption(subjects, input.subjectLabel);
     const classType = classTypes.find((item) => item.code === input.classTypeCode);
     const isSelfStudy = input.kind === "self-study";
 
     if (!isSelfStudy && (!instructor || !subject || !classType)) {
-      setError("강사, 과목, 수업 유형을 다시 확인해 주세요.");
-      return;
+      const missing = [
+        !subject ? `"${input.subjectLabel}" 과목` : "",
+        !instructor ? "강사" : "",
+        !classType ? "수업 유형" : ""
+      ].filter(Boolean);
+      setError(`${missing.join(", ")} 정보를 확인해 주세요.`);
+      return false;
     }
     const overlap = !isSelfStudy
       ? draftEvents.find(
@@ -167,7 +171,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
       : null;
     if (overlap) {
       setError(`${instructor?.name ?? "선택 강사"}의 같은 요일 수업 시간이 겹칩니다.`);
-      return;
+      return false;
     }
 
     const name = targetName || (mode === "prospect" ? "[가안] 신규문의" : "재원생");
@@ -194,6 +198,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
     setDraftEvents((prev) => [...prev, event].sort((a, b) => a.weekday - b.weekday || a.startTime.localeCompare(b.startTime)));
     setError(null);
     setNotice("시간표 초안에 수업을 추가했습니다.");
+    return true;
   };
 
   const saveResident = async (): Promise<number> => {
@@ -432,8 +437,28 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
               <p className="text-sm font-black text-slate-900">{targetName || "대상 미선택"} 시간표 초안</p>
               <p className="mt-1 text-xs font-semibold text-slate-500">빈칸을 눌러 수업을 추가하고, 블록의 삭제 버튼으로 제거할 수 있습니다.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">초안 {draftEvents.length}건</span>
+              <button
+                type="button"
+                aria-pressed={hideEmptyDays}
+                onClick={() => setHideEmptyDays((current) => !current)}
+                className={`sync-pressable sync-focus rounded-lg border px-3 py-2 text-xs font-bold ${
+                  hideEmptyDays ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                빈 요일 숨기기 {hideEmptyDays ? "ON" : "OFF"}
+              </button>
+              <button
+                type="button"
+                aria-pressed={hideEmptyTimes}
+                onClick={() => setHideEmptyTimes((current) => !current)}
+                className={`sync-pressable sync-focus rounded-lg border px-3 py-2 text-xs font-bold ${
+                  hideEmptyTimes ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                빈 시간 숨기기 {hideEmptyTimes ? "ON" : "OFF"}
+              </button>
               <button type="button" disabled={draftEvents.length === 0 || saving} onClick={() => setDraftEvents([])} className="sync-pressable sync-focus rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 disabled:opacity-40">전체 지우기</button>
               <button type="button" disabled={saving || loading || draftEvents.length === 0 || !targetName} onClick={() => void handleSave()} className="sync-pressable sync-focus rounded-lg bg-blue-600 px-4 py-2 text-xs font-black text-white shadow-sm disabled:opacity-40">{saving ? "저장 중" : "새 버전 저장"}</button>
             </div>
@@ -443,6 +468,8 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
             days={DAYS}
             timeSlots={TIME_SLOTS}
             events={draftEvents}
+            hideEmptyDays={hideEmptyDays}
+            hideEmptyTimes={hideEmptyTimes}
             viewMode="detailed"
             onCellClick={(cell) => setModalCell(cell)}
             onEventDelete={async (event) => setDraftEvents((prev) => prev.filter((item) => item.id !== event.id))}

@@ -22,7 +22,7 @@ type SyncScheduleDraftModalProps = {
   instructors: SelectOption[];
   subjects: SubjectOption[];
   classTypes: ClassTypeOption[];
-  onSubmit: (input: SyncScheduleDraftInput) => void;
+  onSubmit: (input: SyncScheduleDraftInput) => boolean | void;
   onClose: () => void;
 };
 
@@ -36,6 +36,11 @@ function normalizeLookupToken(value: string): string {
 
 function subjectAliases(label: string): string[] {
   const normalized = normalizeLookupToken(label);
+  if (normalized.includes("사회문화") || normalized === "사문") return ["사회", "사탐", "social"];
+  if (normalized.includes("세계지리") || normalized === "세지") return ["사회", "사탐", "social"];
+  if (normalized.includes("통합사회") || normalized === "통사") return ["사회", "사탐", "social"];
+  if (normalized.includes("생활과윤리") || normalized === "생윤") return ["사회", "사탐", "social"];
+  if (normalized.includes("통합과학") || normalized === "통과") return ["과학", "science"];
   if (normalized.includes("수학")) return ["수학", "math"];
   if (normalized.includes("영어")) return ["영어", "english", "eng"];
   if (normalized.includes("국어")) return ["국어", "korean"];
@@ -170,7 +175,7 @@ export function SyncScheduleDraftModal({
       }
     }
 
-    onSubmit({
+    const accepted = onSubmit({
       kind: isSelfStudy ? "self-study" : "class",
       weekday: initialCell.weekday,
       startTime,
@@ -180,7 +185,7 @@ export function SyncScheduleDraftModal({
       classTypeCode: isSelfStudy ? "SELF_STUDY" : classTypeCode,
       note: note.trim()
     });
-    onClose();
+    if (accepted !== false) onClose();
   };
 
   const weekdayLabel = DAYS.find((day) => day.key === initialCell?.weekday)?.label ?? "-";

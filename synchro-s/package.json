@@ -21,7 +21,8 @@
     "verify:firebase-roster-sync": "node --import tsx scripts/verify-firebase-roster-sync.mts",
     "verify:timetable-expiration-handoff": "node --import tsx scripts/verify-timetable-expiration-handoff.mts",
     "verify:home-dashboard": "node scripts/verify-home-dashboard-ux.mjs",
-    "verify:multi-hour-subject-edit": "node --import tsx scripts/verify-multi-hour-subject-edit.mts"
+    "verify:multi-hour-subject-edit": "node --import tsx scripts/verify-multi-hour-subject-edit.mts",
+    "verify:schedule-creation-draft": "node --import tsx scripts/verify-schedule-creation-draft.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
