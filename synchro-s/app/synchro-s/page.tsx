@@ -3,6 +3,7 @@
 import { InstructorAvailabilityWorkspace } from "@/components/schedule/InstructorAvailabilityWorkspace";
 import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
+import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { StudentAvailabilityWorkspace } from "@/components/schedule/StudentAvailabilityWorkspace";
 import { ScheduleModal } from "@/components/schedule/ScheduleModal";
 import { ScheduleTagManager, SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
@@ -218,6 +219,7 @@ type SaveHistoryEntry = {
   targetLabel: string;
   tagId?: string | null;
   tagLabel: string;
+  source: "student_timetable" | "schedule_creation";
 };
 
 type SaveHistoryResponse = {
@@ -229,6 +231,7 @@ type SaveHistoryResponse = {
     target_id?: string | null;
     tag_id?: string | null;
     tag_name?: string | null;
+    source?: "student_timetable" | "schedule_creation";
   }[];
 };
 
@@ -1535,6 +1538,7 @@ export default function SynchroSPage() {
   const [selectedScheduleTagId, setSelectedScheduleTagId] = useState<string | null>(null);
   const [scheduleTagManagerOpen, setScheduleTagManagerOpen] = useState(false);
   const [scheduleTagsBusy, setScheduleTagsBusy] = useState(false);
+  const [scheduleTagSelectionReady, setScheduleTagSelectionReady] = useState(false);
   const [timetableGroupsLoading, setTimetableGroupsLoading] = useState(true);
   const [timetableGroupExpirationSupported, setTimetableGroupExpirationSupported] = useState(true);
   const [expandedGroupMonths, setExpandedGroupMonths] = useState<Record<string, boolean>>({});
@@ -1898,7 +1902,9 @@ export default function SynchroSPage() {
         events: [event]
       });
     }
-    return [...byInstructor.values()].sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
+    return [...byInstructor.values()]
+      .map((item) => ({ ...item, events: mergeHomeInstructorEvents(item.events) }))
+      .sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
   }, [homeTodayEvents, instructors]);
   const homeTodayStudentSummaries = useMemo<HomePersonSummary[]>(() => {
     const byStudent = new Map<string, HomePersonSummary>();
@@ -1928,7 +1934,7 @@ export default function SynchroSPage() {
   const isHomeDashboardLoading =
     showIntroPage &&
     !isInstructorReadOnly &&
-    (!viewerRoleResolved || overviewLoading || timetableGroupsLoading);
+    (!viewerRoleResolved || !scheduleTagSelectionReady || overviewLoading || timetableGroupsLoading);
   const selectedSubjectForPlacement = useMemo(
     () => subjects.find((subject) => subject.code === newPlacementDraft.subjectCode) ?? null,
     [newPlacementDraft.subjectCode, subjects]
@@ -3183,7 +3189,8 @@ export default function SynchroSPage() {
         targetId: item.target_id ?? null,
         targetLabel: `${item.target_type}: ${item.target_name}`,
         tagId: item.tag_id ?? null,
-        tagLabel: item.tag_name?.trim() || "기록 없음"
+        tagLabel: item.tag_name?.trim() || "기록 없음",
+        source: item.source ?? "student_timetable"
       }))
     );
     setError(null);
@@ -6400,6 +6407,13 @@ export default function SynchroSPage() {
       setNotice(null);
       if (entry.tagId) setSelectedScheduleTagId(entry.tagId);
 
+      if (entry.source === "schedule_creation") {
+        setMainTab("new");
+        setRoleView("student");
+        setNotice(`'${entry.targetName}' 시간표를 저장한 시간표 생성 메뉴를 열었습니다.`);
+        return;
+      }
+
       if (entry.targetType === "학생") {
         const matchedStudent = findOptionByName(students, entry.targetName);
         const fallbackStudent = entry.targetId ? { id: entry.targetId, name: entry.targetName } : null;
@@ -6474,7 +6488,7 @@ export default function SynchroSPage() {
   useEffect(() => {
     void loadScheduleTags().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "시간표 태그를 불러오지 못했습니다.");
-    });
+    }).finally(() => setScheduleTagSelectionReady(true));
   }, [loadScheduleTags]);
 
   useEffect(() => {
@@ -6514,10 +6528,11 @@ export default function SynchroSPage() {
   }, [loadSaveHistory]);
 
   useEffect(() => {
+    if (!viewerRoleResolved || !scheduleTagSelectionReady) return;
     void loadTimetableGroups().catch((loadError) => {
       setError(loadError instanceof Error ? loadError.message : "저장된 시간표 그룹을 불러오지 못했습니다.");
     });
-  }, [loadTimetableGroups]);
+  }, [loadTimetableGroups, scheduleTagSelectionReady, viewerRoleResolved]);
 
   useEffect(() => {
     if (mainTab !== "overview" && !(showIntroPage && !isInstructorReadOnly)) {
@@ -6815,20 +6830,37 @@ export default function SynchroSPage() {
               <div className="relative pl-4">
                 <span className="absolute left-[6px] top-1 bottom-1 w-px bg-slate-200" />
                 <div className="space-y-2.5">
-                  {saveHistory.map((entry) => (
+                  {saveHistory.map((entry) => {
+                    const isScheduleCreation = entry.source === "schedule_creation";
+                    return (
                     <div key={entry.id} className="relative">
-                      <span className="absolute -left-4 top-1.5 h-2.5 w-2.5 rounded-full border border-blue-100 bg-blue-500 shadow-sm shadow-blue-200" />
+                      <span
+                        className={`absolute -left-4 top-1.5 h-2.5 w-2.5 rounded-full border shadow-sm ${
+                          isScheduleCreation
+                            ? "border-emerald-100 bg-emerald-500 shadow-emerald-200"
+                            : "border-blue-100 bg-blue-500 shadow-blue-200"
+                        }`}
+                      />
                       <button
                         type="button"
                         onClick={() => handleSelectSaveHistoryTarget(entry)}
-                        className="sync-pressable sync-focus w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left hover:border-blue-200 hover:bg-blue-50"
+                        className={`sync-pressable sync-focus w-full rounded-lg border px-2.5 py-2 text-left text-white shadow-sm ${
+                          isScheduleCreation
+                            ? "border-emerald-700 bg-emerald-600 hover:border-emerald-800 hover:bg-emerald-700"
+                            : "border-blue-700 bg-blue-600 hover:border-blue-800 hover:bg-blue-700"
+                        }`}
                       >
-                        <p className="truncate text-[10px] font-black tracking-wide text-slate-700">[{entry.timestampLabel}]</p>
-                        <p className="mt-1 truncate text-[11px] font-semibold leading-5 text-slate-600">{entry.targetLabel}</p>
-                        <p className="mt-0.5 truncate text-[10px] font-bold text-blue-600">분류: {entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</p>
+                        <p className="truncate text-[10px] font-black tracking-wide text-white/90">[{entry.timestampLabel}]</p>
+                        <p className="mt-1 truncate text-[11px] font-bold leading-5 text-white">
+                          {isScheduleCreation ? `시간표 생성: ${entry.targetName}` : entry.targetLabel}
+                        </p>
+                        <p className="mt-1 inline-flex max-w-full rounded bg-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-950">
+                          <span className="truncate">분류: {entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</span>
+                        </p>
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -8927,8 +8959,9 @@ export default function SynchroSPage() {
             instructors={instructors}
             subjects={subjects}
             classTypes={classTypes}
+            scheduleTagId={selectedScheduleTagId}
             onDataChanged={async () => {
-              await loadTimetableGroups();
+              await Promise.all([loadTimetableGroups(), loadSaveHistory()]);
             }}
           />
           <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

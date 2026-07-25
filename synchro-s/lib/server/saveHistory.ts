@@ -1,5 +1,3 @@
-import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
-
 type SupabaseLike = {
   from: (table: string) => any;
 };
@@ -13,6 +11,20 @@ type SaveHistoryRow = {
   tag_id?: string | null;
   schedule_tags?: { name?: string | null } | { name?: string | null }[] | null;
 };
+
+export type SaveHistorySource = "student_timetable" | "schedule_creation";
+
+const SCHEDULE_CREATION_PREFIX = "__schedule_creation__:";
+
+function encodeTargetName(targetName: string, source: SaveHistorySource): string {
+  return source === "schedule_creation" ? `${SCHEDULE_CREATION_PREFIX}${targetName.trim()}` : targetName.trim();
+}
+
+function decodeTargetName(targetName: string): { targetName: string; source: SaveHistorySource } {
+  return targetName.startsWith(SCHEDULE_CREATION_PREFIX)
+    ? { targetName: targetName.slice(SCHEDULE_CREATION_PREFIX.length), source: "schedule_creation" }
+    : { targetName, source: "student_timetable" };
+}
 
 function normalizeTargetName(value: string): string {
   return value
@@ -48,7 +60,8 @@ export async function insertSaveHistory(
   supabase: SupabaseLike,
   targetType?: string | null,
   targetName?: string | null,
-  tagId?: string | null
+  tagId?: string | null,
+  source: SaveHistorySource = "student_timetable"
 ): Promise<void> {
   if ((targetType !== "학생" && targetType !== "강사") || !targetName?.trim()) {
     return;
@@ -56,7 +69,7 @@ export async function insertSaveHistory(
 
   const { error } = await supabase.from("save_history").insert({
     target_type: targetType,
-    target_name: targetName.trim(),
+    target_name: encodeTargetName(targetName, source),
     tag_id: tagId?.trim() || null
   });
 
@@ -80,22 +93,19 @@ export async function fetchRecentSaveHistory(supabase: SupabaseLike, limit = 20)
 
   // Target resolution is supplemental metadata. Preserve save-history rendering
   // even when either roster lookup is temporarily unavailable.
-  const [studentRows, instructorRows] = await Promise.all([
-    fetchAllSupabaseRows<{ id: string; student_name: string }>(async (from, to) => {
-      const result = await supabase.from("students").select("id,student_name").order("id").range(from, to);
-      return {
-        data: (result.data ?? []) as { id: string; student_name: string }[],
-        error: result.error
-      };
-    }).catch(() => []),
-    fetchAllSupabaseRows<{ id: string; instructor_name: string }>(async (from, to) => {
-      const result = await supabase.from("instructors").select("id,instructor_name").order("id").range(from, to);
-      return {
-        data: (result.data ?? []) as { id: string; instructor_name: string }[],
-        error: result.error
-      };
-    }).catch(() => [])
+  const decodedRows = rows.map((row) => ({ row, ...decodeTargetName(row.target_name) }));
+  const studentNames = Array.from(new Set(decodedRows.filter(({ row }) => row.target_type === "학생").map(({ targetName }) => targetName)));
+  const instructorNames = Array.from(new Set(decodedRows.filter(({ row }) => row.target_type === "강사").map(({ targetName }) => targetName)));
+  const [studentResult, instructorResult] = await Promise.all([
+    studentNames.length > 0
+      ? supabase.from("students").select("id,student_name").in("student_name", studentNames)
+      : Promise.resolve({ data: [], error: null }),
+    instructorNames.length > 0
+      ? supabase.from("instructors").select("id,instructor_name").in("instructor_name", instructorNames)
+      : Promise.resolve({ data: [], error: null })
   ]);
+  const studentRows = (studentResult.error ? [] : (studentResult.data ?? [])) as { id: string; student_name: string }[];
+  const instructorRows = (instructorResult.error ? [] : (instructorResult.data ?? [])) as { id: string; instructor_name: string }[];
 
   const studentTargets = studentRows.map((row) => ({
     id: row.id,
@@ -106,12 +116,14 @@ export async function fetchRecentSaveHistory(supabase: SupabaseLike, limit = 20)
     name: row.instructor_name
   }));
 
-  return rows.map((row) => ({
+  return decodedRows.map(({ row, targetName, source }) => ({
     ...row,
+    target_name: targetName,
+    source,
     tag_name: Array.isArray(row.schedule_tags) ? row.schedule_tags[0]?.name ?? null : row.schedule_tags?.name ?? null,
     target_id:
       row.target_type === "학생"
-        ? findTargetId(studentTargets, row.target_name)
-        : findTargetId(instructorTargets, row.target_name)
+        ? findTargetId(studentTargets, targetName)
+        : findTargetId(instructorTargets, targetName)
   }));
 }

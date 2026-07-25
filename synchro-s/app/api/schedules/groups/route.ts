@@ -2,6 +2,7 @@ import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { fetchEventsForClassIdsInWeek } from "@/lib/server/scheduleService";
 import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
+import { insertSaveHistory } from "@/lib/server/saveHistory";
 import { selectEffectiveStudentTimetableGroup } from "@/lib/timetableGroupSelection";
 import { NextResponse } from "next/server";
 
@@ -43,6 +44,7 @@ type GroupCreatePayload = {
   classIds: string[];
   snapshotEvents: unknown[];
   isActive?: boolean;
+  historySource?: "schedule_creation";
 };
 
 function isRoleView(value: string | null): value is "student" | "instructor" {
@@ -390,6 +392,25 @@ export async function POST(req: Request) {
         throw activationError;
       }
       data.is_active = activationState === true;
+    }
+
+    if (payload.historySource === "schedule_creation" && payload.roleView === "student") {
+      try {
+        const { data: student } = await supabase
+          .from("students")
+          .select("student_name")
+          .eq("id", payload.targetId)
+          .maybeSingle();
+        await insertSaveHistory(
+          supabase,
+          "학생",
+          student?.student_name ?? payload.name.trim(),
+          payload.tagId ?? null,
+          "schedule_creation"
+        );
+      } catch (historyError) {
+        console.error("[save-history] schedule creation insert failed", historyError);
+      }
     }
 
     return NextResponse.json({

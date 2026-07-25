@@ -38,6 +38,7 @@ type Props = {
   instructors: SelectOption[];
   subjects: SubjectOption[];
   classTypes: ClassTypeOption[];
+  scheduleTagId: string | null;
   onDataChanged: () => void | Promise<void>;
 };
 
@@ -68,7 +69,7 @@ function mapGroupItem(item: any, kind: TargetMode): CreationGroup {
   };
 }
 
-export function ScheduleCreationWorkspace({ weekStart, students, instructors, subjects, classTypes, onDataChanged }: Props) {
+export function ScheduleCreationWorkspace({ weekStart, students, instructors, subjects, classTypes, scheduleTagId, onDataChanged }: Props) {
   const [mode, setMode] = useState<TargetMode>("resident");
   const [studentId, setStudentId] = useState("");
   const [prospectId, setProspectId] = useState("");
@@ -249,7 +250,8 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
             endTime: event.endTime
           })),
           targetType: "학생",
-          targetName: selectedStudent.name
+          targetName: selectedStudent.name,
+          recordHistory: false
         })
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string; results?: { status?: string; classId?: string; conflict?: { conflicts?: { reason?: string }[] } }[] };
@@ -282,9 +284,11 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
         roleView: "student",
         targetId: studentId,
         weekStart,
+        tagId: scheduleTagId,
         classIds,
         snapshotEvents: snapshots,
-        isActive: false
+        isActive: false,
+        historySource: "schedule_creation"
       })
     });
     if (!groupRes.ok) {
@@ -305,6 +309,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
         prospect: prospectForm,
         weekStart,
         groupName: groupName.trim(),
+        scheduleTagId: scheduleTagId ?? undefined,
         items: draftEvents.map((event) => ({
           instructorId: event.instructorId || undefined,
           instructorName: event.instructorName,

@@ -1,6 +1,7 @@
 "use client";
 
 import { TIME_SLOTS } from "@/lib/constants";
+import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { getSubjectColorClass } from "@/lib/subjectColors";
 import type { ScheduleEvent } from "@/types/schedule";
 import { useEffect, useMemo, useState } from "react";
@@ -121,13 +122,17 @@ export function HomeInstructorFolderDashboard({
     () => instructorSummaries.find((item) => item.id === selectedInstructorId) ?? instructorSummaries[0] ?? null,
     [instructorSummaries, selectedInstructorId]
   );
+  const selectedInstructorEvents = useMemo(
+    () => mergeHomeInstructorEvents(selectedInstructor?.events ?? []),
+    [selectedInstructor]
+  );
   const rows = useMemo(
     () =>
       TIME_SLOTS.map((slot) => ({
         slot,
-        events: (selectedInstructor?.events ?? []).filter((event) => event.startTime === slot)
+        events: selectedInstructorEvents.filter((event) => event.startTime === slot)
       })),
-    [selectedInstructor]
+    [selectedInstructorEvents]
   );
   const selectedStudentCount = useMemo(
     () => new Set((selectedInstructor?.events ?? []).flatMap((event) => event.studentNames)).size,
@@ -311,7 +316,7 @@ export function HomeInstructorFolderDashboard({
                     <p className="mt-0.5 text-xs font-semibold text-slate-300">{selectedInstructor.secondary || "과목 정보 없음"}</p>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-1.5">
-                    <span className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold tabular-nums">수업 {selectedInstructor.events.length}개</span>
+                    <span className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold tabular-nums">수업 {selectedInstructorEvents.length}개</span>
                     <span className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold tabular-nums">학생 {selectedStudentCount}명</span>
                     <span className="rounded-md bg-blue-500 px-2 py-1 text-[11px] font-black">#{selectedTagLabel}</span>
                     <button type="button" onClick={() => onOpenInstructor(selectedInstructor.id)} className="sync-pressable sync-focus min-h-10 rounded-md border border-white/20 bg-white px-3 text-[11px] font-black text-slate-900 hover:bg-blue-50">

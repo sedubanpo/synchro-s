@@ -11,6 +11,8 @@ type ImportBatchRequest = {
   items: CreateScheduleRequest[];
   targetType?: "학생" | "강사";
   targetName?: string;
+  recordHistory?: boolean;
+  historySource?: "student_timetable" | "schedule_creation";
 };
 
 type IndexedImportItem = {
@@ -159,9 +161,15 @@ export async function POST(req: Request) {
       }
       await assertSourceInstructorsMatch(supabase, payload.items);
       const results = await importBatchWithSafeConcurrency(supabase, payload.items, user.id);
-      if (results.some((result) => result.status === "created" || result.status === "enrolled" || result.status === "existing")) {
+      if (payload.recordHistory !== false && results.some((result) => result.status === "created" || result.status === "enrolled" || result.status === "existing")) {
         try {
-          await insertSaveHistory(supabase, payload.targetType, payload.targetName, payload.items[0]?.scheduleTagId ?? null);
+          await insertSaveHistory(
+            supabase,
+            payload.targetType,
+            payload.targetName,
+            payload.items[0]?.scheduleTagId ?? null,
+            payload.historySource ?? "student_timetable"
+          );
         } catch (historyError) {
           console.error("[save-history] insert failed", historyError);
         }

@@ -7,7 +7,7 @@ const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf
 
 assert.match(page, /const \[overviewLoading, setOverviewLoading\] = useState\(true\)/, "overview loading must cover the first paint");
 assert.match(page, /const \[timetableGroupsLoading, setTimetableGroupsLoading\] = useState\(true\)/, "group loading must cover the first paint");
-assert.match(page, /!viewerRoleResolved \|\| overviewLoading \|\| timetableGroupsLoading/, "home loading must wait for role and schedule data");
+assert.match(page, /!viewerRoleResolved \|\| !scheduleTagSelectionReady \|\| overviewLoading \|\| timetableGroupsLoading/, "home loading must wait for role, tag selection, and schedule data");
 assert.match(page, /\.finally\(\(\) => setViewerRoleResolved\(true\)\)/, "failed roster loading must not leave the home skeleton running forever");
 
 const openInstructor = page.slice(page.indexOf("onOpenInstructor={(id) =>"), page.indexOf("onOpenStudent={(id) =>"));
