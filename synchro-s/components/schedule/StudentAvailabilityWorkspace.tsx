@@ -2,6 +2,7 @@
 
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
 import { nextStudentAvailabilitySlot, type StudentAvailabilityPaintMode } from "@/lib/studentAvailabilityPaint";
+import { studentAvailabilityComparisonCell } from "@/lib/studentAvailabilityComparison";
 import type {
   StudentAvailabilityByDay,
   StudentAvailabilityDateOverride,
@@ -137,6 +138,8 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
   const [draftWeekly, setDraftWeekly] = useState<StudentAvailabilityByDay>({});
   const [draftOverrides, setDraftOverrides] = useState<StudentAvailabilityDateOverrides>({});
   const [selectedDate, setSelectedDate] = useState(() => defaultSelectedDate(currentMonthStart()));
+  const [compareMode, setCompareMode] = useState(false);
+  const [comparisonDates, setComparisonDates] = useState<string[]>([]);
   const [cellEditor, setCellEditor] = useState<CellEditor | null>(null);
   const [weeklyPaintMode, setWeeklyPaintMode] = useState<StudentAvailabilityPaintMode>("available");
   const [loading, setLoading] = useState(false);
@@ -158,6 +161,8 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
     setDraftMemo(group.memo);
     setDraftWeekly(cloneWeekly(group.weeklyAvailability));
     setDraftOverrides(cloneOverrides(group.dateOverrides));
+    setCompareMode(false);
+    setComparisonDates([]);
     setCellEditor(null);
     setError(null);
     if (!preserveNotice) setNotice(null);
@@ -169,6 +174,8 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
     setDraftMemo("");
     setDraftWeekly({});
     setDraftOverrides({});
+    setCompareMode(false);
+    setComparisonDates([]);
     setCellEditor(null);
     setError(null);
     setNotice("새 가능 일정 초안을 시작했습니다.");
@@ -211,8 +218,34 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
 
   useEffect(() => {
     setSelectedDate(defaultSelectedDate(monthStart));
+    setCompareMode(false);
+    setComparisonDates([]);
     setCellEditor(null);
   }, [monthStart]);
+
+  const toggleCompareMode = useCallback(() => {
+    setCompareMode((current) => {
+      if (!current) setComparisonDates([selectedDate]);
+      return !current;
+    });
+    setCellEditor(null);
+  }, [selectedDate]);
+
+  const toggleComparisonDate = useCallback((date: string) => {
+    setComparisonDates((current) => (
+      current.includes(date)
+        ? current.filter((item) => item !== date)
+        : [...current, date].sort()
+    ));
+  }, []);
+
+  const selectAllOverrideDates = useCallback(() => {
+    setComparisonDates(
+      Object.keys(draftOverrides)
+        .filter((date) => date.startsWith(monthStart.slice(0, 7)))
+        .sort()
+    );
+  }, [draftOverrides, monthStart]);
 
   const setWeeklyCell = useCallback((weekday: Weekday, slot: string, value: StudentAvailabilitySlot | null) => {
     if (saving) return;
@@ -454,7 +487,72 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
         {error ? <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{error}</p> : null}
         {notice ? <p role="status" className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">{notice}</p> : null}
 
-        {selectedOverride?.status === "temporary" ? (
+        {compareMode ? (
+          <div className="mt-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-black text-slate-900">선택한 날짜 모아보기</p>
+                <p className="sync-copy text-[11px] font-semibold text-slate-500">날짜별 일정은 한 화면에서 비교하고, 수정은 각 날짜의 ‘편집’으로 들어가 진행합니다.</p>
+              </div>
+              <span className="sync-tabular rounded-md bg-violet-100 px-2.5 py-1.5 text-[11px] font-black text-violet-700">선택 {comparisonDates.length}일</span>
+            </div>
+            {comparisonDates.length === 0 ? (
+              <div className="flex min-h-72 items-center justify-center rounded-lg border border-dashed border-violet-200 bg-violet-50 p-6 text-center">
+                <div>
+                  <p className="text-sm font-black text-violet-900">오른쪽 달력에서 비교할 날짜를 선택해 주세요.</p>
+                  <p className="sync-copy mt-1 text-xs font-semibold text-violet-700">한시 적용일 전체를 한 번에 선택할 수도 있습니다.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="sync-tabular min-w-max border-collapse text-xs">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 w-24 min-w-24 border-b border-r border-slate-200 bg-slate-50 px-2 py-3">시간</th>
+                      {comparisonDates.map((date) => {
+                        const override = draftOverrides[date];
+                        return (
+                          <th key={`student-compare-head-${date}`} className="w-44 min-w-44 border-b border-r border-slate-200 bg-white px-2 py-2 last:border-r-0">
+                            <span className="block font-black text-slate-900">{dateLabel(date)}</span>
+                            <span className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[9px] font-black ${override?.status === "temporary" ? "bg-emerald-100 text-emerald-700" : override?.status === "unavailable" ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700"}`}>
+                              {override?.status === "temporary" ? "한시 적용" : override?.status === "unavailable" ? "수업 불가" : "기본 일정"}
+                            </span>
+                            <button type="button" onClick={() => { setSelectedDate(date); setCompareMode(false); setCellEditor(null); }} className="sync-pressable sync-focus ml-1 min-h-8 rounded-md border border-slate-200 bg-white px-2 text-[9px] font-black text-slate-600 hover:bg-slate-50">편집</button>
+                            {override?.note ? <span title={override.note} className="mt-1 block truncate text-[9px] font-semibold text-slate-500">{override.note}</span> : null}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {TIME_SLOTS.map((slot) => (
+                      <tr key={`student-compare-row-${slot}`}>
+                        <th className="sticky left-0 z-10 border-b border-r border-slate-200 bg-slate-50 px-2 py-2 text-[11px] font-black text-slate-600">{timeRange(slot)}</th>
+                        {comparisonDates.map((date) => {
+                          const cell = studentAvailabilityComparisonCell(draftWeekly, draftOverrides, date, slot);
+                          const label = cell.source === "temporary" && cell.status === "available"
+                            ? "한시 가능"
+                            : cell.status === "available"
+                              ? "기본 가능"
+                              : cell.status === "unavailable"
+                                ? cell.source === "date-unavailable" ? "수업 불가" : "기본 불가"
+                                : "—";
+                          return (
+                            <td key={`student-compare-cell-${date}-${slot}`} className="border-b border-r border-slate-100 p-1 last:border-r-0">
+                              <div title={cell.note} className={`flex min-h-10 items-center justify-center rounded-md border px-2 text-center text-[10px] font-black ${cell.source === "temporary" && cell.status === "available" ? "border-emerald-300 bg-emerald-100 text-emerald-800" : cell.status === "available" ? "border-blue-200 bg-blue-50 text-blue-700" : cell.status === "unavailable" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-transparent bg-slate-50 text-slate-300"}`}>
+                                {label}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : selectedOverride?.status === "temporary" ? (
           <div className="mt-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div><p className="text-sm font-black text-slate-900">{dateLabel(selectedDate)} 한시 적용</p><p className="sync-copy text-[11px] font-semibold text-slate-500">이 날짜에만 가능한 시간을 드래그해 선택합니다.</p></div>
@@ -536,19 +634,21 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
 
       <aside className="space-y-3">
         <div className="sync-surface rounded-xl bg-white p-3">
-          <div className="flex items-center justify-between gap-2"><div><p className="text-sm font-black text-slate-900">날짜별 변동</p><p className="sync-copy mt-0.5 text-[10px] font-semibold text-slate-500">특정 날짜만 기본 일정과 다르게 지정합니다.</p></div><span className="sync-tabular rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-600">{Object.keys(draftOverrides).length}일</span></div>
+          <div className="flex items-center justify-between gap-2"><div><p className="text-sm font-black text-slate-900">날짜별 변동</p><p className="sync-copy mt-0.5 text-[10px] font-semibold text-slate-500">{compareMode ? "비교할 날짜를 여러 개 선택합니다." : "특정 날짜만 기본 일정과 다르게 지정합니다."}</p></div><span className="sync-tabular rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-600">{Object.keys(draftOverrides).length}일</span></div>
+          <button type="button" aria-pressed={compareMode} onClick={toggleCompareMode} className={`sync-pressable sync-focus mt-3 min-h-10 w-full rounded-lg border px-3 text-xs font-black ${compareMode ? "border-violet-600 bg-violet-600 text-white shadow-sm" : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"}`}>{compareMode ? "여러 날짜 모아보기 종료" : "여러 날짜 모아보기"}</button>
+          {compareMode ? <div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={selectAllOverrideDates} className="sync-pressable sync-focus min-h-10 rounded-lg border border-emerald-200 bg-emerald-50 px-2 text-[10px] font-black text-emerald-700 hover:bg-emerald-100">변동일 전체 선택</button><button type="button" onClick={() => setComparisonDates([])} className="sync-pressable sync-focus min-h-10 rounded-lg border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-600 hover:bg-slate-50">선택 해제</button></div> : null}
           <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-black text-slate-500">{DAYS.map((day) => <span key={`student-calendar-head-${day.key}`}>{day.label}</span>)}</div>
           <div className="mt-1 grid grid-cols-7 gap-1">{calendarValues.map((date, index) => {
             if (!date) return <span key={`student-calendar-empty-${index}`} className="min-h-10" aria-hidden="true" />;
             const item = draftOverrides[date];
-            const selected = date === selectedDate;
-            return <button key={date} type="button" onClick={() => { setSelectedDate(date); setCellEditor(null); }} aria-pressed={selected} aria-label={`${date} ${item?.status === "temporary" ? "한시 적용" : item?.status === "unavailable" ? "수업 불가" : "기본 적용"}`} className={`sync-pressable sync-focus sync-tabular min-h-10 rounded-md border text-[11px] font-black ${item?.status === "temporary" ? "border-emerald-300 bg-emerald-100 text-emerald-800" : item?.status === "unavailable" ? "border-rose-600 bg-rose-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"} ${selected ? "ring-2 ring-slate-800 ring-offset-1" : ""}`}>{Number(date.slice(-2))}</button>;
+            const selected = compareMode ? comparisonDates.includes(date) : date === selectedDate;
+            return <button key={date} type="button" onClick={() => { if (compareMode) toggleComparisonDate(date); else { setSelectedDate(date); setCellEditor(null); } }} aria-pressed={selected} aria-label={`${date} ${item?.status === "temporary" ? "한시 적용" : item?.status === "unavailable" ? "수업 불가" : "기본 적용"}${compareMode ? selected ? ", 비교 선택됨" : ", 비교 선택 안 됨" : ""}`} className={`sync-pressable sync-focus sync-tabular min-h-10 rounded-md border text-[11px] font-black ${item?.status === "temporary" ? "border-emerald-300 bg-emerald-100 text-emerald-800" : item?.status === "unavailable" ? "border-rose-600 bg-rose-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"} ${selected ? compareMode ? "ring-2 ring-violet-600 ring-offset-1" : "ring-2 ring-slate-800 ring-offset-1" : ""}`}>{Number(date.slice(-2))}</button>;
           })}</div>
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+          {!compareMode ? <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
             <p className="sync-tabular text-xs font-black text-slate-900">{dateLabel(selectedDate)}</p>
             <div className="mt-2 grid grid-cols-3 gap-1"><button type="button" onClick={() => setDateOverride("default")} className={`sync-pressable sync-focus min-h-10 rounded-md border px-1 text-[10px] font-black ${!selectedOverride ? "border-slate-700 bg-slate-700 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100"}`}>기본 적용</button><button type="button" onClick={() => setDateOverride("temporary")} className={`sync-pressable sync-focus min-h-10 rounded-md border px-1 text-[10px] font-black ${selectedOverride?.status === "temporary" ? "border-emerald-500 bg-emerald-500 text-white" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}>한시 적용</button><button type="button" onClick={() => setDateOverride("unavailable")} className={`sync-pressable sync-focus min-h-10 rounded-md border px-1 text-[10px] font-black ${selectedOverride?.status === "unavailable" ? "border-rose-600 bg-rose-600 text-white" : "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"}`}>수업 불가</button></div>
             {selectedOverride ? <label className="mt-2 block text-[10px] font-black text-slate-600">{selectedOverride.status === "unavailable" ? "수업 불가 사유" : "일자 메모"}<textarea value={selectedOverride.note ?? ""} maxLength={160} onChange={(event) => setDraftOverrides((previous) => ({ ...previous, [selectedDate]: { ...previous[selectedDate]!, note: event.target.value } }))} placeholder={selectedOverride.status === "unavailable" ? "예: 타 학원, 가족여행" : "한시 일정에 대한 메모"} className="sync-input mt-1 min-h-20 w-full resize-y rounded-lg border border-slate-300 bg-white p-2 text-xs font-semibold text-slate-700 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100" /></label> : null}
-          </div>
+          </div> : <p className="mt-3 rounded-lg bg-violet-50 px-3 py-2 text-[10px] font-bold leading-relaxed text-violet-700">모아보기에서는 일정이 변경되지 않습니다. 표의 ‘편집’을 누르면 해당 날짜만 수정할 수 있습니다.</p>}
         </div>
 
         <div className="sync-surface rounded-xl bg-white p-3">

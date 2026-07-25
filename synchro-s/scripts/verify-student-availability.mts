@@ -4,6 +4,7 @@ import {
   normalizeStudentAvailabilityDateOverrides
 } from "../lib/server/studentAvailability";
 import { nextStudentAvailabilitySlot } from "../lib/studentAvailabilityPaint";
+import { studentAvailabilityComparisonCell } from "../lib/studentAvailabilityComparison";
 
 assert.deepEqual(nextStudentAvailabilitySlot(undefined, "available"), { status: "available" });
 assert.equal(nextStudentAvailabilitySlot({ status: "available" }, "available"), null);
@@ -31,6 +32,34 @@ assert.deepEqual(weekly[7]?.["19:00"], { status: "available" });
 assert.throws(
   () => normalizeStudentAvailabilityByDay({ 1: { "10:30": { status: "available" } } }),
   /정시 슬롯/
+);
+
+const comparisonWeekly = {
+  1: {
+    "10:00": { status: "available" as const },
+    "11:00": { status: "unavailable" as const, note: "정규 불가" }
+  }
+};
+const comparisonOverrides = {
+  "2026-07-27": { status: "temporary" as const, slots: ["13:00"], note: "방학 특강" },
+  "2026-07-28": { status: "unavailable" as const, slots: [], note: "가족 일정" }
+};
+
+assert.deepEqual(
+  studentAvailabilityComparisonCell(comparisonWeekly, comparisonOverrides, "2026-07-27", "13:00"),
+  { status: "available", source: "temporary", note: "방학 특강" }
+);
+assert.deepEqual(
+  studentAvailabilityComparisonCell(comparisonWeekly, comparisonOverrides, "2026-07-27", "10:00"),
+  { status: "unset", source: "temporary" }
+);
+assert.deepEqual(
+  studentAvailabilityComparisonCell(comparisonWeekly, comparisonOverrides, "2026-07-28", "10:00"),
+  { status: "unavailable", source: "date-unavailable", note: "가족 일정" }
+);
+assert.deepEqual(
+  studentAvailabilityComparisonCell(comparisonWeekly, comparisonOverrides, "2026-08-03", "11:00"),
+  { status: "unavailable", source: "weekly", note: "정규 불가" }
 );
 assert.throws(
   () => normalizeStudentAvailabilityByDay({ 1: { "10:00": { status: "maybe" } } }),
