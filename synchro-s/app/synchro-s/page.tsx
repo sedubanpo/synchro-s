@@ -1152,6 +1152,28 @@ function resolveSubjectOption(rawLabel: string, subjects: SubjectOptionWithColor
     subjects.find((entry) => normalizeLookupToken(entry.code).includes(target) || target.includes(normalizeLookupToken(entry.code)));
   if (contains) return contains;
 
+  const specificAliasByCode: Record<string, string[]> = {
+    SOCIAL2: ["사문", "사회문화"],
+    SOCIAL: ["세지", "세계지리"],
+    SOCIAL3: ["생윤", "생활과윤리"],
+    SOCIAL4: ["윤리", "윤리와사상"],
+    SOCIAL5: ["한국사"],
+    SOCIAL6: ["경제"],
+    SOCIAL7: ["지리"],
+    SOCIAL8: ["통사", "통합사회"],
+    SCIENCE2: ["물리"],
+    SCIENCE3: ["생물"],
+    SCIENCE5: ["화학"],
+    SCIENCE6: ["생명", "생명과학"],
+    SCIENCE7: ["통과", "통합과학"]
+  };
+
+  for (const [code, aliases] of Object.entries(specificAliasByCode)) {
+    if (!aliases.some((alias) => target === normalizeLookupToken(alias))) continue;
+    const mapped = subjects.find((entry) => normalizeLookupToken(entry.code) === normalizeLookupToken(code));
+    if (mapped) return mapped;
+  }
+
   const aliasByCode: Record<string, string[]> = {
     MATH: ["수학", "math"],
     ENGLISH: ["영어", "english", "eng"],
@@ -1336,7 +1358,15 @@ function buildMonthCells(monthISO: string): CalendarCell[] {
 
 function moveEventInList(
   source: ScheduleEvent[],
-  move: { classId: string; weekday: Weekday; startTime: string; endTime: string; classDate: string }
+  move: {
+    classId: string;
+    weekday: Weekday;
+    startTime: string;
+    endTime: string;
+    classDate: string;
+    subjectCode?: string;
+    subjectName?: string;
+  }
 ): ScheduleEvent[] {
   return source.map((event) =>
     event.id === move.classId
@@ -1345,7 +1375,9 @@ function moveEventInList(
           weekday: move.weekday,
           startTime: move.startTime,
           endTime: move.endTime,
-          classDate: move.classDate
+          classDate: move.classDate,
+          subjectCode: move.subjectCode ?? event.subjectCode,
+          subjectName: move.subjectName ?? event.subjectName
         }
       : event
   );
@@ -1444,7 +1476,7 @@ export default function SynchroSPage() {
   const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
   const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
   const [timeEditEvent, setTimeEditEvent] = useState<ScheduleEvent | null>(null);
-  const [timeEditForm, setTimeEditForm] = useState({ startTime: "10:00", endTime: "11:00" });
+  const [timeEditForm, setTimeEditForm] = useState({ startTime: "10:00", endTime: "11:00", subjectCode: "" });
   const [timeEditSaving, setTimeEditSaving] = useState(false);
   const [selfStudyDraft, setSelfStudyDraft] = useState<SelfStudyDraft | null>(null);
   const [selfStudySaving, setSelfStudySaving] = useState(false);
@@ -4530,7 +4562,14 @@ export default function SynchroSPage() {
   );
 
   const handleMoveSchedule = useCallback(
-    async (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => {
+    async (ctx: {
+      classId: string;
+      weekday: Weekday;
+      startTime: string;
+      endTime: string;
+      subjectCode?: string;
+      subjectName?: string;
+    }) => {
       if (movingLockRef.current) return;
       movingLockRef.current = true;
       try {
@@ -4578,7 +4617,8 @@ export default function SynchroSPage() {
                       ...item,
                       weekday: ctx.weekday,
                       startTime: ctx.startTime,
-                      endTime: ctx.endTime
+                      endTime: ctx.endTime,
+                      subjectLabel: ctx.subjectName ?? item.subjectLabel
                     }
                   : item
               )
@@ -4719,7 +4759,9 @@ export default function SynchroSPage() {
                       weekday: ctx.weekday,
                       startTime: ctx.startTime,
                       endTime: ctx.endTime,
-                      classDate: moveClassDate
+                      classDate: moveClassDate,
+                      subjectCode: ctx.subjectCode,
+                      subjectName: ctx.subjectName
                     })
                   }
                 : group
@@ -4740,7 +4782,9 @@ export default function SynchroSPage() {
             weekday: ctx.weekday,
             startTime: ctx.startTime,
             endTime: ctx.endTime,
-            classDate: moveClassDate
+            classDate: moveClassDate,
+            subjectCode: ctx.subjectCode,
+            subjectName: ctx.subjectName
           })
         );
 
@@ -4754,7 +4798,8 @@ export default function SynchroSPage() {
             startTime: ctx.startTime,
             endTime: ctx.endTime,
             weekStart,
-            studentId: roleView === "student" ? selectedStudentId || undefined : undefined
+            studentId: roleView === "student" ? selectedStudentId || undefined : undefined,
+            subjectCode: ctx.subjectCode
           })
         });
 
@@ -4820,7 +4865,9 @@ export default function SynchroSPage() {
           weekday: ctx.weekday,
           startTime: ctx.startTime,
           endTime: ctx.endTime,
-          classDate: moveClassDate
+          classDate: moveClassDate,
+          subjectCode: ctx.subjectCode,
+          subjectName: ctx.subjectName
         });
         const nextSnapshot =
           updatedClassId && updatedClassId !== targetClassId
@@ -4864,7 +4911,11 @@ export default function SynchroSPage() {
           }
         }
 
-        setNotice(`수업을 ${ctx.startTime} / ${DAYS.find((day) => day.key === ctx.weekday)?.label ?? ""}로 이동했습니다.`);
+        setNotice(
+          ctx.subjectName
+            ? `${ctx.subjectName} · ${ctx.startTime}-${ctx.endTime}로 수정했습니다.`
+            : `수업을 ${ctx.startTime} / ${DAYS.find((day) => day.key === ctx.weekday)?.label ?? ""}로 이동했습니다.`
+        );
         void loadWeek({ silent: true });
       } finally {
         movingLockRef.current = false;
@@ -4899,10 +4950,17 @@ export default function SynchroSPage() {
       if (isInstructorReadOnly || roleView !== "student" || timetableViewMode !== "detailed") return;
       if (event.id.startsWith("draft-")) return;
       setTimeEditEvent(event);
-      setTimeEditForm({ startTime: event.startTime, endTime: event.endTime });
+      const subject =
+        subjects.find((item) => item.code === event.subjectCode) ??
+        resolveSubjectOption(event.subjectName, subjects);
+      setTimeEditForm({
+        startTime: event.startTime,
+        endTime: event.endTime,
+        subjectCode: subject?.code ?? event.subjectCode
+      });
       setError(null);
     },
-    [isInstructorReadOnly, roleView, timetableViewMode]
+    [isInstructorReadOnly, roleView, subjects, timetableViewMode]
   );
 
   const handleSaveSelfStudy = useCallback(async () => {
@@ -5002,6 +5060,11 @@ export default function SynchroSPage() {
       setError("종료 시간은 시작 시간보다 늦어야 합니다.");
       return;
     }
+    const selectedSubject = subjects.find((subject) => subject.code === timeEditForm.subjectCode);
+    if (!isSelfStudyEventId(timeEditEvent.id) && !selectedSubject) {
+      setError("과목을 다시 선택해 주세요.");
+      return;
+    }
 
     setTimeEditSaving(true);
     setError(null);
@@ -5055,7 +5118,9 @@ export default function SynchroSPage() {
         classId: timeEditEvent.id,
         weekday: timeEditEvent.weekday,
         startTime: timeEditForm.startTime,
-        endTime: timeEditForm.endTime
+        endTime: timeEditForm.endTime,
+        subjectCode: selectedSubject?.code,
+        subjectName: selectedSubject?.label
       });
       setTimeEditEvent(null);
     } finally {
@@ -5072,7 +5137,9 @@ export default function SynchroSPage() {
     timeEditEvent,
     timeEditForm.endTime,
     timeEditForm.startTime,
+    timeEditForm.subjectCode,
     timeEditSaving,
+    subjects,
     weekStart
   ]);
 
@@ -9414,7 +9481,7 @@ export default function SynchroSPage() {
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <p className="text-lg font-black text-slate-900">수업 시간 수정</p>
+                <p className="text-lg font-black text-slate-900">수업 정보 수정</p>
                 <p className="mt-1 text-sm font-semibold text-slate-500">
                   {timeEditEvent.instructorName ? `${timeEditEvent.subjectName} · ${timeEditEvent.instructorName}` : timeEditEvent.subjectName}
                 </p>
@@ -9428,6 +9495,22 @@ export default function SynchroSPage() {
                 닫기
               </button>
             </div>
+            {!isSelfStudyEventId(timeEditEvent.id) ? (
+              <label className="mb-3 block space-y-1 text-xs font-semibold text-slate-700">
+                과목
+                <select
+                  value={timeEditForm.subjectCode}
+                  onChange={(event) => setTimeEditForm((prev) => ({ ...prev, subjectCode: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-800"
+                >
+                  {subjects.map((subject) => (
+                    <option key={`edit-subject-${subject.code}`} value={subject.code}>
+                      {subject.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1 text-xs font-semibold text-slate-700">
                 시작

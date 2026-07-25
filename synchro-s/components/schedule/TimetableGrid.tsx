@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 import { ScheduleBlock } from "@/components/schedule/ScheduleBlock";
+import { getOverlappingHourSlots } from "@/lib/timetableSlots";
 import { timeToMinutes } from "@/lib/time";
 import type { RoleView, ScheduleEvent, TimetableViewMode, Weekday } from "@/types/schedule";
 import { useEffect, useRef, useState } from "react";
@@ -81,26 +82,6 @@ function isIndividualRegularClass(event: ScheduleEvent): boolean {
 
   const normalized = normalizeClassToken(`${event.classTypeCode} ${event.classTypeLabel} ${event.badgeText}`);
   return ["개별정규", "개별", "정규", "regular", "multi"].some((token) => normalized.includes(normalizeClassToken(token)));
-}
-
-function eventOverlapsHourSlot(event: ScheduleEvent, slot: string): boolean {
-  const start = timeToMinutes(event.startTime);
-  const end = timeToMinutes(event.endTime);
-  const slotStart = timeToMinutes(slot);
-  const slotEnd = slotStart + 60;
-  return start < slotEnd && end > slotStart;
-}
-
-function getInstructorDisplaySlot(event: ScheduleEvent, timeSlots: string[]): string {
-  if (!isIndividualRegularClass(event)) {
-    return timeSlots.find((slot) => eventOverlapsHourSlot(event, slot)) ?? event.startTime;
-  }
-
-  return timeSlots.find((slot) => eventOverlapsHourSlot(event, slot)) ?? event.startTime;
-}
-
-function getEventDisplaySlot(event: ScheduleEvent, timeSlots: string[]): string {
-  return timeSlots.find((slot) => eventOverlapsHourSlot(event, slot)) ?? event.startTime;
 }
 
 function isInstructorRegularGroupEvent(event: ScheduleEvent): boolean {
@@ -241,11 +222,14 @@ export function TimetableGrid({
   const canMoveEvents = Boolean(onEventMove && viewMode === "detailed");
 
   for (const event of events) {
-    const displaySlot = roleView === "instructor" ? getInstructorDisplaySlot(event, timeSlots) : getEventDisplaySlot(event, timeSlots);
-    const key = `${event.weekday}-${displaySlot}`;
-    const bucket = eventMap.get(key) ?? [];
-    bucket.push(event);
-    eventMap.set(key, bucket);
+    const overlappingSlots = getOverlappingHourSlots(event, timeSlots);
+    const displaySlots = overlappingSlots.length > 0 ? overlappingSlots : [event.startTime];
+    for (const displaySlot of displaySlots) {
+      const key = `${event.weekday}-${displaySlot}`;
+      const bucket = eventMap.get(key) ?? [];
+      bucket.push(event);
+      eventMap.set(key, bucket);
+    }
     activeDaySet.add(event.weekday);
   }
 

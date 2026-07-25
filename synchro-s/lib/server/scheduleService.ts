@@ -1351,7 +1351,7 @@ export async function updateScheduleStatus(
 export async function moveScheduleSlot(
   supabase: SupabaseLike,
   classId: string,
-  target: { weekday: number; weekStart: string; startTime: string; endTime?: string },
+  target: { weekday: number; weekStart: string; startTime: string; endTime?: string; subjectCode?: string },
   actorUserId: string,
   options?: { studentId?: string }
 ) {
@@ -1368,6 +1368,17 @@ export async function moveScheduleSlot(
 
   const sourceStart = fromSqlTime(classRow.start_time);
   const sourceEnd = fromSqlTime(classRow.end_time);
+  const subjectCode = target.subjectCode?.trim() || classRow.subject_code;
+  if (subjectCode !== classRow.subject_code) {
+    const { data: subjectRow, error: subjectError } = await supabase
+      .from("subjects")
+      .select("code")
+      .eq("code", subjectCode)
+      .single();
+    if (subjectError || !subjectRow) {
+      throw new Error(`Unknown subject: ${subjectCode}`);
+    }
+  }
   const durationMinutes = Math.max(30, timeToMinutes(sourceEnd) - timeToMinutes(sourceStart));
   const endTime = target.endTime ?? addMinutes(target.startTime, durationMinutes);
   if (timeToMinutes(endTime) <= timeToMinutes(target.startTime)) {
@@ -1402,7 +1413,7 @@ export async function moveScheduleSlot(
           ? {
               schedule_mode: classRow.schedule_mode,
               instructor_id: classRow.instructor_id,
-              subject_code: classRow.subject_code,
+              subject_code: subjectCode,
               class_type_code: classRow.class_type_code,
               weekday: target.weekday,
               class_date: null,
@@ -1414,7 +1425,7 @@ export async function moveScheduleSlot(
           : {
               schedule_mode: classRow.schedule_mode,
               instructor_id: classRow.instructor_id,
-              subject_code: classRow.subject_code,
+              subject_code: subjectCode,
               class_type_code: classRow.class_type_code,
               weekday: null,
               class_date: addDays(target.weekStart, target.weekday - 1),
@@ -1427,7 +1438,7 @@ export async function moveScheduleSlot(
       const { data: insertedClass, error: classInsertError } = await supabase
         .from("classes")
         .insert(insertPayload)
-        .select("id,weekday,class_date,start_time,end_time")
+        .select("id,weekday,class_date,start_time,end_time,subject_code")
         .single();
       if (classInsertError || !insertedClass) {
         throw classInsertError ?? new Error("Failed to split class for student move");
@@ -1472,12 +1483,14 @@ export async function moveScheduleSlot(
     classRow.schedule_mode === "recurring"
       ? {
           weekday: target.weekday,
+          subject_code: subjectCode,
           start_time: toSqlTime(target.startTime),
           end_time: toSqlTime(endTime),
           updated_at: new Date().toISOString()
         }
       : {
           class_date: addDays(target.weekStart, target.weekday - 1),
+          subject_code: subjectCode,
           start_time: toSqlTime(target.startTime),
           end_time: toSqlTime(endTime),
           updated_at: new Date().toISOString()
@@ -1487,7 +1500,7 @@ export async function moveScheduleSlot(
     .from("classes")
     .update(updatePayload)
     .eq("id", classId)
-    .select("id,weekday,class_date,start_time,end_time")
+    .select("id,weekday,class_date,start_time,end_time,subject_code")
     .single();
 
   if (updateError || !updated) {
