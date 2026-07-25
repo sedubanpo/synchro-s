@@ -3,6 +3,10 @@
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
+import {
+  filterProspectTimetableGroups,
+  formatProspectSchoolGrade
+} from "@/lib/prospectTimetableGroups";
 import { resolveSubjectOption } from "@/lib/subjectResolver";
 import type { ClassTypeOption, ScheduleEvent, SelectOption, SubjectOption, Weekday } from "@/types/schedule";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -80,6 +84,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
   const [error, setError] = useState<string | null>(null);
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
   const [hideEmptyTimes, setHideEmptyTimes] = useState(false);
+  const [savedGroupSearch, setSavedGroupSearch] = useState("");
 
   const activeStudents = useMemo(() => students.filter((student) => student.isActive !== false), [students]);
   const activeInstructors = useMemo(() => instructors.filter((instructor) => instructor.isActive !== false), [instructors]);
@@ -87,7 +92,24 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
   const selectedProspect = prospects.find((prospect) => prospect.id === prospectId) ?? null;
   const targetName = mode === "resident" ? selectedStudent?.name ?? "" : prospectForm.name.trim();
   const targetId = mode === "resident" ? studentId : prospectId;
-  const visibleGroups = groups.filter((group) => group.kind === mode && group.targetId === targetId && group.weekStart === weekStart);
+  const prospectById = useMemo(() => new Map(prospects.map((prospect) => [prospect.id, prospect])), [prospects]);
+  const visibleGroups = useMemo(() => {
+    if (mode === "prospect") {
+      return filterProspectTimetableGroups(
+        groups.filter((group) => group.kind === "prospect"),
+        prospects,
+        weekStart,
+        savedGroupSearch
+      );
+    }
+    return groups.filter(
+      (group) => group.kind === "resident" && group.targetId === targetId && group.weekStart === weekStart
+    );
+  }, [groups, mode, prospects, savedGroupSearch, targetId, weekStart]);
+  const prospectGroupTotal = useMemo(
+    () => groups.filter((group) => group.kind === "prospect" && group.weekStart === weekStart).length,
+    [groups, weekStart]
+  );
 
   useEffect(() => {
     setGroupName(`${weekStart} ${targetName || (mode === "resident" ? "재원생" : "신규문의")} 시간표`);
@@ -353,6 +375,18 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
   };
 
   const selectGroup = (group: CreationGroup) => {
+    if (group.kind === "prospect") {
+      setProspectId(group.targetId);
+      const prospect = prospectById.get(group.targetId);
+      if (prospect) {
+        setProspectForm({
+          name: prospect.name,
+          school: prospect.school ?? "",
+          grade: prospect.grade ?? "",
+          memo: prospect.memo ?? ""
+        });
+      }
+    }
     setDraftEvents(group.snapshotEvents.map((event) => ({ ...event, id: makeDraftId() })));
     setGroupName(`${group.name} 복사본`);
     setNotice("저장된 버전을 불러왔습니다. 변경 후 새 버전으로 저장할 수 있습니다.");
@@ -483,27 +517,77 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
             <h3 className="text-base font-black text-slate-900">저장된 시간표</h3>
             <p className="mt-1 text-xs font-semibold text-slate-500">활성 일정이 운영 화면에 반영됩니다.</p>
           </div>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">{visibleGroups.length}개</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
+            {mode === "prospect" && savedGroupSearch.trim()
+              ? `${visibleGroups.length}/${prospectGroupTotal}개`
+              : `${visibleGroups.length}개`}
+          </span>
         </div>
+        {mode === "prospect" ? (
+          <label className="mt-4 block">
+            <span className="sr-only">저장된 신규문의 시간표 검색</span>
+            <span className="relative block">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 fill-none stroke-slate-400"
+                strokeWidth="2"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="m16.5 16.5 4 4" />
+              </svg>
+              <input
+                type="search"
+                value={savedGroupSearch}
+                onChange={(event) => setSavedGroupSearch(event.target.value)}
+                placeholder="이름·학교·학년·메모 검색"
+                className="sync-input h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs font-semibold text-slate-800 placeholder:text-slate-400"
+              />
+            </span>
+          </label>
+        ) : null}
         <div className="mt-4 space-y-2">
           {loading ? <p className="rounded-lg bg-slate-50 px-3 py-4 text-xs font-semibold text-slate-500">불러오는 중...</p> : null}
-          {!loading && !targetId ? <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs font-semibold leading-5 text-slate-500">대상을 선택하면 저장된 버전을 표시합니다.</p> : null}
-          {!loading && targetId && visibleGroups.length === 0 ? <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs font-semibold leading-5 text-slate-500">아직 저장된 시간표가 없습니다.</p> : null}
-          {visibleGroups.map((group) => (
-            <article key={`${group.kind}-${group.id}`} className={`rounded-lg border p-3 ${group.isActive ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
-              <div className="flex items-start justify-between gap-2">
-                <button type="button" onClick={() => selectGroup(group)} className="min-w-0 flex-1 text-left">
-                  <p className="truncate text-sm font-black text-slate-900">{group.name}</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">수업 {group.snapshotEvents.length}개 · {new Date(group.createdAt).toLocaleDateString("ko-KR")}</p>
-                </button>
-                {group.isActive ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-black text-white">활성</span> : null}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => selectGroup(group)} className="sync-pressable sync-focus flex-1 rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-600">불러오기</button>
-                <button type="button" disabled={saving} onClick={() => void handleActivate(group)} className={`sync-pressable sync-focus flex-1 rounded-md px-2 py-2 text-xs font-black ${group.isActive ? "border border-slate-200 bg-white text-slate-600" : "bg-blue-600 text-white"}`}>{group.isActive ? "비활성" : "활성"}</button>
-              </div>
-            </article>
-          ))}
+          {!loading && mode === "resident" && !targetId ? <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs font-semibold leading-5 text-slate-500">대상을 선택하면 저장된 버전을 표시합니다.</p> : null}
+          {!loading && visibleGroups.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs font-semibold leading-5 text-slate-500">
+              {mode === "prospect" && savedGroupSearch.trim()
+                ? "검색 조건과 일치하는 신규문의 시간표가 없습니다."
+                : "아직 저장된 시간표가 없습니다."}
+            </p>
+          ) : null}
+          {visibleGroups.map((group) => {
+            const prospect = group.kind === "prospect" ? prospectById.get(group.targetId) : null;
+            return (
+              <article key={`${group.kind}-${group.id}`} className={`rounded-lg border p-3 ${group.isActive ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <button type="button" onClick={() => selectGroup(group)} className="min-w-0 flex-1 text-left">
+                    {prospect ? (
+                      <>
+                        <p className="truncate text-sm font-black text-slate-900">{prospect.name}</p>
+                        <p className="mt-1 truncate text-xs font-bold text-slate-600">{formatProspectSchoolGrade(prospect)}</p>
+                        <p className="mt-2 truncate text-[11px] font-semibold text-slate-500">{group.name}</p>
+                      </>
+                    ) : (
+                      <p className="truncate text-sm font-black text-slate-900">{group.name}</p>
+                    )}
+                    <p className="mt-1 text-xs font-semibold text-slate-500">수업 {group.snapshotEvents.length}개 · {new Date(group.createdAt).toLocaleDateString("ko-KR")}</p>
+                  </button>
+                  {group.isActive ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-black text-white">활성</span> : null}
+                </div>
+                {prospect ? (
+                  <p className="mt-3 rounded-md bg-slate-50 px-2.5 py-2 text-xs font-semibold leading-5 text-slate-600">
+                    <span className="font-black text-slate-500">메모</span>
+                    <span className="ml-2 whitespace-pre-wrap">{prospect.memo?.trim() || "메모 없음"}</span>
+                  </p>
+                ) : null}
+                <div className="mt-3 flex gap-2">
+                  <button type="button" onClick={() => selectGroup(group)} className="sync-pressable sync-focus flex-1 rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-600">불러오기</button>
+                  <button type="button" disabled={saving} onClick={() => void handleActivate(group)} className={`sync-pressable sync-focus flex-1 rounded-md px-2 py-2 text-xs font-black ${group.isActive ? "border border-slate-200 bg-white text-slate-600" : "bg-blue-600 text-white"}`}>{group.isActive ? "비활성" : "활성"}</button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </aside>
 
