@@ -372,8 +372,14 @@ export function TimetableGrid({
       ) : null}
       <table
         data-timetable-table="true"
-        className={`sync-tabular relative z-10 min-w-[1032px] table-fixed border-collapse text-xs 2xl:min-w-[1180px] ${inactive ? "opacity-75 grayscale-[0.15]" : ""}`}
+        className={`sync-tabular relative z-10 w-[1240px] min-w-[1240px] table-fixed border-collapse text-xs 2xl:w-[1320px] 2xl:min-w-[1320px] ${inactive ? "opacity-75 grayscale-[0.15]" : ""}`}
       >
+        <colgroup>
+          <col className="w-20" />
+          {renderDays.map((day) => (
+            <col key={`timetable-column-${day.key}`} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
             <th className="sticky left-0 top-0 z-30 w-20 border-b border-r border-slate-200 bg-white px-1.5 py-3 text-center font-extrabold text-slate-700 shadow-[0_1px_0_rgba(148,163,184,0.24)]">
@@ -382,7 +388,7 @@ export function TimetableGrid({
             {renderDays.map((day) => (
               <th
                 key={day.key}
-                className={`sticky top-0 z-20 w-[136px] border-b border-r px-2 py-3 text-center text-sm font-bold transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
+                className={`sticky top-0 z-20 border-b border-r px-2 py-3 text-center text-sm font-bold transition-[background-color,border-color,box-shadow,color] duration-150 ease-out ${
                   daysOffSet.has(day.key)
                     ? "border-slate-300 bg-slate-100 text-slate-600 shadow-[inset_0_-1px_0_rgba(100,116,139,0.28)]"
                     : activeDaySet.has(day.key)
@@ -457,7 +463,7 @@ export function TimetableGrid({
                   return (
                     <td
                       key={cellKey}
-                      className={`w-[136px] border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
+                      className={`border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
                         isDropTarget
                           ? "border-sky-300 bg-sky-100/80"
                           : isSelectedRow

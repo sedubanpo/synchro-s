@@ -296,7 +296,8 @@ export function ScheduleBlock({
             <div className="flex min-w-0 items-center gap-1">
             <p
               title={title}
-              className="min-w-0 flex-1 truncate pr-1 text-[12px] font-bold leading-4 whitespace-nowrap"
+              data-schedule-title="true"
+              className="min-w-0 flex-1 break-keep pr-0.5 text-pretty text-[12px] font-bold leading-4"
             >
               {title}
             </p>

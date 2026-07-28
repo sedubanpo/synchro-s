@@ -25,6 +25,7 @@
     "verify:home-dashboard-improvements": "node --import tsx scripts/verify-home-dashboard-improvements.mts",
     "verify:multi-hour-subject-edit": "node --import tsx scripts/verify-multi-hour-subject-edit.mts",
     "verify:eight-am-group-memos": "node --import tsx scripts/verify-eight-am-and-group-memos.mts",
+    "verify:dense-timetable-layout": "node --import tsx scripts/verify-dense-timetable-layout.mts",
     "verify:schedule-creation-draft": "node --import tsx scripts/verify-schedule-creation-draft.mts",
     "verify:prospect-saved-groups": "node --import tsx scripts/verify-prospect-saved-groups.mts"
   },
