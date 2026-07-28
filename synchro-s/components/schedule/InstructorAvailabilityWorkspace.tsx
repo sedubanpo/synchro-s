@@ -2,6 +2,11 @@
 
 import { InstructorAvailabilityAssignmentModal } from "@/components/schedule/InstructorAvailabilityAssignmentModal";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
+import {
+  formatAvailabilityWeekdays,
+  formatInstructorTeacherName,
+  summarizeInstructorAvailabilityDays
+} from "@/lib/instructorAvailabilityProfile";
 import { planningClassTypeTone, resolvePlanningClassTypes } from "@/lib/instructorAvailabilityPlanning";
 import type {
   AvailableTimeSlotsByDay,
@@ -31,6 +36,7 @@ type AvailabilityGroup = {
 type InstructorAvailabilityWorkspaceProps = {
   instructorId: string;
   instructorName: string;
+  instructorSubject: string;
   initialAvailability: AvailableTimeSlotsByDay;
   students: SelectOption[];
   classTypes: ClassTypeOption[];
@@ -182,6 +188,7 @@ async function apiError(res: Response, fallback: string): Promise<string> {
 export function InstructorAvailabilityWorkspace({
   instructorId,
   instructorName,
+  instructorSubject,
   initialAvailability,
   students,
   classTypes,
@@ -211,6 +218,10 @@ export function InstructorAvailabilityWorkspace({
   );
   const activeGroup = useMemo(() => groups.find((group) => group.isActive) ?? null, [groups]);
   const selectedCount = useMemo(() => totalSlotCount(draftSlotsByDay), [draftSlotsByDay]);
+  const availabilityDaySummary = useMemo(
+    () => summarizeInstructorAvailabilityDays(draftSlotsByDay),
+    [draftSlotsByDay]
+  );
   const calendarValues = useMemo(() => calendarDates(monthStart), [monthStart]);
   const activeStudents = useMemo(() => students.filter((student) => student.isActive !== false), [students]);
   const planningClassTypes = useMemo(() => resolvePlanningClassTypes(classTypes), [classTypes]);
@@ -630,6 +641,49 @@ export function InstructorAvailabilityWorkspace({
 
         {error ? <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{error}</p> : null}
         {notice ? <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">{notice}</p> : null}
+
+        <section
+          data-instructor-availability-profile="true"
+          aria-label={`${instructorName} 강사 기본 가능 요일 요약`}
+          className="mt-3 flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3 text-white shadow-sm sm:flex-row sm:items-stretch"
+        >
+          <div className="flex min-w-[180px] items-center gap-3 sm:border-r sm:border-slate-700 sm:pr-4">
+            <div
+              aria-hidden="true"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-lg font-black text-white shadow-sm"
+            >
+              {instructorName.trim().slice(0, 1) || "강"}
+            </div>
+            <div className="min-w-0">
+              <p className="sync-heading truncate text-lg font-black tracking-tight text-white">
+                {formatInstructorTeacherName(instructorName)}
+              </p>
+              <p className="mt-0.5 truncate text-xs font-bold text-slate-300">
+                {instructorSubject.trim() || "담당 과목 미지정"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+            <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-2.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300">기본 가능 요일</p>
+              <p className="sync-tabular mt-1 text-sm font-black text-white">
+                {formatAvailabilityWeekdays(availabilityDaySummary.availableDays)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-rose-300/20 bg-rose-300/10 px-3 py-2.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-rose-200">기본 불가능 요일</p>
+              <p className="sync-tabular mt-1 text-sm font-black text-white">
+                {formatAvailabilityWeekdays(availabilityDaySummary.unavailableDays)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 sm:min-w-[108px] sm:flex-col sm:items-end sm:justify-center">
+            <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">주간 가능</span>
+            <span className="sync-tabular text-base font-black text-blue-300">{availabilityDaySummary.selectedHours}시간</span>
+          </div>
+        </section>
 
         <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
           <label className="min-w-[240px] flex-1 space-y-1 text-xs font-bold text-slate-600">

@@ -18,6 +18,7 @@
     "link:firebase-accounts": "node scripts/synchro-link-existing-firebase-accounts.mjs",
     "verify:firestore-plan": "node scripts/synchro-firestore-plan-verify.mjs",
     "verify:student-availability": "tsx scripts/verify-student-availability.mts",
+    "verify:instructor-availability-profile": "node --import tsx scripts/verify-instructor-availability-profile.mts",
     "verify:firebase-roster-sync": "node --import tsx scripts/verify-firebase-roster-sync.mts",
     "verify:timetable-expiration-handoff": "node --import tsx scripts/verify-timetable-expiration-handoff.mts",
     "verify:home-dashboard": "node scripts/verify-home-dashboard-ux.mjs",

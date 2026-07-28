@@ -7325,6 +7325,7 @@ export default function SynchroSPage() {
           <InstructorAvailabilityWorkspace
             instructorId={selectedInstructorId}
             instructorName={selectedInstructorLabel}
+            instructorSubject={selectedInstructorSecondary}
             initialAvailability={selectedInstructorAvailabilityByDay}
             students={students}
             classTypes={classTypes}
