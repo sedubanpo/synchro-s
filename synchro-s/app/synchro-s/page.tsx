@@ -147,8 +147,8 @@ type SelfStudyDraft = {
   endTime: string;
 };
 
-const TIME_EDIT_OPTIONS = Array.from({ length: 31 }, (_, index) => {
-  const totalMinutes = 9 * 60 + index * 30;
+const TIME_EDIT_OPTIONS = Array.from({ length: 33 }, (_, index) => {
+  const totalMinutes = 8 * 60 + index * 30;
   const hour = Math.floor(totalMinutes / 60);
   const minute = totalMinutes % 60;
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
@@ -2395,7 +2395,7 @@ export default function SynchroSPage() {
   const specialNotesByGroupId = useMemo(() => {
     const notesByGroup = new Map<string, SpecialNoteItem[]>();
     for (const note of specialNotes) {
-      if (!note.groupId) continue;
+      if (!note.groupId || !note.content.trim()) continue;
       const groupNotes = notesByGroup.get(note.groupId) ?? [];
       groupNotes.push(note);
       notesByGroup.set(note.groupId, groupNotes);
@@ -7988,27 +7988,25 @@ export default function SynchroSPage() {
                                   </span>
                                   {group.weekStart} | 수업 {group.classIds.length}개
                                 </p>
-                                <details
-                                  className="group/memo relative mt-2"
-                                  onClick={(event) => event.stopPropagation()}
-                                  onKeyDown={(event) => event.stopPropagation()}
-                                >
-                                  <summary
-                                    className={`sync-focus inline-flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black [&::-webkit-details-marker]:hidden ${
-                                      isSelectedGroup ? "bg-white/15 text-white hover:bg-white/25" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                    }`}
-                                    title={groupNotes.length > 0 ? "시간표 메모 보기" : "등록된 시간표 메모 없음"}
+                                {groupNotes.length > 0 ? (
+                                  <details
+                                    className="group/memo relative mt-2"
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
                                   >
-                                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                                      <path d="M5 4.5h14v12H9l-4 3v-15Z" strokeLinejoin="round" />
-                                      <path d="M8 8h8M8 11.5h6" strokeLinecap="round" />
-                                    </svg>
-                                    메모 <span className="sync-tabular">{groupNotes.length}</span>
-                                  </summary>
-                                  <div className="absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-lg border border-slate-200 bg-white p-2 text-left text-slate-700 shadow-[0_12px_30px_-16px_rgba(15,23,42,0.42)] group-hover/memo:block group-open/memo:block">
-                                    {groupNotes.length === 0 ? (
-                                      <p className="text-[10px] font-semibold text-slate-500">등록된 시간표 메모가 없습니다.</p>
-                                    ) : (
+                                    <summary
+                                      className={`sync-focus inline-flex min-h-7 cursor-pointer list-none items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black [&::-webkit-details-marker]:hidden ${
+                                        isSelectedGroup ? "bg-white/15 text-white hover:bg-white/25" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                      }`}
+                                      title="시간표 메모 보기"
+                                    >
+                                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                                        <path d="M5 4.5h14v12H9l-4 3v-15Z" strokeLinejoin="round" />
+                                        <path d="M8 8h8M8 11.5h6" strokeLinecap="round" />
+                                      </svg>
+                                      메모 <span className="sync-tabular">{groupNotes.length}</span>
+                                    </summary>
+                                    <div className="absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-lg border border-slate-200 bg-white p-2 text-left text-slate-700 shadow-[0_12px_30px_-16px_rgba(15,23,42,0.42)] group-hover/memo:block group-open/memo:block">
                                       <div className="max-h-40 space-y-1.5 overflow-y-auto">
                                         {groupNotes.map((note) => (
                                           <p key={note.id} className="rounded-md bg-slate-50 px-2 py-1.5 text-[10px] font-semibold leading-4 text-slate-700">
@@ -8017,9 +8015,9 @@ export default function SynchroSPage() {
                                           </p>
                                         ))}
                                       </div>
-                                    )}
-                                  </div>
-                                </details>
+                                    </div>
+                                  </details>
+                                ) : null}
                                 <label className={`mt-2 block text-[10px] font-semibold ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`} onClick={(event) => event.stopPropagation()}>
                                   시간표 태그
                                   <select
