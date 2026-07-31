@@ -1,6 +1,7 @@
 "use client";
 
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
+import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
 import {
@@ -39,6 +40,8 @@ type Props = {
   subjects: SubjectOption[];
   classTypes: ClassTypeOption[];
   scheduleTagId: string | null;
+  hiddenTimeSlots: string[];
+  onHiddenTimeSlotsChange: (timeSlots: string[]) => void;
   onDataChanged: () => void | Promise<void>;
 };
 
@@ -69,7 +72,17 @@ function mapGroupItem(item: any, kind: TargetMode): CreationGroup {
   };
 }
 
-export function ScheduleCreationWorkspace({ weekStart, students, instructors, subjects, classTypes, scheduleTagId, onDataChanged }: Props) {
+export function ScheduleCreationWorkspace({
+  weekStart,
+  students,
+  instructors,
+  subjects,
+  classTypes,
+  scheduleTagId,
+  hiddenTimeSlots,
+  onHiddenTimeSlotsChange,
+  onDataChanged
+}: Props) {
   const [mode, setMode] = useState<TargetMode>("resident");
   const [studentId, setStudentId] = useState("");
   const [prospectId, setProspectId] = useState("");
@@ -99,17 +112,14 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
       return filterProspectTimetableGroups(
         groups.filter((group) => group.kind === "prospect"),
         prospects,
-        weekStart,
         savedGroupSearch
       );
     }
-    return groups.filter(
-      (group) => group.kind === "resident" && group.targetId === targetId && group.weekStart === weekStart
-    );
-  }, [groups, mode, prospects, savedGroupSearch, targetId, weekStart]);
+    return groups.filter((group) => group.kind === "resident" && group.targetId === targetId);
+  }, [groups, mode, prospects, savedGroupSearch, targetId]);
   const prospectGroupTotal = useMemo(
-    () => groups.filter((group) => group.kind === "prospect" && group.weekStart === weekStart).length,
-    [groups, weekStart]
+    () => groups.filter((group) => group.kind === "prospect").length,
+    [groups]
   );
 
   useEffect(() => {
@@ -117,7 +127,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
   }, [mode, targetName, weekStart]);
 
   const loadProspects = useCallback(async () => {
-    const res = await fetch(`/api/schedule-creation/prospects?${new URLSearchParams({ weekStart }).toString()}`, { cache: "no-store" });
+    const res = await fetch("/api/schedule-creation/prospects", { cache: "no-store" });
     if (!res.ok) {
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(payload.error ?? "신규문의 시간표를 불러오지 못했습니다.");
@@ -127,7 +137,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
     setProspects(nextProspects);
     setGroups((prev) => [...prev.filter((group) => group.kind !== "prospect"), ...(payload.groups ?? []).map((item) => mapGroupItem(item, "prospect"))]);
     return nextProspects;
-  }, [weekStart]);
+  }, []);
 
   const loadResidentGroups = useCallback(async (nextStudentId: string) => {
     if (!nextStudentId) {
@@ -509,6 +519,7 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
             events={draftEvents}
             hideEmptyDays={hideEmptyDays}
             hideEmptyTimes={hideEmptyTimes}
+            hiddenTimeSlots={hiddenTimeSlots}
             viewMode="detailed"
             onCellClick={(cell) => setModalCell(cell)}
             onEventDelete={async (event) => setDraftEvents((prev) => prev.filter((item) => item.id !== event.id))}
@@ -517,6 +528,12 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
       </div>
 
       <aside className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <TimeSlotVisibilityControl
+          className="mb-4"
+          timeSlots={TIME_SLOTS}
+          hiddenTimeSlots={hiddenTimeSlots}
+          onChange={onHiddenTimeSlotsChange}
+        />
         <div className="flex items-center justify-between gap-2">
           <div>
             <h3 className="text-base font-black text-slate-900">저장된 시간표</h3>
@@ -576,7 +593,12 @@ export function ScheduleCreationWorkspace({ weekStart, students, instructors, su
                     ) : (
                       <p className="truncate text-sm font-black text-slate-900">{group.name}</p>
                     )}
-                    <p className="mt-1 text-xs font-semibold text-slate-500">수업 {group.snapshotEvents.length}개 · {new Date(group.createdAt).toLocaleDateString("ko-KR")}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      적용 주차 {group.weekStart} · 수업 {group.snapshotEvents.length}개
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                      저장 {new Date(group.createdAt).toLocaleDateString("ko-KR")}
+                    </p>
                   </button>
                   {group.isActive ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-black text-white">활성</span> : null}
                 </div>

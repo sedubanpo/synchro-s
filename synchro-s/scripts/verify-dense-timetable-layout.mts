@@ -15,13 +15,13 @@ function expectSource(source: string, pattern: RegExp, message: string) {
 
 expectSource(
   grid,
-  /w-\[1240px\]\s+min-w-\[1240px\].*2xl:w-\[1320px\]\s+2xl:min-w-\[1320px\]/s,
-  "시간표가 요일별 강사명을 표시할 수 있는 확장 폭을 가져야 합니다."
+  /w-max\s+min-w-max.*\[--timetable-day-width:165\.714px\].*2xl:\[--timetable-day-width:177\.143px\]/s,
+  "시간표는 표시 요일 수와 무관하게 기존 7요일 기준의 고정 열 폭을 사용해야 합니다."
 );
 expectSource(
   grid,
-  /<colgroup>[\s\S]*?<col className="w-20"\s*\/>[\s\S]*?renderDays\.map/,
-  "시간 열과 요일 열의 폭을 colgroup으로 안정적으로 배분해야 합니다."
+  /<colgroup>[\s\S]*?<col className="w-20 min-w-20"\s*\/>[\s\S]*?renderDays\.map[\s\S]*?data-timetable-day-column[\s\S]*?var\(--timetable-day-width\)/,
+  "숨겨지지 않은 요일은 colgroup에서 동일한 고정 폭을 유지해야 합니다."
 );
 expectSource(
   block,

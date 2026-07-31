@@ -33,14 +33,12 @@ export function formatProspectSchoolGrade(prospect: ProspectSearchProfile | null
 export function filterProspectTimetableGroups<T extends ProspectGroupSearchItem>(
   groups: T[],
   prospects: ProspectSearchProfile[],
-  weekStart: string,
   query: string
 ): T[] {
   const profileById = new Map(prospects.map((prospect) => [prospect.id, prospect]));
   const normalizedQuery = normalizeSearchValue(query);
 
   return groups.filter((group) => {
-    if (group.weekStart !== weekStart) return false;
     if (!normalizedQuery) return true;
 
     const prospect = profileById.get(group.targetId);

@@ -8,6 +8,7 @@ import { StudentAvailabilityWorkspace } from "@/components/schedule/StudentAvail
 import { ScheduleModal } from "@/components/schedule/ScheduleModal";
 import { ScheduleTagManager, SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
+import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
 import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
@@ -21,6 +22,7 @@ import {
   selectEffectiveStudentTimetableGroup
 } from "@/lib/timetableGroupSelection";
 import { normalizeInstructorAlias, parseNotionClassCell } from "@/lib/notionScheduleParser";
+import { mergeScheduleEventsByIdentity } from "@/lib/scheduleEventMerge";
 import type {
   AvailableTimeSlotsByDay,
   ClassTypeOption,
@@ -1499,6 +1501,8 @@ export default function SynchroSPage() {
   const [savingInstructorDaysOff, setSavingInstructorDaysOff] = useState(false);
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
   const [hideEmptyTimes, setHideEmptyTimes] = useState(false);
+  const [hiddenTimeSlots, setHiddenTimeSlots] = useState<string[]>([]);
+  const [hiddenTimeSlotsReady, setHiddenTimeSlotsReady] = useState(false);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
   const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
@@ -5390,6 +5394,7 @@ export default function SynchroSPage() {
     const noSubjectDetails: string[] = [];
     const noInstructorDetails: string[] = [];
     const unresolvedInstructorNames = new Set<string>();
+    const confirmedSavedEvents: ScheduleEvent[] = [];
     const skipReasons: Record<string, number> = {
       noInstructor: 0,
       noStudent: 0,
@@ -5592,6 +5597,44 @@ export default function SynchroSPage() {
             memoUpdates[result.classId] = entry.payload.note;
           }
 
+          if (
+            result.classId &&
+            (result.status === "created" || result.status === "enrolled" || result.status === "existing")
+          ) {
+            const savedInstructor = instructors.find((item) => item.id === entry.payload.instructorId);
+            const savedSubject = subjects.find((item) => item.code === entry.payload.subjectCode);
+            const savedClassType = classTypes.find((item) => item.code === entry.payload.classTypeCode);
+            const savedStudentNames = resolveStudentNames(entry.payload.studentIds);
+            const savedWeekday = entry.payload.weekday ?? entry.item.weekday;
+            confirmedSavedEvents.push({
+              id: result.classId,
+              scheduleMode: entry.payload.scheduleMode,
+              instructorId: entry.payload.instructorId,
+              instructorName: savedInstructor?.name ?? normalizeInstructorAlias(entry.item.instructorName),
+              studentIds: entry.payload.studentIds,
+              studentNames:
+                savedStudentNames.length > 0
+                  ? savedStudentNames
+                  : selectedStudentLabel && selectedStudentLabel !== "학생 선택"
+                    ? [selectedStudentLabel]
+                    : [],
+              subjectCode: entry.payload.subjectCode,
+              subjectName: savedSubject?.label ?? entry.item.subjectLabel,
+              classTypeCode: entry.payload.classTypeCode,
+              classTypeLabel: savedClassType?.label ?? entry.item.classTypeLabel,
+              badgeText: savedClassType?.badgeText ?? `[${entry.item.classTypeLabel}]`,
+              weekday: savedWeekday,
+              classDate:
+                entry.payload.classDate ??
+                shiftDate(entry.payload.activeFrom ?? weekStart, savedWeekday - 1),
+              startTime: entry.payload.startTime,
+              endTime: entry.payload.endTime,
+              note: entry.payload.note,
+              progressStatus: "planned",
+              createdAt: new Date().toISOString()
+            });
+          }
+
           if (result.status === "existing") {
             existing += 1;
             return;
@@ -5682,6 +5725,7 @@ export default function SynchroSPage() {
       if (shouldRefreshHistory) {
         setParsedNotionItems([]);
         setNotionInput("");
+        setEvents((prev) => mergeScheduleEventsByIdentity(prev, confirmedSavedEvents));
       }
 
       const [groupSaveResult, historyRefreshResult] = await Promise.allSettled([
@@ -5692,7 +5736,7 @@ export default function SynchroSPage() {
             targetId: currentTargetId,
             weekStart,
             classIds: dedupedClassIds,
-            snapshotEvents: [],
+            snapshotEvents: confirmedSavedEvents,
             isActive: true
           })
           : Promise.resolve(null),
@@ -5711,6 +5755,14 @@ export default function SynchroSPage() {
       if (historyRefreshResult.status === "rejected") {
         console.error("[notion-import] save history reload failed after classes were saved", historyRefreshResult.reason);
         postSaveWarnings.push("수업 DB 저장은 완료됐지만 최근 저장 기록 갱신 중 일시 오류가 발생했습니다.");
+      }
+
+      if (confirmedSavedEvents.length > 0) {
+        pendingRealtimeReloadRef.current = false;
+        await loadWeek({ silent: true });
+        // A successful import is authoritative even if a read replica trails
+        // briefly. Keep those rows visible while the normal reload reconciles.
+        setEvents((prev) => mergeScheduleEventsByIdentity(prev, confirmedSavedEvents));
       }
 
       if (postSaveWarnings.length > 0) {
@@ -5799,13 +5851,6 @@ export default function SynchroSPage() {
       setImportProgress((prev) => ({ ...prev, active: false, label: "" }));
     }
 
-    if (pendingRealtimeReloadRef.current) {
-      pendingRealtimeReloadRef.current = false;
-    }
-    void loadWeek({ silent: true }).catch((reloadError) => {
-      console.error("[notion-import] background timetable refresh failed", reloadError);
-      setError("저장은 완료됐지만 최신 시간표를 다시 불러오지 못했습니다. 새로고침해 주세요.");
-    });
   }, [
     createTimetableGroup,
     classTypes,
@@ -5815,6 +5860,7 @@ export default function SynchroSPage() {
     notionTextValue,
     parsedNotionItems,
     recordConflictLogs,
+    resolveStudentNames,
     selectedInstructorId,
     selectedStudentId,
     selectedStudentLabel,
@@ -6497,6 +6543,22 @@ export default function SynchroSPage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("synchro-s-hidden-time-slots-v1") ?? "[]");
+      setHiddenTimeSlots(Array.isArray(saved) ? TIME_SLOTS.filter((slot) => saved.includes(slot)) : []);
+    } catch {
+      setHiddenTimeSlots([]);
+    } finally {
+      setHiddenTimeSlotsReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hiddenTimeSlotsReady) return;
+    window.localStorage.setItem("synchro-s-hidden-time-slots-v1", JSON.stringify(hiddenTimeSlots));
+  }, [hiddenTimeSlots, hiddenTimeSlotsReady]);
+
+  useEffect(() => {
     const refreshToday = () => setTodayISO(formatDateISOInKST(new Date()));
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") refreshToday();
@@ -6832,6 +6894,7 @@ export default function SynchroSPage() {
                 <div className="space-y-2.5">
                   {saveHistory.map((entry) => {
                     const isScheduleCreation = entry.source === "schedule_creation";
+                    const historyTypeLabel = isScheduleCreation ? "시간표 생성" : `${entry.targetType} 시간표`;
                     return (
                     <div key={entry.id} className="relative">
                       <span
@@ -6850,9 +6913,14 @@ export default function SynchroSPage() {
                             : "border-blue-700 bg-blue-600 hover:border-blue-800 hover:bg-blue-700"
                         }`}
                       >
-                        <p className="truncate text-[10px] font-black tracking-wide text-white/90">[{entry.timestampLabel}]</p>
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="truncate text-[10px] font-black tracking-wide text-white/90">[{entry.timestampLabel}]</span>
+                          <span className="shrink-0 rounded-full border border-white/25 bg-white/15 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-white">
+                            {historyTypeLabel}
+                          </span>
+                        </span>
                         <p className="mt-1 truncate text-[11px] font-bold leading-5 text-white">
-                          {isScheduleCreation ? `시간표 생성: ${entry.targetName}` : entry.targetLabel}
+                          {entry.targetName}
                         </p>
                         <p className="mt-1 inline-flex max-w-full rounded bg-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-950">
                           <span className="truncate">분류: {entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</span>
@@ -7736,6 +7804,7 @@ export default function SynchroSPage() {
                   studentSecondaryLookup={studentSecondaryLookup}
                   hideEmptyDays={hideEmptyDays}
                   hideEmptyTimes={hideEmptyTimes}
+                  hiddenTimeSlots={hiddenTimeSlots}
                   daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
                   viewMode={timetableViewMode}
                   inactive={isDisplayedGroupInactive}
@@ -7818,6 +7887,13 @@ export default function SynchroSPage() {
               );
             })}
           </div>
+
+          <TimeSlotVisibilityControl
+            className="mt-5"
+            timeSlots={TIME_SLOTS}
+            hiddenTimeSlots={hiddenTimeSlots}
+            onChange={setHiddenTimeSlots}
+          />
 
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-semibold text-slate-500">월간 수업 현황</p>
@@ -8959,6 +9035,8 @@ export default function SynchroSPage() {
             subjects={subjects}
             classTypes={classTypes}
             scheduleTagId={selectedScheduleTagId}
+            hiddenTimeSlots={hiddenTimeSlots}
+            onHiddenTimeSlotsChange={setHiddenTimeSlots}
             onDataChanged={async () => {
               await Promise.all([loadTimetableGroups(), loadSaveHistory()]);
             }}
@@ -9178,6 +9256,7 @@ export default function SynchroSPage() {
                   events={displayEvents}
                   hideEmptyDays={hideEmptyDays}
                   hideEmptyTimes={hideEmptyTimes}
+                  hiddenTimeSlots={hiddenTimeSlots}
                   daysOff={selectedInstructorDaysOff}
                   viewMode="summary"
                   onEventMove={undefined}
@@ -9195,6 +9274,12 @@ export default function SynchroSPage() {
                   {displayEvents.filter((event) => event.weekday === todayWeekday).length}개
                 </p>
               </div>
+              <TimeSlotVisibilityControl
+                className="mt-4"
+                timeSlots={TIME_SLOTS}
+                hiddenTimeSlots={hiddenTimeSlots}
+                onChange={setHiddenTimeSlots}
+              />
               <button
                 type="button"
                 onClick={() => setShowIntroPage(false)}

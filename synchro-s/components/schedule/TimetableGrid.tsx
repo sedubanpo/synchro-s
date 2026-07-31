@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 import { ScheduleBlock } from "@/components/schedule/ScheduleBlock";
-import { getOverlappingHourSlots } from "@/lib/timetableSlots";
+import { formatTimeSlotRange, getOverlappingHourSlots, getVisibleTimeSlots } from "@/lib/timetableSlots";
 import { timeToMinutes } from "@/lib/time";
 import type { RoleView, ScheduleEvent, TimetableViewMode, Weekday } from "@/types/schedule";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +14,7 @@ type TimetableGridProps = {
   daysOff?: Weekday[];
   hideEmptyDays?: boolean;
   hideEmptyTimes?: boolean;
+  hiddenTimeSlots?: string[];
   viewMode?: TimetableViewMode;
   onCellClick: (ctx: { weekday: Weekday; startTime: string }) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
@@ -24,16 +25,6 @@ type TimetableGridProps = {
   inactive?: boolean;
   emptyMessage?: string;
 };
-
-function toRangeLabel(startTime: string): string {
-  const [h, m] = startTime.split(":").map(Number);
-  const nextHour = h + 1;
-  if (m === 0) {
-    return `${h}-${nextHour}시`;
-  }
-  const mm = String(m).padStart(2, "0");
-  return `${h}:${mm}-${nextHour}:${mm}`;
-}
 
 function minutesToTime(totalMinutes: number): string {
   const safe = Math.max(0, totalMinutes);
@@ -199,6 +190,7 @@ export function TimetableGrid({
   daysOff = [],
   hideEmptyDays = false,
   hideEmptyTimes = false,
+  hiddenTimeSlots = [],
   viewMode = "detailed",
   onCellClick,
   onEventMove,
@@ -277,10 +269,14 @@ export function TimetableGrid({
 
   const visibleDays = hideEmptyDays ? days.filter((day) => activeDaySet.has(day.key)) : days;
   const renderDays = visibleDays.length > 0 ? visibleDays : days;
+  const manuallyVisibleTimeSlots = getVisibleTimeSlots(timeSlots, hiddenTimeSlots);
   const visibleTimeSlots = hideEmptyTimes
-    ? timeSlots.filter((slot) => renderDays.some((day) => (eventMap.get(`${day.key}-${slot}`) ?? []).length > 0))
-    : timeSlots;
-  const renderTimeSlots = visibleTimeSlots.length > 0 ? visibleTimeSlots : timeSlots;
+    ? manuallyVisibleTimeSlots.filter((slot) => renderDays.some((day) => (eventMap.get(`${day.key}-${slot}`) ?? []).length > 0))
+    : manuallyVisibleTimeSlots;
+  const renderTimeSlots =
+    visibleTimeSlots.length > 0 || manuallyVisibleTimeSlots.length === 0
+      ? visibleTimeSlots
+      : manuallyVisibleTimeSlots;
 
   const moveByPayload = async (payload: { classId: string; durationMinutes: number }, weekday: Weekday, startTime: string) => {
     if (!canMoveEvents || !onEventMove) return;
@@ -372,12 +368,16 @@ export function TimetableGrid({
       ) : null}
       <table
         data-timetable-table="true"
-        className={`sync-tabular relative z-10 w-[1240px] min-w-[1240px] table-fixed border-collapse text-xs 2xl:w-[1320px] 2xl:min-w-[1320px] ${inactive ? "opacity-75 grayscale-[0.15]" : ""}`}
+        className={`sync-tabular relative z-10 w-max min-w-max table-fixed border-collapse text-xs [--timetable-day-width:165.714px] 2xl:[--timetable-day-width:177.143px] ${inactive ? "opacity-75 grayscale-[0.15]" : ""}`}
       >
         <colgroup>
-          <col className="w-20" />
+          <col className="w-20 min-w-20" />
           {renderDays.map((day) => (
-            <col key={`timetable-column-${day.key}`} />
+            <col
+              key={`timetable-column-${day.key}`}
+              data-timetable-day-column={day.key}
+              style={{ width: "var(--timetable-day-width)", minWidth: "var(--timetable-day-width)" }}
+            />
           ))}
         </colgroup>
         <thead>
@@ -448,7 +448,7 @@ export function TimetableGrid({
                         : "border-transparent bg-white/70 text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                     }`}
                   >
-                    {toRangeLabel(slot)}
+                    {formatTimeSlotRange(slot)}
                   </button>
                 </td>
 

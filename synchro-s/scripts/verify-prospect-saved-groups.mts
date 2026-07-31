@@ -17,12 +17,12 @@ const groups = [
 ];
 
 assert.deepEqual(
-  filterProspectTimetableGroups(groups, prospects, "2026-07-20", "").map((group) => group.id),
-  ["g1", "g2"],
-  "신규문의 목록은 현재 선택한 한 명이 아니라 해당 주차의 모든 이름을 누적 표시해야 합니다."
+  filterProspectTimetableGroups(groups, prospects, "").map((group) => group.id),
+  ["g1", "g2", "g3"],
+  "신규문의 목록은 현재 주차에 한정하지 않고 DB에 누적된 모든 저장 버전을 표시해야 합니다."
 );
-assert.deepEqual(filterProspectTimetableGroups(groups, prospects, "2026-07-20", "세화고").map((group) => group.id), ["g2"]);
-assert.deepEqual(filterProspectTimetableGroups(groups, prospects, "2026-07-20", "저녁").map((group) => group.id), ["g1"]);
+assert.deepEqual(filterProspectTimetableGroups(groups, prospects, "세화고").map((group) => group.id), ["g2"]);
+assert.deepEqual(filterProspectTimetableGroups(groups, prospects, "저녁").map((group) => group.id), ["g1", "g3"]);
 assert.equal(formatProspectSchoolGrade(prospects[0]), "검증학교 · 1학년");
 assert.equal(formatProspectSchoolGrade(prospects[1]), "세화고 · 3학년");
 
@@ -32,6 +32,8 @@ const route = fs.readFileSync(path.join(root, "app/api/schedule-creation/prospec
 
 assert.ok(workspace.includes("저장된 신규문의 시간표 검색"));
 assert.ok(workspace.includes("이름·학교·학년·메모 검색"));
+assert.ok(workspace.includes('fetch("/api/schedule-creation/prospects"'), "저장 목록 조회에서 현재 주차 필터를 제거해야 합니다.");
+assert.ok(workspace.includes("적용 주차 {group.weekStart}"), "누적 목록에는 각 저장 버전의 적용 주차를 표시해야 합니다.");
 assert.ok(workspace.includes('prospect.memo?.trim() || "메모 없음"'));
 assert.ok(workspace.includes("setProspectId(group.targetId)"));
 assert.ok(route.includes("prospect_timetable_groups"));
