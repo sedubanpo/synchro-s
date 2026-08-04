@@ -2559,7 +2559,15 @@ export default function SynchroSPage() {
     const byStudentId = new Map<string, TimetableGroup>();
 
     for (const group of effectiveStudentGroupByTargetId.values()) {
-      const canonicalStudent = reviewStudentAlias.idToCanonical.get(group.targetId);
+      const normalizedGroupName = normalizeLookupToken(group.name);
+      const canonicalStudent =
+        reviewStudentAlias.idToCanonical.get(group.targetId) ??
+        [...reviewStudents]
+          .filter((student) => {
+            const normalizedStudentName = normalizeLookupToken(student.name);
+            return Boolean(normalizedStudentName && normalizedGroupName.includes(normalizedStudentName));
+          })
+          .sort((a, b) => normalizeLookupToken(b.name).length - normalizeLookupToken(a.name).length)[0];
       if (!canonicalStudent) {
         continue;
       }
@@ -2577,7 +2585,7 @@ export default function SynchroSPage() {
     }
 
     return byStudentId;
-  }, [effectiveStudentGroupByTargetId, reviewStudentAlias]);
+  }, [effectiveStudentGroupByTargetId, reviewStudentAlias, reviewStudents]);
   const reviewHasGroupByStudentId = useMemo(() => {
     const byStudentId = new Set<string>();
 

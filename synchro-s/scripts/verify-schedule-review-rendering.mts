@@ -48,5 +48,10 @@ assert.match(
   /targetsCanonicalStudent && !existingTargetsCanonicalStudent/,
   "when duplicate roster aliases share a review card, the canonical student's own group must win"
 );
+assert.match(
+  reviewPage,
+  /normalizedGroupName\.includes\(normalizedStudentName\)/,
+  "legacy student-group target IDs must fall back to the saved group's student name"
+);
 
 console.log("schedule review multi-hour rendering verification passed");
