@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { getOverlappingHourSlots } from "../lib/timetableSlots";
+
+const hourlySlots = ["08:00", "09:00", "10:00", "11:00"];
+
+assert.deepEqual(
+  getOverlappingHourSlots({ startTime: "08:00", endTime: "10:00" }, hourlySlots),
+  ["08:00", "09:00"],
+  "a two-hour class must occupy both visible timetable rows"
+);
+
+assert.deepEqual(
+  getOverlappingHourSlots({ startTime: "09:00", endTime: "10:00" }, hourlySlots),
+  ["09:00"],
+  "a one-hour class must occupy exactly one timetable row"
+);
+
+assert.deepEqual(
+  getOverlappingHourSlots({ startTime: "09:30", endTime: "11:30" }, hourlySlots),
+  ["09:00", "10:00", "11:00"],
+  "partial-hour classes must appear in every row they overlap"
+);
+
+const reviewPage = readFileSync(new URL("../app/synchro-s/page.tsx", import.meta.url), "utf8");
+assert.match(
+  reviewPage,
+  /event\.weekday === day\.key\s*&&\s*getOverlappingHourSlots\(event, \[slot\]\)\.length > 0/,
+  "schedule review grid must use the same overlap helper as the student timetable"
+);
+assert.doesNotMatch(
+  reviewPage,
+  /event\.weekday === day\.key && event\.startTime === slot/,
+  "schedule review must not hide the continuation rows of multi-hour classes"
+);
+
+console.log("schedule review multi-hour rendering verification passed");

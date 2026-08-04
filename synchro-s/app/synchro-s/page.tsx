@@ -15,6 +15,7 @@ import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
 import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
+import { getOverlappingHourSlots } from "@/lib/timetableSlots";
 import {
   compareEffectiveTimetableGroups,
   getEffectiveStudentTimetableGroupMap,
@@ -8798,7 +8799,9 @@ export default function SynchroSPage() {
                             </div>
                             {DAYS.map((day) => {
                               const cellEvents = selectedReviewEvents.filter(
-                                (event) => event.weekday === day.key && event.startTime === slot
+                                (event) =>
+                                  event.weekday === day.key &&
+                                  getOverlappingHourSlots(event, [slot]).length > 0
                               );
                               return (
                                 <div
