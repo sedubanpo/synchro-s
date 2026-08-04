@@ -63,5 +63,15 @@ assert.match(
   /for \(const group of timetableGroups\)/,
   "review grouping must inspect every active saved group instead of losing legacy target IDs in a pre-keyed map"
 );
+assert.match(
+  reviewPage,
+  /studentId: selectedReviewStudentId/,
+  "the selected review student must use the same student-scoped weekly API as the student timetable"
+);
+assert.match(
+  reviewPage,
+  /targetedReviewEventsByStudentId\[student\.id\]/,
+  "student-scoped review events must override the lossy all-students aggregate"
+);
 
 console.log("schedule review multi-hour rendering verification passed");

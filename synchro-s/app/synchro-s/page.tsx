@@ -1457,6 +1457,7 @@ export default function SynchroSPage() {
   const [overviewEvents, setOverviewEvents] = useState<ScheduleEvent[]>([]);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [reviewEvents, setReviewEvents] = useState<ScheduleEvent[]>([]);
+  const [targetedReviewEventsByStudentId, setTargetedReviewEventsByStudentId] = useState<Record<string, ScheduleEvent[]>>({});
   const [scheduleReviews, setScheduleReviews] = useState<ScheduleReviewItem[]>([]);
   const [scheduleReviewHistory, setScheduleReviewHistory] = useState<ScheduleReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -2617,6 +2618,24 @@ export default function SynchroSPage() {
     const map = new Map<string, ScheduleEvent[]>();
 
     for (const student of reviewStudents) {
+      const targetedEvents = targetedReviewEventsByStudentId[student.id];
+      if (targetedEvents) {
+        map.set(
+          student.id,
+          targetedEvents
+            .filter(
+              (event) =>
+                eventHasInstructorInSet(event, activeInstructorIdSet, activeInstructorNameSet) &&
+                eventHasStudentInSet(event, activeStudentIdSet, activeStudentNameSet)
+            )
+            .sort((a, b) => {
+              if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+              return a.startTime.localeCompare(b.startTime);
+            })
+        );
+        continue;
+      }
+
       const activeGroup = reviewActiveGroupByStudentId.get(student.id);
       const liveLinkedEvents = activeGroup?.classIds.length
         ? reviewEvents.filter((event) => activeGroup.classIds.includes(event.id))
@@ -2676,7 +2695,8 @@ export default function SynchroSPage() {
     reviewEvents,
     reviewHasGroupByStudentId,
     reviewStudentAlias,
-    reviewStudents
+    reviewStudents,
+    targetedReviewEventsByStudentId
   ]);
   const reviewFingerprintByStudentId = useMemo(() => {
     const map = new Map<string, string>();
@@ -3340,6 +3360,52 @@ export default function SynchroSPage() {
       setReviewLoading(false);
     }
   }, [mainTab, moveToLogin, selectedScheduleTagId, weekStart]);
+
+  useEffect(() => {
+    setTargetedReviewEventsByStudentId({});
+  }, [selectedScheduleTagId, weekStart]);
+
+  useEffect(() => {
+    if (mainTab !== "review" || !selectedReviewStudentId || targetedReviewEventsByStudentId[selectedReviewStudentId]) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const query = new URLSearchParams({
+      weekStart,
+      view: "student",
+      studentId: selectedReviewStudentId
+    });
+
+    void fetch(`/api/schedules/week?${query.toString()}`, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        if (response.status === 401) {
+          moveToLogin();
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(await getApiErrorMessage(response, "학생별 검토 시간표를 불러오지 못했습니다."));
+        }
+        return (await response.json()) as WeekResponse;
+      })
+      .then((data) => {
+        if (!data || controller.signal.aborted) return;
+        setTargetedReviewEventsByStudentId((current) => ({
+          ...current,
+          [selectedReviewStudentId]: data.events
+        }));
+      })
+      .catch((loadError) => {
+        if (controller.signal.aborted) return;
+        setError(loadError instanceof Error ? loadError.message : "학생별 검토 시간표를 불러오지 못했습니다.");
+      });
+
+    return () => controller.abort();
+  }, [mainTab, moveToLogin, selectedReviewStudentId, targetedReviewEventsByStudentId, weekStart]);
 
   const saveScheduleReview = useCallback(
     async (studentId: string, status: ReviewStatus, memo: string, action: "status" | "memo" = "status") => {
