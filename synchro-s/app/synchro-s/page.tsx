@@ -8606,7 +8606,16 @@ export default function SynchroSPage() {
               {notice}
             </div>
           ) : null}
-          <section className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md">
+          <section
+            data-review-loaded-group-count={timetableGroups.length}
+            data-review-selected-group-id={selectedReviewStudentId ? reviewActiveGroupByStudentId.get(selectedReviewStudentId)?.id ?? "" : ""}
+            data-review-selected-group-event-count={
+              selectedReviewStudentId
+                ? reviewActiveGroupByStudentId.get(selectedReviewStudentId)?.snapshotEvents?.length ?? 0
+                : 0
+            }
+            className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md"
+          >
             <div className="rounded-[26px] border border-white/55 bg-white/45 p-4 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
