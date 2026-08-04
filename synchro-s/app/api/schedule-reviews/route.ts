@@ -1,6 +1,8 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createScheduleReviewSnapshot } from "@/lib/scheduleReviewSnapshot";
+import type { ScheduleEvent } from "@/types/schedule";
 import { NextResponse } from "next/server";
 
 const REVIEW_NOTE_PREFIX = "__SCHEDULE_REVIEW__";
@@ -13,6 +15,8 @@ type ReviewPayload = {
   tagId?: string | null;
   status?: ReviewStatus;
   memo?: string;
+  action?: "status" | "memo";
+  snapshotEvents?: ScheduleEvent[];
 };
 
 type ReviewNotePayload = {
@@ -23,6 +27,10 @@ type ReviewNotePayload = {
   memo: string;
   reviewedByName: string;
   reviewedAt: string;
+  action: "status" | "memo";
+  snapshotEvents: ScheduleEvent[];
+  snapshotFingerprint: string | null;
+  snapshotEventCount: number | null;
 };
 
 function isReviewStatus(value: unknown): value is ReviewStatus {
@@ -46,7 +54,11 @@ function parseReviewNote(content: string): ReviewNotePayload | null {
       status: parsed.status,
       memo: typeof parsed.memo === "string" ? parsed.memo : "",
       reviewedByName: typeof parsed.reviewedByName === "string" ? parsed.reviewedByName : "",
-      reviewedAt: typeof parsed.reviewedAt === "string" ? parsed.reviewedAt : ""
+      reviewedAt: typeof parsed.reviewedAt === "string" ? parsed.reviewedAt : "",
+      action: parsed.action === "memo" ? "memo" : "status",
+      snapshotEvents: Array.isArray(parsed.snapshotEvents) ? parsed.snapshotEvents : [],
+      snapshotFingerprint: typeof parsed.snapshotFingerprint === "string" ? parsed.snapshotFingerprint : null,
+      snapshotEventCount: typeof parsed.snapshotEventCount === "number" ? parsed.snapshotEventCount : null
     };
   } catch {
     return null;
@@ -124,6 +136,18 @@ export async function GET(req: Request) {
     for (const [studentId, row] of taggedCarryForwardByStudent) latestByStudent.set(studentId, row);
     for (const [studentId, row] of exactByStudent) latestByStudent.set(studentId, row);
 
+    const historyRows = ((data ?? []) as { id: string; created_at: string; target_type: "학생" | "신규문의"; target_id: string; content: string }[])
+      .flatMap((row) => {
+        const parsed = parseReviewNote(row.content);
+        if (!parsed || parsed.action !== "status" || parsed.tagId !== requestedTagId || parsed.weekStart > weekStart) return [];
+        return [{
+          id: row.id,
+          createdAt: row.created_at,
+          studentId: row.target_type === "신규문의" ? `prospect:${row.target_id}` : row.target_id,
+          parsed
+        }];
+      });
+
     const regularStudentIds = [...latestByStudent.values()]
       .map((row) => row.target_id)
       .filter((studentId) => !studentId.startsWith("prospect:"));
@@ -173,7 +197,24 @@ export async function GET(req: Request) {
         status: row.parsed.status,
         memo: row.parsed.memo,
         reviewedByName: row.parsed.reviewedByName,
-        reviewedAt: row.parsed.reviewedAt || row.created_at
+        reviewedAt: row.parsed.reviewedAt || row.created_at,
+        snapshotEvents: row.parsed.snapshotEvents,
+        snapshotFingerprint: row.parsed.snapshotFingerprint,
+        snapshotEventCount: row.parsed.snapshotEventCount
+      })),
+      historyItems: historyRows.map((row) => ({
+        id: row.id,
+        studentId: row.studentId,
+        studentName: studentNameById.get(row.studentId) ?? prospectNameById.get(row.studentId) ?? row.parsed.studentName,
+        weekStart,
+        sourceWeekStart: row.parsed.weekStart,
+        tagId: row.parsed.tagId,
+        status: row.parsed.status,
+        memo: row.parsed.memo,
+        reviewedByName: row.parsed.reviewedByName,
+        reviewedAt: row.parsed.reviewedAt || row.createdAt,
+        snapshotFingerprint: row.parsed.snapshotFingerprint,
+        snapshotEventCount: row.parsed.snapshotEventCount
       }))
     }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (error) {
@@ -222,20 +263,10 @@ export async function PATCH(req: Request) {
       ? ((nameResult.data as { name?: string } | null)?.name ?? "")
       : ((nameResult.data as { student_name?: string } | null)?.student_name ?? "");
 
-    const likePrefix = `${REVIEW_NOTE_PREFIX}${JSON.stringify({ weekStart }).slice(0, -1)}%`;
-    const { data: existingRows, error: existingRowsError } = await dataSupabase
-      .from("special_notes")
-      .select("id,content")
-      .eq("target_type", targetType)
-      .eq("target_id", targetId)
-      .like("content", likePrefix);
-    if (existingRowsError) throw existingRowsError;
-
-    const matchingIds = ((existingRows ?? []) as { id: string; content: string }[])
-      .filter((row) => parseReviewNote(row.content)?.tagId === tagId)
-      .map((row) => row.id);
     const reviewedAt = new Date().toISOString();
     const reviewedByName = (profile as { full_name?: string | null }).full_name ?? "";
+    const hasSnapshot = Array.isArray(payload.snapshotEvents);
+    const snapshot = createScheduleReviewSnapshot(hasSnapshot ? payload.snapshotEvents!.slice(0, 500) : []);
     const content = buildReviewNote({
       weekStart,
       tagId,
@@ -243,7 +274,11 @@ export async function PATCH(req: Request) {
       status: payload.status,
       memo,
       reviewedByName,
-      reviewedAt
+      reviewedAt,
+      action: payload.action === "memo" ? "memo" : "status",
+      snapshotEvents: hasSnapshot ? snapshot.snapshotEvents : [],
+      snapshotFingerprint: hasSnapshot ? snapshot.snapshotFingerprint : null,
+      snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null
     });
 
     const { data, error } = await dataSupabase
@@ -260,11 +295,6 @@ export async function PATCH(req: Request) {
       throw error ?? new Error("시간표 검토 저장에 실패했습니다.");
     }
 
-    // 새 기록을 먼저 확정한 뒤 과거 중복만 정리합니다. 정리 실패가 방금 저장한 검토를 되돌리지는 않습니다.
-    if (matchingIds.length > 0) {
-      await dataSupabase.from("special_notes").delete().in("id", matchingIds);
-    }
-
     return NextResponse.json({
       item: {
         id: data.id,
@@ -278,7 +308,24 @@ export async function PATCH(req: Request) {
         status: payload.status,
         memo,
         reviewedByName,
-        reviewedAt
+        reviewedAt,
+        snapshotEvents: hasSnapshot ? snapshot.snapshotEvents : [],
+        snapshotFingerprint: hasSnapshot ? snapshot.snapshotFingerprint : null,
+        snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null
+      },
+      historyItem: payload.action === "memo" ? null : {
+        id: data.id,
+        studentId,
+        studentName,
+        weekStart,
+        sourceWeekStart: weekStart,
+        tagId,
+        status: payload.status,
+        memo,
+        reviewedByName,
+        reviewedAt,
+        snapshotFingerprint: hasSnapshot ? snapshot.snapshotFingerprint : null,
+        snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null
       }
     });
   } catch (error) {

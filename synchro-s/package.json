@@ -29,7 +29,8 @@
     "verify:schedule-creation-draft": "node --import tsx scripts/verify-schedule-creation-draft.mts",
     "verify:prospect-saved-groups": "node --import tsx scripts/verify-prospect-saved-groups.mts",
     "verify:notion-immediate-refresh": "node --import tsx scripts/verify-notion-immediate-refresh.mts",
-    "verify:hidden-time-slots": "node --import tsx scripts/verify-hidden-time-slots.mts"
+    "verify:hidden-time-slots": "node --import tsx scripts/verify-hidden-time-slots.mts",
+    "verify:schedule-review-snapshots": "node --import tsx scripts/verify-schedule-review-snapshots.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

@@ -23,6 +23,11 @@ import {
 } from "@/lib/timetableGroupSelection";
 import { normalizeInstructorAlias, parseNotionClassCell } from "@/lib/notionScheduleParser";
 import { mergeScheduleEventsByIdentity } from "@/lib/scheduleEventMerge";
+import {
+  createScheduleReviewSnapshot,
+  getScheduleReviewFingerprint,
+  mergeScheduleReviewEvents
+} from "@/lib/scheduleReviewSnapshot";
 import type {
   AvailableTimeSlotsByDay,
   ClassTypeOption,
@@ -294,10 +299,14 @@ type ScheduleReviewItem = {
   memo: string;
   reviewedByName?: string;
   reviewedAt?: string;
+  snapshotEvents?: ScheduleEvent[];
+  snapshotFingerprint?: string | null;
+  snapshotEventCount?: number | null;
 };
 
 type ScheduleReviewsResponse = {
   items?: ScheduleReviewItem[];
+  historyItems?: ScheduleReviewItem[];
 };
 
 type OverviewEntity = RoleView;
@@ -1452,6 +1461,7 @@ export default function SynchroSPage() {
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [reviewEvents, setReviewEvents] = useState<ScheduleEvent[]>([]);
   const [scheduleReviews, setScheduleReviews] = useState<ScheduleReviewItem[]>([]);
+  const [scheduleReviewHistory, setScheduleReviewHistory] = useState<ScheduleReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewSavingId, setReviewSavingId] = useState<string | null>(null);
   const [reviewFilter, setReviewFilter] = useState<ReviewStatus | "all" | "unreviewed" | "memo">("all");
@@ -2579,11 +2589,14 @@ export default function SynchroSPage() {
 
     for (const student of reviewStudents) {
       const activeGroup = reviewActiveGroupByStudentId.get(student.id);
+      const liveLinkedEvents = activeGroup?.classIds.length
+        ? reviewEvents.filter((event) => activeGroup.classIds.includes(event.id))
+        : [];
       const sourceEvents =
         activeGroup && (activeGroup.snapshotEvents?.length ?? 0) > 0
-          ? activeGroup.snapshotEvents ?? []
+          ? mergeScheduleReviewEvents(activeGroup.snapshotEvents ?? [], liveLinkedEvents)
           : activeGroup?.classIds.length
-            ? reviewEvents.filter((event) => activeGroup.classIds.includes(event.id))
+            ? liveLinkedEvents
             : reviewHasGroupByStudentId.has(student.id)
               ? []
             : reviewEvents.filter((event) =>
@@ -2639,6 +2652,21 @@ export default function SynchroSPage() {
     reviewStudentAlias,
     reviewStudents
   ]);
+  const reviewFingerprintByStudentId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const student of reviewStudents) {
+      map.set(student.id, getScheduleReviewFingerprint(reviewEventsByStudentId.get(student.id) ?? []));
+    }
+    return map;
+  }, [reviewEventsByStudentId, reviewStudents]);
+  const staleReviewStudentIds = useMemo(() => {
+    const stale = new Set<string>();
+    for (const [studentId, review] of reviewByStudentId) {
+      if (!review.snapshotFingerprint) continue;
+      if (review.snapshotFingerprint !== reviewFingerprintByStudentId.get(studentId)) stale.add(studentId);
+    }
+    return stale;
+  }, [reviewByStudentId, reviewFingerprintByStudentId]);
   const getReviewHints = useCallback((eventsForStudent: ScheduleEvent[]) => {
     const hints: string[] = [];
     if (eventsForStudent.length === 0) {
@@ -2667,19 +2695,22 @@ export default function SynchroSPage() {
       .map((student) => {
         const eventsForStudent = reviewEventsByStudentId.get(student.id) ?? [];
         const review = reviewByStudentId.get(student.id) ?? null;
+        const isStale = staleReviewStudentIds.has(student.id);
         const hints = getReviewHints(eventsForStudent);
         return {
           student,
           events: eventsForStudent,
           review,
+          effectiveReview: isStale ? null : review,
+          isStale,
           hints
         };
       })
       .filter((row) => {
         if (reviewFilter === "all") return true;
-        if (reviewFilter === "unreviewed") return !row.review;
+        if (reviewFilter === "unreviewed") return !row.effectiveReview;
         if (reviewFilter === "memo") return Boolean(row.review?.memo?.trim());
-        return row.review?.status === reviewFilter;
+        return row.effectiveReview?.status === reviewFilter;
       })
       .filter((row) => {
         const keyword = reviewSearchKeyword.trim().toLowerCase();
@@ -2696,35 +2727,49 @@ export default function SynchroSPage() {
         if (reviewSortMode === "name") {
           return a.student.name.localeCompare(b.student.name, "ko");
         }
-        const aStatus = a.review?.status ?? "unreviewed";
-        const bStatus = b.review?.status ?? "unreviewed";
+        const aStatus = a.effectiveReview?.status ?? "unreviewed";
+        const bStatus = b.effectiveReview?.status ?? "unreviewed";
         if (aStatus !== bStatus) {
           const order = ["unreviewed", "issue", "needs_check", "normal"];
           return order.indexOf(aStatus) - order.indexOf(bStatus);
         }
         return b.events.length - a.events.length || a.student.name.localeCompare(b.student.name, "ko");
       });
-  }, [getReviewHints, reviewByStudentId, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, reviewStudents]);
+  }, [getReviewHints, reviewByStudentId, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, reviewStudents, staleReviewStudentIds]);
   const reviewStats = useMemo(() => {
-    const reviewedIds = new Set(reviewByStudentId.keys());
+    const effectiveReviews = [...reviewByStudentId.entries()].filter(([studentId]) => !staleReviewStudentIds.has(studentId));
+    const reviewedIds = new Set(effectiveReviews.map(([studentId]) => studentId));
     return {
       total: reviewStudents.length,
-      normal: [...reviewByStudentId.values()].filter((item) => item.status === "normal").length,
-      needsCheck: [...reviewByStudentId.values()].filter((item) => item.status === "needs_check").length,
-      issue: [...reviewByStudentId.values()].filter((item) => item.status === "issue").length,
+      normal: effectiveReviews.filter(([, item]) => item.status === "normal").length,
+      needsCheck: effectiveReviews.filter(([, item]) => item.status === "needs_check").length,
+      issue: effectiveReviews.filter(([, item]) => item.status === "issue").length,
       unreviewed: reviewStudents.filter((student) => !reviewedIds.has(student.id)).length,
       memo: [...reviewByStudentId.values()].filter((item) => item.memo.trim().length > 0).length
     };
-  }, [reviewByStudentId, reviewStudents]);
+  }, [reviewByStudentId, reviewStudents, staleReviewStudentIds]);
   const selectedReviewStudent = useMemo(
     () => reviewRows.find((row) => row.student.id === selectedReviewStudentId)?.student ?? reviewRows[0]?.student ?? null,
     [reviewRows, selectedReviewStudentId]
   );
   const selectedReview = selectedReviewStudent ? reviewByStudentId.get(selectedReviewStudent.id) ?? null : null;
+  const selectedReviewIsStale = Boolean(selectedReviewStudent && staleReviewStudentIds.has(selectedReviewStudent.id));
   const selectedReviewEvents = useMemo(
     () => (selectedReviewStudent ? reviewEventsByStudentId.get(selectedReviewStudent.id) ?? [] : []),
     [reviewEventsByStudentId, selectedReviewStudent]
   );
+  const selectedReviewHistory = useMemo(() => {
+    if (!selectedReviewStudent) return [];
+    return scheduleReviewHistory
+      .filter((item) => {
+        const canonicalStudent =
+          reviewStudentAlias.idToCanonical.get(item.studentId) ??
+          (item.studentName ? reviewStudentAlias.nameToCanonical.get(normalizePersonName(item.studentName)) : undefined);
+        return canonicalStudent?.id === selectedReviewStudent.id;
+      })
+      .sort((a, b) => (b.reviewedAt ?? "").localeCompare(a.reviewedAt ?? ""))
+      .slice(0, 8);
+  }, [reviewStudentAlias, scheduleReviewHistory, selectedReviewStudent]);
   const selectedReviewProgressByEventKey = useMemo(() => {
     const progress = new Map<string, { index: number; total: number }>();
     const eventGroups = new Map<string, ScheduleEvent[]>();
@@ -3253,8 +3298,9 @@ export default function SynchroSPage() {
 
       // 검토 상태는 주간 시간표 응답과 독립적으로 먼저 복원합니다. 한쪽 요청이
       // 지연되거나 실패해도 이미 서버에 저장된 판정이 미검토로 되돌아가지 않습니다.
-      const reviewData = (await reviewRes.json()) as { items?: ScheduleReviewItem[] };
+      const reviewData = (await reviewRes.json()) as ScheduleReviewsResponse;
       setScheduleReviews(reviewData.items ?? []);
+      setScheduleReviewHistory(reviewData.historyItems ?? []);
 
       if (!weekRes.ok) {
         throw new Error(await getApiErrorMessage(weekRes, "검토용 시간표를 불러오지 못했습니다."));
@@ -3270,11 +3316,19 @@ export default function SynchroSPage() {
   }, [mainTab, moveToLogin, selectedScheduleTagId, weekStart]);
 
   const saveScheduleReview = useCallback(
-    async (studentId: string, status: ReviewStatus, memo: string) => {
+    async (studentId: string, status: ReviewStatus, memo: string, action: "status" | "memo" = "status") => {
       if (!studentId || reviewSavingId) return;
 
       const previousReviews = scheduleReviews;
+      const previousHistory = scheduleReviewHistory;
       const studentName = reviewStudents.find((student) => student.id === studentId)?.name ?? "";
+      const existingReview = reviewByStudentId.get(studentId) ?? null;
+      const shouldPreserveReviewSnapshot = action === "memo" && Boolean(existingReview?.snapshotFingerprint);
+      const snapshot = createScheduleReviewSnapshot(
+        shouldPreserveReviewSnapshot
+          ? existingReview?.snapshotEvents ?? []
+          : reviewEventsByStudentId.get(studentId) ?? []
+      );
       const optimisticItem: ScheduleReviewItem = {
         id: `optimistic:${studentId}:${Date.now()}`,
         studentId,
@@ -3284,18 +3338,36 @@ export default function SynchroSPage() {
         isLegacyFallback: false,
         status,
         memo: memo.trim(),
-        reviewedAt: new Date().toISOString()
+        reviewedAt: new Date().toISOString(),
+        ...(action === "status" || shouldPreserveReviewSnapshot
+          ? snapshot
+          : {
+              snapshotEvents: existingReview?.snapshotEvents,
+              snapshotFingerprint: existingReview?.snapshotFingerprint ?? null,
+              snapshotEventCount: existingReview?.snapshotEventCount ?? null
+            })
       };
       setReviewSavingId(studentId);
       setError(null);
       setNotice(null);
       setScheduleReviews((prev) => [optimisticItem, ...prev.filter((item) => item.studentId !== studentId)]);
+      if (action === "status") {
+        setScheduleReviewHistory((prev) => [optimisticItem, ...prev]);
+      }
 
       try {
         const res = await fetch("/api/timetable-notes", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ weekStart, studentId, tagId: selectedScheduleTagId, status, memo })
+          body: JSON.stringify({
+            weekStart,
+            studentId,
+            tagId: selectedScheduleTagId,
+            status,
+            memo,
+            action,
+            ...(action === "status" || shouldPreserveReviewSnapshot ? { snapshotEvents: snapshot.snapshotEvents } : {})
+          })
         });
 
         if (res.status === 401) {
@@ -3307,22 +3379,37 @@ export default function SynchroSPage() {
           throw new Error(await getApiErrorMessage(res, "시간표 검토 저장에 실패했습니다."));
         }
 
-        const data = (await res.json().catch(() => ({}))) as { item?: ScheduleReviewItem };
+        const data = (await res.json().catch(() => ({}))) as { item?: ScheduleReviewItem; historyItem?: ScheduleReviewItem | null };
         if (data.item) {
           setScheduleReviews((prev) => [data.item!, ...prev.filter((item) => item.studentId !== studentId)]);
           if (studentId === selectedReviewStudentId) {
             setReviewMemoDraft(data.item.memo ?? "");
           }
         }
-        setNotice(`${REVIEW_STATUS_META[status].label} 상태를 서버에 저장했습니다.`);
+        if (action === "status" && data.historyItem) {
+          setScheduleReviewHistory((prev) => [data.historyItem!, ...prev.filter((item) => item.id !== optimisticItem.id)]);
+        }
+        setNotice(action === "memo" ? "검토 메모를 서버에 저장했습니다." : `${REVIEW_STATUS_META[status].label} 상태를 서버에 저장했습니다.`);
       } catch (saveError) {
         setScheduleReviews(previousReviews);
+        setScheduleReviewHistory(previousHistory);
         setError(saveError instanceof Error ? saveError.message : "시간표 검토 저장에 실패했습니다.");
       } finally {
         setReviewSavingId(null);
       }
     },
-    [moveToLogin, reviewSavingId, reviewStudents, scheduleReviews, selectedReviewStudentId, selectedScheduleTagId, weekStart]
+    [
+      moveToLogin,
+      reviewEventsByStudentId,
+      reviewByStudentId,
+      reviewSavingId,
+      reviewStudents,
+      scheduleReviewHistory,
+      scheduleReviews,
+      selectedReviewStudentId,
+      selectedScheduleTagId,
+      weekStart
+    ]
   );
 
   const resolveStudentNames = useCallback(
@@ -8604,14 +8691,14 @@ export default function SynchroSPage() {
                   <div className="overflow-x-auto pb-2">
                     <div className="flex min-w-max gap-3">
                       {reviewRows.map((row) => {
-                        const status = row.review?.status ?? null;
+                        const status = row.effectiveReview?.status ?? null;
                         const active = selectedReviewStudent?.id === row.student.id;
                         return (
                           <button
                             key={`review-row-${row.student.id}`}
                             type="button"
                             onClick={() => setSelectedReviewStudentId(row.student.id)}
-                            className={`w-[270px] shrink-0 rounded-2xl border px-4 py-3 text-left transition ${
+                            className={`sync-pressable sync-focus min-h-10 w-[270px] shrink-0 rounded-2xl border px-4 py-3 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out ${
                               active
                                 ? "border-blue-300 bg-blue-50/90 shadow-[0_12px_24px_rgba(37,99,235,0.14)]"
                                 : "border-slate-200/80 bg-white/82 hover:border-sky-200 hover:bg-sky-50/50"
@@ -8624,7 +8711,11 @@ export default function SynchroSPage() {
                                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">
                                     {row.events.length}개
                                   </span>
-                                  {status ? (
+                                  {row.isStale ? (
+                                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-black text-amber-700">
+                                      재검토
+                                    </span>
+                                  ) : status ? (
                                     <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black ${REVIEW_STATUS_META[status].tone}`}>
                                       {REVIEW_STATUS_META[status].label}
                                     </span>
@@ -8795,8 +8886,8 @@ export default function SynchroSPage() {
                           <h3 className="text-2xl font-black text-slate-900">{selectedReviewStudent.name}</h3>
                           <p className="mt-1 text-sm font-semibold text-slate-500">{selectedReviewStudent.secondary || "상세 정보 없음"}</p>
                         </div>
-                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-slate-400"}`}>
-                          {selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
+                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReviewIsStale ? "border-amber-300 bg-amber-50 text-amber-700" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-slate-400"}`}>
+                          {selectedReviewIsStale ? "재검토 필요" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -8814,6 +8905,12 @@ export default function SynchroSPage() {
                         ) : null}
                       </div>
 
+                      {selectedReviewIsStale ? (
+                        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2.5 text-xs font-bold leading-relaxed text-amber-800">
+                          판정 후 시간표가 변경되었습니다. 현재 시간표를 확인한 뒤 상태를 다시 선택해 주세요.
+                        </div>
+                      ) : null}
+
                       <div className="mt-4 grid gap-2">
                         {(["normal", "needs_check", "issue"] as ReviewStatus[]).map((status) => (
                           <button
@@ -8821,9 +8918,9 @@ export default function SynchroSPage() {
                             type="button"
                             disabled={reviewSavingId === selectedReviewStudent.id}
                             onClick={() => void saveScheduleReview(selectedReviewStudent.id, status, reviewMemoDraft)}
-                            aria-pressed={selectedReview?.status === status}
+                            aria-pressed={!selectedReviewIsStale && selectedReview?.status === status}
                             className={`sync-pressable sync-focus relative min-h-10 rounded-2xl border px-3 py-2.5 text-sm font-black transition-[background-color,border-color,box-shadow,color,opacity,transform] duration-150 ease-out disabled:cursor-wait disabled:opacity-70 ${
-                              selectedReview?.status === status
+                              !selectedReviewIsStale && selectedReview?.status === status
                                 ? `${REVIEW_STATUS_META[status].button} ring-2 ring-offset-1 ring-offset-white`
                                 : REVIEW_STATUS_META[status].button
                             }`}
@@ -8831,7 +8928,7 @@ export default function SynchroSPage() {
                             <span className="inline-flex items-center justify-center gap-2">
                               {reviewSavingId === selectedReviewStudent.id && selectedReview?.status === status ? (
                                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" aria-hidden="true" />
-                              ) : selectedReview?.status === status ? (
+                              ) : !selectedReviewIsStale && selectedReview?.status === status ? (
                                 <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
                                   <path d="m5 10 3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
@@ -8854,8 +8951,8 @@ export default function SynchroSPage() {
                       <button
                         type="button"
                         disabled={!selectedReview || reviewSavingId === selectedReviewStudent.id}
-                        onClick={() => selectedReview ? void saveScheduleReview(selectedReviewStudent.id, selectedReview.status, reviewMemoDraft) : undefined}
-                        className="mt-2 w-full rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-black text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => selectedReview ? void saveScheduleReview(selectedReviewStudent.id, selectedReview.status, reviewMemoDraft, "memo") : undefined}
+                        className="sync-pressable sync-focus mt-2 min-h-10 w-full rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-black text-blue-700 transition-[background-color,box-shadow,opacity,transform] duration-150 ease-out hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         메모 저장
                       </button>
@@ -8875,6 +8972,37 @@ export default function SynchroSPage() {
                             </span>
                           )}
                         </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-white/70 bg-white/70 p-3 shadow-[0_0_0_1px_rgba(15,23,42,0.04),0_2px_8px_rgba(15,23,42,0.04)]">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-black text-slate-600">판정 이력</p>
+                          <span className="tabular-nums text-[11px] font-bold text-slate-400">최근 {selectedReviewHistory.length}건</span>
+                        </div>
+                        {selectedReviewHistory.length > 0 ? (
+                          <ol className="mt-2 space-y-1.5">
+                            {selectedReviewHistory.map((historyItem) => (
+                              <li key={`review-history-${historyItem.id}`} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50/80 px-2.5 py-2">
+                                <div className="min-w-0">
+                                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black ${REVIEW_STATUS_META[historyItem.status].tone}`}>
+                                    {REVIEW_STATUS_META[historyItem.status].label}
+                                  </span>
+                                  <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
+                                    {historyItem.reviewedByName || "담당자"}
+                                    {typeof historyItem.snapshotEventCount === "number" ? ` · ${historyItem.snapshotEventCount}개 수업` : ""}
+                                  </p>
+                                </div>
+                                <time className="shrink-0 tabular-nums text-[11px] font-black text-slate-500" dateTime={historyItem.reviewedAt}>
+                                  {historyItem.reviewedAt ? formatConflictLogTimestamp(historyItem.reviewedAt) : "-"}
+                                </time>
+                              </li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <p className="mt-2 rounded-xl bg-slate-50/70 px-3 py-3 text-center text-xs font-semibold text-slate-400">
+                            아직 저장된 판정 이력이 없습니다.
+                          </p>
+                        )}
                       </div>
 
                       {selectedReview?.reviewedAt ? (
