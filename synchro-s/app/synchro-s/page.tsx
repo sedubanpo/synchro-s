@@ -3373,9 +3373,11 @@ export default function SynchroSPage() {
     const controller = new AbortController();
     const selectedStudent = reviewStudents.find((student) => student.id === selectedReviewStudentId);
     const selectedName = normalizePersonName(selectedStudent?.name ?? "");
+    const savedGroupTargetId = reviewActiveGroupByStudentId.get(selectedReviewStudentId)?.targetId;
     const candidateStudentIds = Array.from(
       new Set([
         selectedReviewStudentId,
+        ...(savedGroupTargetId ? [savedGroupTargetId] : []),
         ...students
           .filter((student) => normalizePersonName(student.name) === selectedName)
           .map((student) => student.id)
@@ -3417,7 +3419,16 @@ export default function SynchroSPage() {
       });
 
     return () => controller.abort();
-  }, [mainTab, moveToLogin, reviewStudents, selectedReviewStudentId, students, targetedReviewEventsByStudentId, weekStart]);
+  }, [
+    mainTab,
+    moveToLogin,
+    reviewActiveGroupByStudentId,
+    reviewStudents,
+    selectedReviewStudentId,
+    students,
+    targetedReviewEventsByStudentId,
+    weekStart
+  ]);
 
   const saveScheduleReview = useCallback(
     async (studentId: string, status: ReviewStatus, memo: string, action: "status" | "memo" = "status") => {

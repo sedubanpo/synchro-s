@@ -75,6 +75,11 @@ assert.match(
 );
 assert.match(
   reviewPage,
+  /savedGroupTargetId = reviewActiveGroupByStudentId\.get\(selectedReviewStudentId\)\?\.targetId/,
+  "the saved timetable group's legacy target ID must be queried with the student-scoped weekly API"
+);
+assert.match(
+  reviewPage,
   /targetedReviewEventsByStudentId\[student\.id\]/,
   "student-scoped review events must override the lossy all-students aggregate"
 );
