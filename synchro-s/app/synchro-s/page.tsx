@@ -2558,7 +2558,15 @@ export default function SynchroSPage() {
   const reviewActiveGroupByStudentId = useMemo(() => {
     const byStudentId = new Map<string, TimetableGroup>();
 
-    for (const group of effectiveStudentGroupByTargetId.values()) {
+    for (const group of timetableGroups) {
+      if (
+        group.roleView !== "student" ||
+        !group.isActive ||
+        (group.tagId ?? null) !== selectedScheduleTagId ||
+        !isGroupEffectiveForWeek(group, weekStart, todayISO)
+      ) {
+        continue;
+      }
       const normalizedGroupName = normalizeLookupToken(group.name);
       const canonicalStudent =
         reviewStudentAlias.idToCanonical.get(group.targetId) ??
@@ -2592,7 +2600,7 @@ export default function SynchroSPage() {
     }
 
     return byStudentId;
-  }, [effectiveStudentGroupByTargetId, reviewStudentAlias, reviewStudents]);
+  }, [reviewStudentAlias, reviewStudents, selectedScheduleTagId, timetableGroups, todayISO, weekStart]);
   const reviewHasGroupByStudentId = useMemo(() => {
     const byStudentId = new Set<string>();
 

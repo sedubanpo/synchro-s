@@ -58,5 +58,10 @@ assert.match(
   /groupEventCount > existingGroupEventCount/,
   "duplicate roster aliases must keep the complete saved timetable group"
 );
+assert.match(
+  reviewPage,
+  /for \(const group of timetableGroups\)/,
+  "review grouping must inspect every active saved group instead of losing legacy target IDs in a pre-keyed map"
+);
 
 console.log("schedule review multi-hour rendering verification passed");
