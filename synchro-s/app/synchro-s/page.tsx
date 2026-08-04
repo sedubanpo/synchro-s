@@ -2584,9 +2584,13 @@ export default function SynchroSPage() {
       const existingGroup = byStudentId.get(canonicalStudent.id);
       const targetsCanonicalStudent = group.targetId === canonicalStudent.id;
       const existingTargetsCanonicalStudent = existingGroup?.targetId === canonicalStudent.id;
-      const groupEventCount = group.snapshotEvents?.length ?? group.classIds.length;
+      const groupEventCount = (group.snapshotEvents?.length ?? 0) > 0
+        ? group.snapshotEvents!.length
+        : group.classIds.length;
       const existingGroupEventCount = existingGroup
-        ? existingGroup.snapshotEvents?.length ?? existingGroup.classIds.length
+        ? (existingGroup.snapshotEvents?.length ?? 0) > 0
+          ? existingGroup.snapshotEvents!.length
+          : existingGroup.classIds.length
         : -1;
       if (
         !existingGroup ||

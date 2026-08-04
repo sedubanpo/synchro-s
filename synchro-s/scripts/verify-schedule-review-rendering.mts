@@ -60,6 +60,11 @@ assert.match(
 );
 assert.match(
   reviewPage,
+  /\(group\.snapshotEvents\?\.length \?\? 0\) > 0[\s\S]*?: group\.classIds\.length/,
+  "groups without a snapshot must use their linked class count instead of being treated as empty"
+);
+assert.match(
+  reviewPage,
   /for \(const group of timetableGroups\)/,
   "review grouping must inspect every active saved group instead of losing legacy target IDs in a pre-keyed map"
 );
