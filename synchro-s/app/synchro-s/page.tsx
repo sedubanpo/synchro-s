@@ -3390,20 +3390,49 @@ export default function SynchroSPage() {
 
     void Promise.all(
       candidateStudentIds.map(async (studentId) => {
-        const query = new URLSearchParams({ weekStart, view: "student", studentId });
-        const response = await fetch(`/api/schedules/week?${query.toString()}`, {
-          method: "GET",
-          cache: "no-store",
-          signal: controller.signal
+        const weekQuery = new URLSearchParams({ weekStart, view: "student", studentId });
+        const groupQuery = new URLSearchParams({
+          roleView: "student",
+          targetId: studentId,
+          includeSnapshots: "1"
         });
-        if (response.status === 401) {
+        const [weekResponse, groupResponse] = await Promise.all([
+          fetch(`/api/schedules/week?${weekQuery.toString()}`, {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal
+          }),
+          fetch(`/api/schedules/groups?${groupQuery.toString()}`, {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal
+          })
+        ]);
+        if (weekResponse.status === 401 || groupResponse.status === 401) {
           moveToLogin();
           return null;
         }
-        if (!response.ok) {
-          throw new Error(await getApiErrorMessage(response, "학생별 검토 시간표를 불러오지 못했습니다."));
+        if (!weekResponse.ok) {
+          throw new Error(await getApiErrorMessage(weekResponse, "학생별 검토 시간표를 불러오지 못했습니다."));
         }
-        return (await response.json()) as WeekResponse;
+        if (!groupResponse.ok) {
+          throw new Error(await getApiErrorMessage(groupResponse, "학생별 저장 시간표를 불러오지 못했습니다."));
+        }
+        const weekData = (await weekResponse.json()) as WeekResponse;
+        const groupData = (await groupResponse.json()) as TimetableGroupsResponse;
+        const selectedGroup = selectEffectiveStudentTimetableGroup(
+          (groupData.items ?? []).map(mapApiGroupToState),
+          weekStart,
+          selectedScheduleTagId,
+          todayISO
+        );
+        const snapshotEvents = selectedGroup?.snapshotEvents ?? [];
+        const selectedEvents = snapshotEvents.length > 0
+          ? snapshotEvents
+          : selectedGroup
+            ? weekData.events.filter((event) => selectedGroup.classIds.includes(event.id))
+            : weekData.events;
+        return { ...weekData, events: selectedEvents };
       })
     )
       .then((results) => {
@@ -3429,8 +3458,10 @@ export default function SynchroSPage() {
     reviewActiveGroupByStudentId,
     reviewStudents,
     selectedReviewStudentId,
+    selectedScheduleTagId,
     students,
     targetedReviewEventsByStudentId,
+    todayISO,
     weekStart
   ]);
 

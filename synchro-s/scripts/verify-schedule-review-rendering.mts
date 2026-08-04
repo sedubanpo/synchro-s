@@ -85,6 +85,16 @@ assert.match(
 );
 assert.match(
   reviewPage,
+  /fetch\(`\/api\/schedules\/groups\?\$\{groupQuery\.toString\(\)\}`/,
+  "review must load the selected student's saved groups instead of relying on the all-student group aggregate"
+);
+assert.match(
+  reviewPage,
+  /const selectedGroup = selectEffectiveStudentTimetableGroup\([\s\S]*?const snapshotEvents = selectedGroup\?\.snapshotEvents \?\? \[\]/,
+  "review must select and render the same effective saved-group snapshot as the student timetable"
+);
+assert.match(
+  reviewPage,
   /targetedReviewEventsByStudentId\[student\.id\]/,
   "student-scoped review events must override the lossy all-students aggregate"
 );
