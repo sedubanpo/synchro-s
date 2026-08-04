@@ -529,10 +529,6 @@ function getReviewStudentKey(student: SelectOption): string {
   return name ? `${name}|${secondary}` : student.id;
 }
 
-function getReviewEventDedupeKey(event: ScheduleEvent): string {
-  return getScheduleEventMergeKey(event);
-}
-
 function cloneEvents(items: ScheduleEvent[]): ScheduleEvent[] {
   return items.map((item) => ({
     ...item,
@@ -2606,7 +2602,6 @@ export default function SynchroSPage() {
               );
 
       const studentEvents: ScheduleEvent[] = [];
-      const seenKeys = new Set<string>();
 
       for (const event of sourceEvents) {
         const isProspect = student.id.startsWith("prospect:");
@@ -2624,12 +2619,6 @@ export default function SynchroSPage() {
           continue;
         }
 
-        const eventKey = getReviewEventDedupeKey(event);
-        if (seenKeys.has(eventKey)) {
-          continue;
-        }
-
-        seenKeys.add(eventKey);
         studentEvents.push(event);
       }
 

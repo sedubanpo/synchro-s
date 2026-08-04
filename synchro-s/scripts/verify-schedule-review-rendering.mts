@@ -33,5 +33,10 @@ assert.doesNotMatch(
   /event\.weekday === day\.key && event\.startTime === slot/,
   "schedule review must not hide the continuation rows of multi-hour classes"
 );
+assert.doesNotMatch(
+  reviewPage,
+  /getReviewEventDedupeKey|seenKeys\.has\(eventKey\)/,
+  "schedule review must preserve the same saved occurrences shown by the student timetable"
+);
 
 console.log("schedule review multi-hour rendering verification passed");
