@@ -2564,7 +2564,16 @@ export default function SynchroSPage() {
         continue;
       }
 
-      byStudentId.set(canonicalStudent.id, group);
+      const existingGroup = byStudentId.get(canonicalStudent.id);
+      const targetsCanonicalStudent = group.targetId === canonicalStudent.id;
+      const existingTargetsCanonicalStudent = existingGroup?.targetId === canonicalStudent.id;
+      if (
+        !existingGroup ||
+        (targetsCanonicalStudent && !existingTargetsCanonicalStudent) ||
+        (targetsCanonicalStudent === existingTargetsCanonicalStudent && compareEffectiveTimetableGroup(group, existingGroup) < 0)
+      ) {
+        byStudentId.set(canonicalStudent.id, group);
+      }
     }
 
     return byStudentId;

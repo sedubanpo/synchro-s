@@ -43,5 +43,10 @@ assert.match(
   /if \(!activeGroup && !hasCanonicalStudent\)/,
   "saved student-group snapshots must not lose classes with incomplete embedded student links"
 );
+assert.match(
+  reviewPage,
+  /targetsCanonicalStudent && !existingTargetsCanonicalStudent/,
+  "when duplicate roster aliases share a review card, the canonical student's own group must win"
+);
 
 console.log("schedule review multi-hour rendering verification passed");
