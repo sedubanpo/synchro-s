@@ -65,13 +65,18 @@ assert.match(
 );
 assert.match(
   reviewPage,
-  /studentId: selectedReviewStudentId/,
-  "the selected review student must use the same student-scoped weekly API as the student timetable"
+  /candidateStudentIds\.map\(async \(studentId\)/,
+  "duplicate roster IDs must each be checked with the same student-scoped weekly API as the student timetable"
 );
 assert.match(
   reviewPage,
   /targetedReviewEventsByStudentId\[student\.id\]/,
   "student-scoped review events must override the lossy all-students aggregate"
+);
+assert.match(
+  reviewPage,
+  /sort\(\(a, b\) => b\.events\.length - a\.events\.length\)\[0\]/,
+  "duplicate roster IDs must keep the complete student timetable response"
 );
 
 console.log("schedule review multi-hour rendering verification passed");

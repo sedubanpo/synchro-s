@@ -3371,18 +3371,30 @@ export default function SynchroSPage() {
     }
 
     const controller = new AbortController();
-    const query = new URLSearchParams({
-      weekStart,
-      view: "student",
-      studentId: selectedReviewStudentId
-    });
+    const selectedStudent = reviewStudents.find((student) => student.id === selectedReviewStudentId);
+    const selectedName = normalizePersonName(selectedStudent?.name ?? "");
+    const selectedSecondary = normalizeLookupToken(selectedStudent?.secondary ?? "");
+    const candidateStudentIds = Array.from(
+      new Set([
+        selectedReviewStudentId,
+        ...students
+          .filter(
+            (student) =>
+              normalizePersonName(student.name) === selectedName &&
+              (!selectedSecondary || normalizeLookupToken(student.secondary ?? "") === selectedSecondary)
+          )
+          .map((student) => student.id)
+      ])
+    );
 
-    void fetch(`/api/schedules/week?${query.toString()}`, {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal
-    })
-      .then(async (response) => {
+    void Promise.all(
+      candidateStudentIds.map(async (studentId) => {
+        const query = new URLSearchParams({ weekStart, view: "student", studentId });
+        const response = await fetch(`/api/schedules/week?${query.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal
+        });
         if (response.status === 401) {
           moveToLogin();
           return null;
@@ -3392,8 +3404,13 @@ export default function SynchroSPage() {
         }
         return (await response.json()) as WeekResponse;
       })
-      .then((data) => {
-        if (!data || controller.signal.aborted) return;
+    )
+      .then((results) => {
+        if (controller.signal.aborted) return;
+        const data = results
+          .filter((item): item is WeekResponse => Boolean(item))
+          .sort((a, b) => b.events.length - a.events.length)[0];
+        if (!data) return;
         setTargetedReviewEventsByStudentId((current) => ({
           ...current,
           [selectedReviewStudentId]: data.events
@@ -3405,7 +3422,7 @@ export default function SynchroSPage() {
       });
 
     return () => controller.abort();
-  }, [mainTab, moveToLogin, selectedReviewStudentId, targetedReviewEventsByStudentId, weekStart]);
+  }, [mainTab, moveToLogin, reviewStudents, selectedReviewStudentId, students, targetedReviewEventsByStudentId, weekStart]);
 
   const saveScheduleReview = useCallback(
     async (studentId: string, status: ReviewStatus, memo: string, action: "status" | "memo" = "status") => {
