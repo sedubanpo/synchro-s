@@ -38,5 +38,10 @@ assert.doesNotMatch(
   /getReviewEventDedupeKey|seenKeys\.has\(eventKey\)/,
   "schedule review must preserve the same saved occurrences shown by the student timetable"
 );
+assert.match(
+  reviewPage,
+  /if \(!activeGroup && !hasCanonicalStudent\)/,
+  "saved student-group snapshots must not lose classes with incomplete embedded student links"
+);
 
 console.log("schedule review multi-hour rendering verification passed");

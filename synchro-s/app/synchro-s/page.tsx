@@ -2615,7 +2615,11 @@ export default function SynchroSPage() {
         const hasCanonicalStudent =
           event.studentIds.some((studentId) => reviewStudentAlias.idToCanonical.get(studentId)?.id === student.id) ||
           event.studentNames.some((studentName) => reviewStudentAlias.nameToCanonical.get(normalizePersonName(studentName))?.id === student.id);
-        if (!hasCanonicalStudent) {
+        // A saved student group already scopes its snapshot to the target student.
+        // Older snapshots can omit that student from an individual class record,
+        // so requiring the embedded link here would hide classes that the student
+        // timetable correctly renders from the same group.
+        if (!activeGroup && !hasCanonicalStudent) {
           continue;
         }
 
