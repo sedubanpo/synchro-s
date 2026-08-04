@@ -53,5 +53,10 @@ assert.match(
   /normalizedGroupName\.includes\(normalizedStudentName\)/,
   "legacy student-group target IDs must fall back to the saved group's student name"
 );
+assert.match(
+  reviewPage,
+  /groupEventCount > existingGroupEventCount/,
+  "duplicate roster aliases must keep the complete saved timetable group"
+);
 
 console.log("schedule review multi-hour rendering verification passed");

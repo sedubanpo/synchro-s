@@ -2575,10 +2575,17 @@ export default function SynchroSPage() {
       const existingGroup = byStudentId.get(canonicalStudent.id);
       const targetsCanonicalStudent = group.targetId === canonicalStudent.id;
       const existingTargetsCanonicalStudent = existingGroup?.targetId === canonicalStudent.id;
+      const groupEventCount = group.snapshotEvents?.length ?? group.classIds.length;
+      const existingGroupEventCount = existingGroup
+        ? existingGroup.snapshotEvents?.length ?? existingGroup.classIds.length
+        : -1;
       if (
         !existingGroup ||
-        (targetsCanonicalStudent && !existingTargetsCanonicalStudent) ||
-        (targetsCanonicalStudent === existingTargetsCanonicalStudent && compareEffectiveTimetableGroup(group, existingGroup) < 0)
+        groupEventCount > existingGroupEventCount ||
+        (groupEventCount === existingGroupEventCount && targetsCanonicalStudent && !existingTargetsCanonicalStudent) ||
+        (groupEventCount === existingGroupEventCount &&
+          targetsCanonicalStudent === existingTargetsCanonicalStudent &&
+          compareEffectiveTimetableGroup(group, existingGroup) < 0)
       ) {
         byStudentId.set(canonicalStudent.id, group);
       }
