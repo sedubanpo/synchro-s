@@ -70,6 +70,11 @@ assert.match(
 );
 assert.match(
   reviewPage,
+  /filter\(\(student\) => normalizePersonName\(student\.name\) === selectedName\)/,
+  "legacy duplicate IDs must be compared by student name even when school metadata differs"
+);
+assert.match(
+  reviewPage,
   /targetedReviewEventsByStudentId\[student\.id\]/,
   "student-scoped review events must override the lossy all-students aggregate"
 );

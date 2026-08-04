@@ -3373,16 +3373,11 @@ export default function SynchroSPage() {
     const controller = new AbortController();
     const selectedStudent = reviewStudents.find((student) => student.id === selectedReviewStudentId);
     const selectedName = normalizePersonName(selectedStudent?.name ?? "");
-    const selectedSecondary = normalizeLookupToken(selectedStudent?.secondary ?? "");
     const candidateStudentIds = Array.from(
       new Set([
         selectedReviewStudentId,
         ...students
-          .filter(
-            (student) =>
-              normalizePersonName(student.name) === selectedName &&
-              (!selectedSecondary || normalizeLookupToken(student.secondary ?? "") === selectedSecondary)
-          )
+          .filter((student) => normalizePersonName(student.name) === selectedName)
           .map((student) => student.id)
       ])
     );
