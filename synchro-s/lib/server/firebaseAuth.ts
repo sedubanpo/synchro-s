@@ -44,6 +44,22 @@ const CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken
 const DEFAULT_FIREBASE_PROJECT_ID = "fir-lms-prod";
 
 let certCache: { expiresAt: number; certs: Record<string, string> } | null = null;
+const FIREBASE_SERVER_TIMEOUT_MS = 15_000;
+
+async function fetchFirebaseResource(input: string, init: RequestInit, label: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FIREBASE_SERVER_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label} 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function firebaseProjectId(): string {
   return process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_PROJECT_ID;
@@ -59,7 +75,7 @@ async function loadFirebaseCerts(): Promise<Record<string, string>> {
     return certCache.certs;
   }
 
-  const response = await fetch(CERTS_URL, { cache: "no-store" });
+  const response = await fetchFirebaseResource(CERTS_URL, { cache: "no-store" }, "Firebase 인증서 확인");
   if (!response.ok) {
     throw new Error("Firebase 인증서를 불러오지 못했습니다.");
   }
@@ -138,12 +154,16 @@ async function getFirestoreDoc(idToken: string, collection: string, docId: strin
   const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/${encodeURIComponent(
     collection
   )}/${encodeURIComponent(docId)}`;
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${idToken}`
+  const response = await fetchFirebaseResource(
+    url,
+    {
+      headers: {
+        Authorization: `Bearer ${idToken}`
+      },
+      cache: "no-store"
     },
-    cache: "no-store"
-  });
+    "Firebase 계정 정보 확인"
+  );
   if (response.status === 404) return {};
   if (!response.ok) {
     throw new Error(`Firestore ${collection}/${docId} 문서를 확인하지 못했습니다.`);

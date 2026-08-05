@@ -18,6 +18,39 @@ type LoginAliasDoc = {
   email?: string;
 };
 
+const LOGIN_TIMEOUTS = {
+  alias: 15_000,
+  firebaseAuth: 20_000,
+  session: 25_000,
+  access: 20_000
+} as const;
+
+async function withLoginTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function fetchWithLoginTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number, message: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(message);
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function normalizeFirebaseLoginDigits(value: string): string {
   return value.replace(/\D+/g, "");
 }
@@ -56,7 +89,11 @@ async function findFirebaseLoginAlias(loginId: string): Promise<LoginAliasDoc> {
   const firestore = getSynchroFirestore();
   for (const alias of buildFirebaseLoginAliasCandidates(loginId)) {
     const aliasHash = await sha256Hex(alias);
-    const snapshot = await getDoc(doc(firestore, "loginAliases", aliasHash));
+    const snapshot = await withLoginTimeout(
+      getDoc(doc(firestore, "loginAliases", aliasHash)),
+      LOGIN_TIMEOUTS.alias,
+      "계정 확인 응답이 지연되고 있습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요."
+    );
     if (!snapshot.exists()) continue;
     const data = snapshot.data() as LoginAliasDoc;
     if (data.active === false) {
@@ -81,7 +118,11 @@ async function signInWithFirebase(loginId: string, password: string): Promise<st
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {
-      const credential = await signInWithEmailAndPassword(auth, alias.email, candidate);
+      const credential = await withLoginTimeout(
+        signInWithEmailAndPassword(auth, alias.email, candidate),
+        LOGIN_TIMEOUTS.firebaseAuth,
+        "Firebase 인증 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+      );
       return await credential.user.getIdToken();
     } catch (error) {
       lastError = error;
@@ -203,7 +244,12 @@ function LoginPageContent() {
   const [checking, setChecking] = useState(true);
 
   const verifyAccess = useCallback(async (): Promise<boolean> => {
-    const res = await fetch("/api/schedules/options", { method: "GET", cache: "no-store" });
+    const res = await fetchWithLoginTimeout(
+      "/api/schedules/options",
+      { method: "GET", cache: "no-store" },
+      LOGIN_TIMEOUTS.access,
+      "로그인 권한 확인이 지연되고 있습니다. 다시 시도해 주세요."
+    );
     if (res.ok) {
       return true;
     }
@@ -226,7 +272,12 @@ function LoginPageContent() {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const sessionRes = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
+        const sessionRes = await fetchWithLoginTimeout(
+          "/api/auth/session",
+          { method: "GET", cache: "no-store" },
+          LOGIN_TIMEOUTS.access,
+          "기존 로그인 상태 확인이 지연되고 있습니다."
+        );
         if (sessionRes.ok && (await verifyAccess())) {
           router.replace(nextPath);
         }
@@ -248,23 +299,33 @@ function LoginPageContent() {
       let loginRes: Response;
       try {
         const idToken = await signInWithFirebase(loginId, password);
-        loginRes = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken })
-        });
+        loginRes = await fetchWithLoginTimeout(
+          "/api/auth/login",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken })
+          },
+          LOGIN_TIMEOUTS.session,
+          "로그인 세션 생성이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+        );
       } catch (firebaseError) {
         if (process.env.NEXT_PUBLIC_ENABLE_LEGACY_SHEET_LOGIN !== "true") {
           throw firebaseError instanceof Error ? firebaseError : new Error("Firebase 로그인에 실패했습니다.");
         }
-        loginRes = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: loginId,
-            password
-          })
-        });
+        loginRes = await fetchWithLoginTimeout(
+          "/api/auth/login",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: loginId,
+              password
+            })
+          },
+          LOGIN_TIMEOUTS.session,
+          "로그인 세션 생성이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+        );
       }
 
       if (!loginRes.ok) {

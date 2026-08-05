@@ -32,7 +32,8 @@
     "verify:notion-immediate-refresh": "node --import tsx scripts/verify-notion-immediate-refresh.mts",
     "verify:hidden-time-slots": "node --import tsx scripts/verify-hidden-time-slots.mts",
     "verify:schedule-review-snapshots": "node --import tsx scripts/verify-schedule-review-snapshots.mts",
-    "verify:schedule-review-rendering": "node --import tsx scripts/verify-schedule-review-rendering.mts"
+    "verify:schedule-review-rendering": "node --import tsx scripts/verify-schedule-review-rendering.mts",
+    "verify:login-resilience": "node --import tsx scripts/verify-login-resilience.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
