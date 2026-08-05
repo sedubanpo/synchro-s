@@ -57,6 +57,8 @@ assert.ok(workspace.includes("await loadResidentGroups(group.targetId)"), "재�
 assert.ok(workspace.includes("else await loadProspects()"), "가안 시간표 이름 저장 후 서버 값을 다시 불러와야 합니다.");
 assert.ok(prospectRoute.includes('payload.action === "rename"'), "가안 시간표 이름 수정 API가 있어야 합니다.");
 assert.ok(prospectRoute.includes('.from("prospect_timetable_groups")'), "가안 시간표 이름은 서버 테이블에 저장해야 합니다.");
+assert.ok(prospectRoute.includes("시간표 이름은 100자 이하로 입력해 주세요."), "가안 시간표 이름 길이는 서버에서 검증해야 합니다.");
 assert.ok(groupRoute.includes('payload.action === "rename"'), "재원생 시간표 이름 수정 API가 있어야 합니다.");
+assert.ok(groupRoute.includes("시간표 이름은 100자 이하로 입력해 주세요."), "재원생 시간표 이름 길이는 서버에서 검증해야 합니다.");
 
 console.log("schedule creation draft verification passed");
