@@ -3,6 +3,7 @@
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
+import { SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
 import {
   filterProspectTimetableGroups,
@@ -40,6 +41,8 @@ type Props = {
   subjects: SubjectOption[];
   classTypes: ClassTypeOption[];
   scheduleTagId: string | null;
+  scheduleTags: ScheduleTag[];
+  onScheduleTagChange: (tagId: string) => void;
   hiddenTimeSlots: string[];
   onHiddenTimeSlotsChange: (timeSlots: string[]) => void;
   onDataChanged: () => void | Promise<void>;
@@ -79,6 +82,8 @@ export function ScheduleCreationWorkspace({
   subjects,
   classTypes,
   scheduleTagId,
+  scheduleTags,
+  onScheduleTagChange,
   hiddenTimeSlots,
   onHiddenTimeSlotsChange,
   onDataChanged
@@ -91,7 +96,12 @@ export function ScheduleCreationWorkspace({
   const [draftEvents, setDraftEvents] = useState<ScheduleEvent[]>([]);
   const [groups, setGroups] = useState<CreationGroup[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
-  const [modalCell, setModalCell] = useState<{ weekday: Weekday; startTime: string }>();
+  const [modalCell, setModalCell] = useState<{
+    weekday: Weekday;
+    startTime: string;
+    classDate?: string;
+    scheduleMode?: "recurring" | "one_off";
+  }>();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -99,8 +109,18 @@ export function ScheduleCreationWorkspace({
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
   const [hideEmptyTimes, setHideEmptyTimes] = useState(false);
   const [savedGroupSearch, setSavedGroupSearch] = useState("");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [dayDateOverrides, setDayDateOverrides] = useState<Partial<Record<Weekday, string>>>({});
 
   const activeStudents = useMemo(() => students.filter((student) => student.isActive !== false), [students]);
+  const effectiveScheduleTagId = scheduleTagId ?? scheduleTags.find((tag) => tag.isCurrent && tag.isActive)?.id ?? null;
+  const filteredStudents = useMemo(() => {
+    const token = studentSearch.replace(/\s+/g, "").toLowerCase();
+    if (!token) return activeStudents;
+    return activeStudents.filter((student) =>
+      student.id === studentId || `${student.name}${student.secondary ?? ""}`.replace(/\s+/g, "").toLowerCase().includes(token)
+    );
+  }, [activeStudents, studentId, studentSearch]);
   const activeInstructors = useMemo(() => instructors.filter((instructor) => instructor.isActive !== false), [instructors]);
   const selectedStudent = activeStudents.find((student) => student.id === studentId) ?? null;
   const selectedProspect = prospects.find((prospect) => prospect.id === prospectId) ?? null;
@@ -123,8 +143,16 @@ export function ScheduleCreationWorkspace({
   );
 
   useEffect(() => {
+    if (!scheduleTagId && effectiveScheduleTagId) onScheduleTagChange(effectiveScheduleTagId);
+  }, [effectiveScheduleTagId, onScheduleTagChange, scheduleTagId]);
+
+  useEffect(() => {
     setGroupName(`${weekStart} ${targetName || (mode === "resident" ? "재원생" : "신규문의")} 시간표`);
   }, [mode, targetName, weekStart]);
+
+  useEffect(() => {
+    setDayDateOverrides({});
+  }, [mode, prospectId, studentId, weekStart]);
 
   const loadProspects = useCallback(async () => {
     const res = await fetch("/api/schedule-creation/prospects", { cache: "no-store" });
@@ -210,7 +238,7 @@ export function ScheduleCreationWorkspace({
     const name = targetName || (mode === "prospect" ? "[가안] 신규문의" : "재원생");
     const event: ScheduleEvent = {
       id: makeDraftId(),
-      scheduleMode: "recurring",
+      scheduleMode: input.scheduleMode,
       instructorId: isSelfStudy ? "" : input.instructorId,
       instructorName: isSelfStudy ? "" : instructor?.name ?? "",
       studentIds: targetId ? [mode === "prospect" ? `prospect:${targetId}` : targetId] : [],
@@ -221,7 +249,7 @@ export function ScheduleCreationWorkspace({
       classTypeLabel: isSelfStudy ? "자기주도학습" : classType?.label ?? "",
       badgeText: isSelfStudy ? "[자습]" : classType?.badgeText ?? "",
       weekday: input.weekday,
-      classDate: shiftDate(weekStart, input.weekday - 1),
+      classDate: input.classDate ?? shiftDate(weekStart, input.weekday - 1),
       startTime: input.startTime,
       endTime: input.endTime,
       progressStatus: "planned",
@@ -253,11 +281,13 @@ export function ScheduleCreationWorkspace({
             subjectCode: event.subjectCode,
             classTypeCode: event.classTypeCode,
             note: event.note ?? "시간표 생성",
-            scheduleMode: "recurring",
-            weekday: event.weekday,
-            activeFrom: weekStart,
+            scheduleMode: event.scheduleMode,
+            weekday: event.scheduleMode === "recurring" ? event.weekday : undefined,
+            classDate: event.scheduleMode === "one_off" ? event.classDate : undefined,
+            activeFrom: event.scheduleMode === "recurring" ? weekStart : undefined,
             startTime: event.startTime,
-            endTime: event.endTime
+            endTime: event.endTime,
+            scheduleTagId: effectiveScheduleTagId
           })),
           targetType: "학생",
           targetName: selectedStudent.name,
@@ -294,7 +324,7 @@ export function ScheduleCreationWorkspace({
         roleView: "student",
         targetId: studentId,
         weekStart,
-        tagId: scheduleTagId,
+        tagId: effectiveScheduleTagId,
         classIds,
         snapshotEvents: snapshots,
         isActive: false,
@@ -319,7 +349,7 @@ export function ScheduleCreationWorkspace({
         prospect: prospectForm,
         weekStart,
         groupName: groupName.trim(),
-        scheduleTagId: scheduleTagId ?? undefined,
+        scheduleTagId: effectiveScheduleTagId ?? undefined,
         items: draftEvents.map((event) => ({
           instructorId: event.instructorId || undefined,
           instructorName: event.instructorName,
@@ -329,6 +359,8 @@ export function ScheduleCreationWorkspace({
           classTypeLabel: event.classTypeLabel,
           badgeText: event.badgeText,
           weekday: event.weekday,
+          scheduleMode: event.scheduleMode,
+          classDate: event.classDate,
           startTime: event.startTime,
           endTime: event.endTime,
           note: event.note,
@@ -344,6 +376,10 @@ export function ScheduleCreationWorkspace({
   };
 
   const handleSave = async () => {
+    if (!effectiveScheduleTagId) {
+      setError("시간표 분류(태그)를 선택해 주세요.");
+      return;
+    }
     if (!groupName.trim()) {
       setError("시간표 이름을 입력해 주세요.");
       return;
@@ -442,10 +478,18 @@ export function ScheduleCreationWorkspace({
             {mode === "resident" ? (
               <label className="space-y-1 text-xs font-bold text-slate-600">
                 재원생
+                <input
+                  type="search"
+                  value={studentSearch}
+                  onChange={(event) => setStudentSearch(event.target.value)}
+                  placeholder="이름 또는 학교 검색"
+                  className="sync-input mb-2 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold"
+                />
                 <select value={studentId} onChange={(event) => { setStudentId(event.target.value); setDraftEvents([]); }} className="sync-input h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold">
                   <option value="">학생 선택</option>
-                  {activeStudents.map((student) => <option key={student.id} value={student.id}>{student.name}{student.secondary ? ` · ${student.secondary}` : ""}</option>)}
+                  {filteredStudents.map((student) => <option key={student.id} value={student.id}>{student.name}{student.secondary ? ` · ${student.secondary}` : ""}</option>)}
                 </select>
+                {studentSearch && filteredStudents.length === 0 ? <span className="block text-[11px] font-semibold text-rose-600">검색 결과가 없습니다.</span> : null}
               </label>
             ) : (
               <label className="space-y-1 text-xs font-bold text-slate-600">
@@ -481,6 +525,33 @@ export function ScheduleCreationWorkspace({
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs font-black text-slate-600">시간표 태그</span>
+              {scheduleTags.filter((tag) => tag.isActive || tag.id === effectiveScheduleTagId).map((tag) => {
+                const active = tag.id === effectiveScheduleTagId;
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      onScheduleTagChange(tag.id);
+                      setError(null);
+                    }}
+                    className={`sync-pressable sync-focus min-h-9 rounded-full border px-3 text-xs font-black ${
+                      active ? `${SCHEDULE_TAG_TONES[tag.colorKey]} ring-2 ring-blue-200` : "border-slate-200 bg-white text-slate-600 hover:border-blue-200"
+                    }`}
+                  >
+                    #{tag.name}{tag.isCurrent ? " · 현재" : ""}
+                  </button>
+                );
+              })}
+            </div>
+            <p className={`mt-2 text-[11px] font-bold ${effectiveScheduleTagId ? "text-slate-500" : "text-rose-600"}`}>
+              {effectiveScheduleTagId ? "선택한 태그로 새 시간표 버전을 저장합니다." : "저장할 시간표 태그를 먼저 선택해 주세요."}
+            </p>
+          </div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
             <div>
               <p className="text-sm font-black text-slate-900">{targetName || "대상 미선택"} 시간표 초안</p>
@@ -509,7 +580,7 @@ export function ScheduleCreationWorkspace({
                 빈 시간 숨기기 {hideEmptyTimes ? "ON" : "OFF"}
               </button>
               <button type="button" disabled={draftEvents.length === 0 || saving} onClick={() => setDraftEvents([])} className="sync-pressable sync-focus rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 disabled:opacity-40">전체 지우기</button>
-              <button type="button" disabled={saving || loading || draftEvents.length === 0 || !targetName} onClick={() => void handleSave()} className="sync-pressable sync-focus rounded-lg bg-blue-600 px-4 py-2 text-xs font-black text-white shadow-sm disabled:opacity-40">{saving ? "저장 중" : "새 버전 저장"}</button>
+              <button type="button" disabled={saving || loading || draftEvents.length === 0 || !targetName || !effectiveScheduleTagId} onClick={() => void handleSave()} className="sync-pressable sync-focus rounded-lg bg-blue-600 px-4 py-2 text-xs font-black text-white shadow-sm disabled:opacity-40">{saving ? "저장 중" : "새 버전 저장"}</button>
             </div>
           </div>
           <TimetableGrid
@@ -517,6 +588,15 @@ export function ScheduleCreationWorkspace({
             days={DAYS}
             timeSlots={TIME_SLOTS}
             events={draftEvents}
+            dayDateOverrides={dayDateOverrides}
+            onDayDateChange={(weekday, classDate) =>
+              setDayDateOverrides((current) => {
+                const next = { ...current };
+                if (classDate) next[weekday] = classDate;
+                else delete next[weekday];
+                return next;
+              })
+            }
             hideEmptyDays={hideEmptyDays}
             hideEmptyTimes={hideEmptyTimes}
             hiddenTimeSlots={hiddenTimeSlots}

@@ -100,6 +100,8 @@ type SyncScheduleDraftItem = {
   note: string;
   isSelfStudy: boolean;
   rawText: string;
+  scheduleMode: "recurring" | "one_off";
+  classDate?: string;
 };
 
 type TimetableGroup = {
@@ -153,6 +155,7 @@ type SelfStudyDraft = {
   weekday: Weekday;
   startTime: string;
   endTime: string;
+  classDate?: string;
 };
 
 const TIME_EDIT_OPTIONS = Array.from({ length: 33 }, (_, index) => {
@@ -1481,11 +1484,22 @@ export default function SynchroSPage() {
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [initialCell, setInitialCell] = useState<{ weekday: Weekday; startTime: string } | undefined>();
+  const [initialCell, setInitialCell] = useState<{
+    weekday: Weekday;
+    startTime: string;
+    classDate?: string;
+    scheduleMode?: "recurring" | "one_off";
+  }>();
   const [studentScheduleInputTab, setStudentScheduleInputTab] = useState<StudentScheduleInputTab>("sync");
   const [instructorWorkspaceTab, setInstructorWorkspaceTab] = useState<InstructorWorkspaceTab>("schedule");
   const [syncDraftModalOpen, setSyncDraftModalOpen] = useState(false);
-  const [syncDraftInitialCell, setSyncDraftInitialCell] = useState<{ weekday: Weekday; startTime: string } | undefined>();
+  const [syncDraftInitialCell, setSyncDraftInitialCell] = useState<{
+    weekday: Weekday;
+    startTime: string;
+    classDate?: string;
+    scheduleMode?: "recurring" | "one_off";
+  }>();
+  const [studentDayDateOverrides, setStudentDayDateOverrides] = useState<Partial<Record<Weekday, string>>>({});
   const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
   const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
   const [timeEditEvent, setTimeEditEvent] = useState<ScheduleEvent | null>(null);
@@ -2312,7 +2326,7 @@ export default function SynchroSPage() {
     () =>
       syncDraftItems.map((item) => ({
         id: item.id,
-        scheduleMode: "recurring",
+        scheduleMode: item.scheduleMode,
         instructorId: item.instructorId,
         instructorName: item.instructorName,
         studentIds: selectedStudentId ? [selectedStudentId] : [],
@@ -2323,7 +2337,7 @@ export default function SynchroSPage() {
         classTypeLabel: item.classTypeLabel,
         badgeText: item.badgeText,
         weekday: item.weekday,
-        classDate: shiftDate(weekStart, item.weekday - 1),
+        classDate: item.classDate ?? shiftDate(weekStart, item.weekday - 1),
         startTime: item.startTime,
         endTime: item.endTime,
         note: item.note || item.rawText,
@@ -4113,7 +4127,9 @@ export default function SynchroSPage() {
           badgeText,
           note: input.note,
           isSelfStudy: input.kind === "self-study",
-          rawText
+          rawText,
+          scheduleMode: input.scheduleMode,
+          classDate: input.classDate
         }
       ]);
       setError(null);
@@ -4206,9 +4222,10 @@ export default function SynchroSPage() {
           subjectCode: subject.code,
           classTypeCode: classType.code,
           note: draft.note || draft.rawText || "싱크로 시간표 직접 입력",
-          scheduleMode: "recurring",
-          weekday: draft.weekday,
-          activeFrom: weekStart,
+          scheduleMode: draft.scheduleMode,
+          weekday: draft.scheduleMode === "recurring" ? draft.weekday : undefined,
+          classDate: draft.scheduleMode === "one_off" ? draft.classDate : undefined,
+          activeFrom: draft.scheduleMode === "recurring" ? weekStart : undefined,
           startTime: draft.startTime,
           endTime: draft.endTime,
           scheduleTagId: selectedScheduleTagId
@@ -4321,7 +4338,7 @@ export default function SynchroSPage() {
             memoUpdates[result.classId] = entry.payload.note;
             importedEvents.push({
               id: result.classId,
-              scheduleMode: "recurring",
+              scheduleMode: entry.draft.scheduleMode,
               instructorId: entry.payload.instructorId,
               instructorName: entry.draft.instructorName,
               studentIds: [selectedStudentId],
@@ -4332,7 +4349,7 @@ export default function SynchroSPage() {
               classTypeLabel: entry.classType.label,
               badgeText: entry.classType.badgeText,
               weekday: entry.draft.weekday,
-              classDate: shiftDate(weekStart, entry.draft.weekday - 1),
+              classDate: entry.draft.classDate ?? shiftDate(weekStart, entry.draft.weekday - 1),
               startTime: entry.draft.startTime,
               endTime: entry.draft.endTime,
               progressStatus: "planned",
@@ -4356,7 +4373,7 @@ export default function SynchroSPage() {
         .map((event) => ({ ...event }));
       const existingClassIds = extractSnapshotClassIds(existingSnapshotEvents);
       const selfStudyEvents: ScheduleEvent[] = selfStudyDrafts.map((draft) => ({
-        id: `${SELF_STUDY_EVENT_ID_PREFIX}${selectedStudentId}:${shiftDate(weekStart, draft.weekday - 1)}:${draft.startTime}:${draft.id.replace(SYNC_DRAFT_EVENT_ID_PREFIX, "")}`,
+        id: `${SELF_STUDY_EVENT_ID_PREFIX}${selectedStudentId}:${draft.classDate ?? shiftDate(weekStart, draft.weekday - 1)}:${draft.startTime}:${draft.id.replace(SYNC_DRAFT_EVENT_ID_PREFIX, "")}`,
         scheduleMode: "one_off",
         instructorId: "",
         instructorName: "",
@@ -4368,7 +4385,7 @@ export default function SynchroSPage() {
         classTypeLabel: "자기주도학습",
         badgeText: "[자습]",
         weekday: draft.weekday,
-        classDate: shiftDate(weekStart, draft.weekday - 1),
+        classDate: draft.classDate ?? shiftDate(weekStart, draft.weekday - 1),
         startTime: draft.startTime,
         endTime: draft.endTime,
         progressStatus: "planned",
@@ -5226,7 +5243,7 @@ export default function SynchroSPage() {
     setError(null);
     try {
       const targetGroup = selectedGroup ?? activeGroup;
-      const classDate = shiftDate(weekStart, selfStudyDraft.weekday - 1);
+      const classDate = selfStudyDraft.classDate ?? shiftDate(weekStart, selfStudyDraft.weekday - 1);
       const stableSuffix =
         typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const selfStudyEvent: ScheduleEvent = {
@@ -6815,6 +6832,10 @@ export default function SynchroSPage() {
   }, [selectedScheduleTagId]);
 
   useEffect(() => {
+    setStudentDayDateOverrides({});
+  }, [selectedStudentId, weekStart]);
+
+  useEffect(() => {
     if (selectedScheduleTagId && scheduleTags.length > 0 && !scheduleTags.some((tag) => tag.id === selectedScheduleTagId)) {
       setSelectedScheduleTagId(null);
     }
@@ -8046,6 +8067,15 @@ export default function SynchroSPage() {
                   viewMode={timetableViewMode}
                   inactive={isDisplayedGroupInactive}
                   emptyMessage={timetableEmptyMessage}
+                  dayDateOverrides={roleView === "student" ? studentDayDateOverrides : undefined}
+                  onDayDateChange={roleView === "student" ? (weekday, classDate) => {
+                    setStudentDayDateOverrides((current) => {
+                      const next = { ...current };
+                      if (classDate) next[weekday] = classDate;
+                      else delete next[weekday];
+                      return next;
+                    });
+                  } : undefined}
                   onEventMove={!isInstructorReadOnly && roleView === "student" ? handleMoveSchedule : undefined}
                   onEventClick={!isInstructorReadOnly && roleView === "student" ? handleOpenTimeEdit : undefined}
                   onEventSave={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
@@ -8066,7 +8096,8 @@ export default function SynchroSPage() {
                       setSelfStudyDraft({
                         weekday: ctx.weekday,
                         startTime: ctx.startTime,
-                        endTime: addMinutesToTime(ctx.startTime, 60)
+                        endTime: addMinutesToTime(ctx.startTime, 60),
+                        classDate: ctx.classDate
                       });
                       setError(null);
                       return;
@@ -9324,6 +9355,8 @@ export default function SynchroSPage() {
             subjects={subjects}
             classTypes={classTypes}
             scheduleTagId={selectedScheduleTagId}
+            scheduleTags={scheduleTags}
+            onScheduleTagChange={setSelectedScheduleTagId}
             hiddenTimeSlots={hiddenTimeSlots}
             onHiddenTimeSlotsChange={setHiddenTimeSlots}
             onDataChanged={async () => {

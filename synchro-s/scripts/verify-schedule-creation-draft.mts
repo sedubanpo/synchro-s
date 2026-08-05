@@ -26,6 +26,9 @@ assert.deepEqual(
 const root = process.cwd();
 const workspace = fs.readFileSync(path.join(root, "components/schedule/ScheduleCreationWorkspace.tsx"), "utf8");
 const modal = fs.readFileSync(path.join(root, "components/schedule/SyncScheduleDraftModal.tsx"), "utf8");
+const grid = fs.readFileSync(path.join(root, "components/schedule/TimetableGrid.tsx"), "utf8");
+const page = fs.readFileSync(path.join(root, "app/synchro-s/page.tsx"), "utf8");
+const prospectRoute = fs.readFileSync(path.join(root, "app/api/schedule-creation/prospects/route.ts"), "utf8");
 
 assert.ok(workspace.includes("resolveSubjectOption(subjects, input.subjectLabel)"));
 assert.ok(workspace.includes("hideEmptyDays={hideEmptyDays}"));
@@ -33,5 +36,18 @@ assert.ok(workspace.includes("hideEmptyTimes={hideEmptyTimes}"));
 assert.ok(workspace.includes("빈 요일 숨기기"));
 assert.ok(workspace.includes("빈 시간 숨기기"));
 assert.ok(modal.includes("if (accepted !== false) onClose()"), "검증 실패 시 입력창을 닫지 않아야 합니다.");
+assert.ok(workspace.includes("scheduleTagId: effectiveScheduleTagId"), "재원생 수업 저장 요청에도 선택 태그를 전달해야 합니다.");
+assert.ok(workspace.includes('placeholder="이름 또는 학교 검색"'), "재원생을 이름으로 검색할 수 있어야 합니다.");
+assert.ok(workspace.includes("시간표 태그"));
+assert.ok(workspace.includes("onScheduleTagChange(tag.id)"), "초안 위 태그 버튼은 전역 태그 선택과 같은 상태를 갱신해야 합니다.");
+assert.ok(grid.includes("dayDateOverrides"));
+assert.ok(grid.includes("onDayDateChange"));
+assert.ok(grid.includes("주간 반복으로 되돌리기"));
+assert.ok(grid.includes("selectedWeekday !== day.key"), "요일과 다른 날짜는 특정 일자 지정으로 허용하면 안 됩니다.");
+assert.ok(modal.includes('scheduleMode: initialCell.scheduleMode ?? "recurring"'));
+assert.ok(page.includes('scheduleMode: draft.scheduleMode'));
+assert.ok(page.includes('classDate: draft.scheduleMode === "one_off" ? draft.classDate : undefined'));
+assert.ok(prospectRoute.includes('scheduleMode: item.scheduleMode === "one_off" ? "one_off" : "recurring"'));
+assert.ok(prospectRoute.includes('item.scheduleMode === "one_off" && item.classDate'));
 
 console.log("schedule creation draft verification passed");

@@ -16,7 +16,9 @@ type TimetableGridProps = {
   hideEmptyTimes?: boolean;
   hiddenTimeSlots?: string[];
   viewMode?: TimetableViewMode;
-  onCellClick: (ctx: { weekday: Weekday; startTime: string }) => void;
+  onCellClick: (ctx: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }) => void;
+  dayDateOverrides?: Partial<Record<Weekday, string>>;
+  onDayDateChange?: (weekday: Weekday, classDate: string | null) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
   onEventClick?: (event: ScheduleEvent) => void;
   onEventSave?: (event: ScheduleEvent) => Promise<void>;
@@ -199,12 +201,16 @@ export function TimetableGrid({
   onEventDelete,
   studentSecondaryLookup = {},
   inactive = false,
-  emptyMessage
+  emptyMessage,
+  dayDateOverrides = {},
+  onDayDateChange
 }: TimetableGridProps) {
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
   const [highlightedStudentName, setHighlightedStudentName] = useState<string | null>(null);
+  const [editingDateDay, setEditingDateDay] = useState<Weekday | null>(null);
+  const [dateSelectionError, setDateSelectionError] = useState<string | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
   const progressByEventKey = new Map<string, { index: number; total: number }>();
@@ -405,17 +411,81 @@ export function TimetableGrid({
                 }
               >
                 <div className="flex flex-col items-center gap-1">
-                  <span
-                    className={
-                      daysOffSet.has(day.key)
-                        ? "font-extrabold tracking-wide"
-                        : activeDaySet.has(day.key)
+                  {onDayDateChange ? (
+                    <button
+                      type="button"
+                      aria-expanded={editingDateDay === day.key}
+                      aria-label={`${day.label}요일 특정 일자 지정`}
+                      onClick={() => {
+                        setEditingDateDay((current) => (current === day.key ? null : day.key));
+                        setDateSelectionError(null);
+                      }}
+                      className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm font-extrabold tracking-wide hover:bg-white/70"
+                    >
+                      <span>{day.label}</span>
+                      {dayDateOverrides[day.key] ? (
+                        <span className="sync-tabular rounded-full border border-blue-200 bg-white px-1.5 py-0.5 text-[10px] font-black text-blue-700">
+                          {Number(dayDateOverrides[day.key]?.slice(5, 7))}/{Number(dayDateOverrides[day.key]?.slice(8, 10))}
+                        </span>
+                      ) : (
+                        <span aria-hidden="true" className="text-[10px] text-slate-400">＋</span>
+                      )}
+                    </button>
+                  ) : (
+                    <span
+                      className={
+                        daysOffSet.has(day.key)
                           ? "font-extrabold tracking-wide"
-                          : ""
-                    }
-                  >
-                    {day.label}
-                  </span>
+                          : activeDaySet.has(day.key)
+                            ? "font-extrabold tracking-wide"
+                            : ""
+                      }
+                    >
+                      {day.label}
+                    </span>
+                  )}
+                  {onDayDateChange && editingDateDay === day.key ? (
+                    <div className="flex flex-col items-center gap-1 rounded-lg border border-blue-200 bg-white p-1.5 shadow-lg">
+                      <input
+                        type="date"
+                        autoFocus
+                        value={dayDateOverrides[day.key] ?? ""}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (!value) {
+                            onDayDateChange(day.key, null);
+                            setDateSelectionError(null);
+                            return;
+                          }
+                          const selectedWeekday = new Date(`${value}T12:00:00Z`).getUTCDay() || 7;
+                          if (selectedWeekday !== day.key) {
+                            setDateSelectionError(`${day.label}요일 날짜를 선택해 주세요.`);
+                            return;
+                          }
+                          onDayDateChange(day.key, value);
+                          setDateSelectionError(null);
+                          setEditingDateDay(null);
+                        }}
+                        className="sync-input h-8 w-[126px] rounded-md border border-slate-200 px-1.5 text-[11px] font-bold text-slate-700"
+                      />
+                      {dayDateOverrides[day.key] ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onDayDateChange(day.key, null);
+                            setEditingDateDay(null);
+                            setDateSelectionError(null);
+                          }}
+                          className="sync-pressable sync-focus min-h-7 rounded-md px-2 text-[10px] font-black text-slate-500 hover:bg-slate-100"
+                        >
+                          주간 반복으로 되돌리기
+                        </button>
+                      ) : null}
+                      {dateSelectionError ? <span className="text-[10px] font-bold text-rose-600">{dateSelectionError}</span> : null}
+                    </div>
+                  ) : null}
                   {daysOffSet.has(day.key) ? (
                     <span className="inline-flex rounded-full border border-slate-300/80 bg-white/80 px-2 py-0.5 text-[10px] font-black tracking-[0.16em] text-slate-600 shadow-sm">
                       휴무
@@ -487,7 +557,13 @@ export function TimetableGrid({
                       }
                       onClick={() => {
                         if (isEmpty && viewMode === "detailed") {
-                          onCellClick({ weekday: day.key, startTime: slot });
+                          const classDate = dayDateOverrides[day.key];
+                          onCellClick({
+                            weekday: day.key,
+                            startTime: slot,
+                            classDate,
+                            scheduleMode: classDate ? "one_off" : "recurring"
+                          });
                         }
                       }}
                       onDragOver={(event) => {

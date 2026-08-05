@@ -17,6 +17,8 @@ type ProspectDraftItem = {
   endTime: string;
   note?: string;
   isSelfStudy?: boolean;
+  scheduleMode?: "recurring" | "one_off";
+  classDate?: string;
 };
 
 type SavePayload = {
@@ -49,6 +51,7 @@ function validateItems(items: ProspectDraftItem[]): void {
   if (items.length === 0) throw new Error("가안 시간표에 수업을 한 개 이상 추가해 주세요.");
   for (const item of items) {
     if (!Number.isInteger(item.weekday) || item.weekday < 1 || item.weekday > 7) throw new Error("요일 값이 올바르지 않습니다.");
+    if (item.scheduleMode === "one_off" && (!item.classDate || !isDate(item.classDate))) throw new Error("특정 수업 날짜가 올바르지 않습니다.");
     if (!isTime(item.startTime) || !isTime(item.endTime) || item.startTime >= item.endTime) throw new Error("수업 시간이 올바르지 않습니다.");
     if (!item.isSelfStudy && (!item.instructorId || !item.subjectCode || !item.classTypeCode)) {
       throw new Error("강사, 과목, 수업 유형을 모두 선택해 주세요.");
@@ -59,7 +62,7 @@ function validateItems(items: ProspectDraftItem[]): void {
 function buildSnapshotEvents(items: ProspectDraftItem[], prospectId: string, prospectName: string, weekStart: string): ScheduleEvent[] {
   return items.map((item, index) => ({
     id: `prospect-draft:${prospectId}:${index}:${item.weekday}:${item.startTime}`,
-    scheduleMode: "recurring",
+    scheduleMode: item.scheduleMode === "one_off" ? "one_off" : "recurring",
     instructorId: item.instructorId ?? "",
     instructorName: item.instructorName ?? "",
     studentIds: [`prospect:${prospectId}`],
@@ -70,7 +73,7 @@ function buildSnapshotEvents(items: ProspectDraftItem[], prospectId: string, pro
     classTypeLabel: item.isSelfStudy ? "자기주도학습" : item.classTypeLabel ?? item.classTypeCode ?? "",
     badgeText: item.isSelfStudy ? "[자습]" : item.badgeText ?? "",
     weekday: item.weekday,
-    classDate: shiftDate(weekStart, item.weekday - 1),
+    classDate: item.scheduleMode === "one_off" && item.classDate ? item.classDate : shiftDate(weekStart, item.weekday - 1),
     startTime: item.startTime,
     endTime: item.endTime,
     progressStatus: "planned",

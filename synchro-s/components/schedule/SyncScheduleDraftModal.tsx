@@ -14,11 +14,13 @@ export type SyncScheduleDraftInput = {
   instructorId: string;
   classTypeCode: string;
   note: string;
+  scheduleMode: "recurring" | "one_off";
+  classDate?: string;
 };
 
 type SyncScheduleDraftModalProps = {
   open: boolean;
-  initialCell?: { weekday: Weekday; startTime: string };
+  initialCell?: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode?: "recurring" | "one_off" };
   instructors: SelectOption[];
   subjects: SubjectOption[];
   classTypes: ClassTypeOption[];
@@ -183,12 +185,17 @@ export function SyncScheduleDraftModal({
       subjectLabel: isSelfStudy ? "자기주도학습" : subjectLabel.trim(),
       instructorId: isSelfStudy ? "" : instructorId,
       classTypeCode: isSelfStudy ? "SELF_STUDY" : classTypeCode,
-      note: note.trim()
+      note: note.trim(),
+      scheduleMode: initialCell.scheduleMode ?? "recurring",
+      classDate: initialCell.classDate
     });
     if (accepted !== false) onClose();
   };
 
   const weekdayLabel = DAYS.find((day) => day.key === initialCell?.weekday)?.label ?? "-";
+  const dateLabel = initialCell?.classDate
+    ? `${Number(initialCell.classDate.slice(5, 7))}/${Number(initialCell.classDate.slice(8, 10))}(${weekdayLabel})`
+    : `${weekdayLabel}요일`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
@@ -197,7 +204,7 @@ export function SyncScheduleDraftModal({
           <div>
             <p className="sync-heading text-lg font-extrabold text-slate-950">싱크로 시간표 추가</p>
             <p className="sync-copy mt-1 text-xs font-semibold text-slate-500">
-              {weekdayLabel}요일 {startTime}부터 입력한 시간만큼 미리보기에 반영됩니다.
+              {dateLabel} {startTime}부터 입력한 시간만큼 미리보기에 반영됩니다.
             </p>
           </div>
           <button
@@ -282,7 +289,7 @@ export function SyncScheduleDraftModal({
             <label className="space-y-1 text-xs font-semibold text-slate-700">
               시작 시간
               <input
-                value={`${weekdayLabel} ${startTime}`}
+                value={`${dateLabel} ${startTime}`}
                 readOnly
                 className="sync-input sync-tabular w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700"
               />
