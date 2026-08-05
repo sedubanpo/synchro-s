@@ -24,6 +24,7 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - `--sync-danger-soft`: `#fff1f2`, unavailable-date and destructive-state background.
 - `--sync-scroll-thumb`: `#cbd5e1`, compact timetable scrollbar thumb.
 - Class-type planning tones: blue for `1:1`, violet for `2:1`, rose for `3:1`, amber for `개별정규`.
+- Instructor picker subject tones: rose for Korean, blue for math, purple for English, emerald for science, amber for social studies, and slate for uncategorized instructors. Every tone is paired with a written subject-family badge so color is never the only cue.
 - Import progress gradient: emerald `#34d399`, blue `#60a5fa`, violet `#a78bfa`.
 - Schedule tag tones reuse the existing blue, emerald, amber, rose, violet, and slate UI scales.
 

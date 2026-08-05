@@ -1,6 +1,14 @@
 "use client";
 
 import { DAYS } from "@/lib/constants";
+import {
+  findInstructorByTypedName,
+  getInstructorSubjectFamily,
+  getInstructorSubjectLabel,
+  instructorMatchesSubject,
+  normalizeInstructorToken,
+  type InstructorSubjectFamily
+} from "@/lib/instructorSubjectMatching";
 import type { ClassTypeOption, SelectOption, SubjectOption, Weekday } from "@/types/schedule";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -36,29 +44,14 @@ function normalizeLookupToken(value: string): string {
   return value.replace(/[^0-9a-z가-힣:]/gi, "").toLowerCase();
 }
 
-function subjectAliases(label: string): string[] {
-  const normalized = normalizeLookupToken(label);
-  if (normalized.includes("사회문화") || normalized === "사문") return ["사회", "사탐", "social"];
-  if (normalized.includes("세계지리") || normalized === "세지") return ["사회", "사탐", "social"];
-  if (normalized.includes("통합사회") || normalized === "통사") return ["사회", "사탐", "social"];
-  if (normalized.includes("생활과윤리") || normalized === "생윤") return ["사회", "사탐", "social"];
-  if (normalized.includes("통합과학") || normalized === "통과") return ["과학", "science"];
-  if (normalized.includes("수학")) return ["수학", "math"];
-  if (normalized.includes("영어")) return ["영어", "english", "eng"];
-  if (normalized.includes("국어")) return ["국어", "korean"];
-  if (normalized.includes("과학")) return ["과학", "science"];
-  if (normalized.includes("사회") || normalized.includes("사탐")) return ["사회", "사탐", "social"];
-  return [label];
-}
-
-function instructorMatchesSubject(instructor: SelectOption, subjectLabel: string): boolean {
-  const secondary = normalizeLookupToken(instructor.secondary ?? "");
-  if (!secondary) return true;
-  return subjectAliases(subjectLabel).some((alias) => {
-    const token = normalizeLookupToken(alias);
-    return secondary.includes(token) || token.includes(secondary);
-  });
-}
+const INSTRUCTOR_TONES: Record<InstructorSubjectFamily, string> = {
+  korean: "border-rose-200 bg-rose-50 text-rose-950 hover:bg-rose-100",
+  math: "border-blue-200 bg-blue-50 text-blue-950 hover:bg-blue-100",
+  english: "border-purple-200 bg-purple-50 text-purple-950 hover:bg-purple-100",
+  science: "border-emerald-200 bg-emerald-50 text-emerald-950 hover:bg-emerald-100",
+  social: "border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100",
+  other: "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100"
+};
 
 function timeToMinutes(time: string): number {
   const [hour, minute] = time.split(":").map(Number);
@@ -103,17 +96,32 @@ export function SyncScheduleDraftModal({
 }: SyncScheduleDraftModalProps) {
   const [subjectLabel, setSubjectLabel] = useState("");
   const [instructorId, setInstructorId] = useState("");
+  const [instructorQuery, setInstructorQuery] = useState("");
+  const [autoSelectBySubject, setAutoSelectBySubject] = useState(false);
+  const [instructorPickerOpen, setInstructorPickerOpen] = useState(false);
   const [classTypeCode, setClassTypeCode] = useState("");
   const [durationHours, setDurationHours] = useState("1");
   const [note, setNote] = useState("");
   const [isSelfStudy, setIsSelfStudy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const filteredInstructors = useMemo(() => {
+  const activeInstructors = useMemo(() => instructors.filter((instructor) => instructor.isActive !== false), [instructors]);
+  const subjectMatchedInstructors = useMemo(() => {
     const trimmedSubject = subjectLabel.trim();
-    if (!trimmedSubject) return instructors;
-    return instructors.filter((instructor) => instructorMatchesSubject(instructor, trimmedSubject));
-  }, [instructors, subjectLabel]);
+    if (!autoSelectBySubject || !trimmedSubject) return activeInstructors;
+    return activeInstructors.filter((instructor) => instructorMatchesSubject(instructor, trimmedSubject));
+  }, [activeInstructors, autoSelectBySubject, subjectLabel]);
+  const filteredInstructors = useMemo(() => {
+    const query = normalizeInstructorToken(instructorQuery);
+    if (!query) return subjectMatchedInstructors;
+    return subjectMatchedInstructors.filter((instructor) =>
+      normalizeInstructorToken(`${instructor.name} ${instructor.secondary ?? ""}`).includes(query)
+    );
+  }, [instructorQuery, subjectMatchedInstructors]);
+  const selectedInstructor = activeInstructors.find((instructor) => instructor.id === instructorId) ?? null;
+  const instructorMatchWarning = instructorQuery.trim() && !selectedInstructor
+    ? "입력한 강사명을 활성 강사 명단에서 찾지 못했습니다. 이름을 확인하거나 아래 목록에서 선택해 주세요."
+    : null;
 
   const duration = normalizeDurationHours(durationHours);
   const startTime = initialCell?.startTime ?? "10:00";
@@ -124,24 +132,23 @@ export function SyncScheduleDraftModal({
     if (!open) return;
     const nextClassType = preferredRegularType(classTypes);
     setSubjectLabel("");
-    setInstructorId(instructors[0]?.id ?? "");
+    setInstructorId("");
+    setInstructorQuery("");
+    setAutoSelectBySubject(false);
+    setInstructorPickerOpen(false);
     setClassTypeCode(nextClassType);
     setDurationHours("1");
     setNote("");
     setIsSelfStudy(false);
     setError(null);
-  }, [classTypes, instructors, open]);
+  }, [classTypes, open]);
 
   useEffect(() => {
-    if (!open || isSelfStudy) return;
-    if (filteredInstructors.length === 0) {
-      setInstructorId("");
-      return;
-    }
-    if (!filteredInstructors.some((instructor) => instructor.id === instructorId)) {
-      setInstructorId(filteredInstructors[0].id);
-    }
-  }, [filteredInstructors, instructorId, isSelfStudy, open]);
+    if (!open || isSelfStudy || !autoSelectBySubject) return;
+    const firstMatch = subjectMatchedInstructors[0] ?? null;
+    setInstructorId(firstMatch?.id ?? "");
+    setInstructorQuery(firstMatch?.name ?? "");
+  }, [autoSelectBySubject, isSelfStudy, open, subjectLabel, subjectMatchedInstructors]);
 
   if (!open) return null;
 
@@ -230,7 +237,18 @@ export function SyncScheduleDraftModal({
           {!isSelfStudy ? (
             <>
               <label className="block space-y-1 text-xs font-semibold text-slate-700">
-                과목명
+                <span className="flex flex-wrap items-center justify-between gap-2">
+                  <span>과목명</span>
+                  <span className="flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-600">
+                    과목 기준 자동 선택
+                    <input
+                      type="checkbox"
+                      checked={autoSelectBySubject}
+                      onChange={(event) => setAutoSelectBySubject(event.target.checked)}
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                  </span>
+                </span>
                 <input
                   list="sync-subject-options"
                   value={subjectLabel}
@@ -245,26 +263,63 @@ export function SyncScheduleDraftModal({
                 </datalist>
               </label>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1 text-xs font-semibold text-slate-700">
+              <div className="grid items-start gap-3 sm:grid-cols-2">
+                <label className="relative space-y-1 text-xs font-semibold text-slate-700">
                   강사
-                  <select
-                    value={instructorId}
-                    disabled={filteredInstructors.length === 0}
-                    onChange={(event) => setInstructorId(event.target.value)}
-                    className="sync-input w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400"
-                  >
-                    {filteredInstructors.length === 0 ? (
-                      <option value="">매칭 강사 없음</option>
-                    ) : (
-                      filteredInstructors.map((instructor) => (
-                        <option key={instructor.id} value={instructor.id}>
-                          {instructor.name}
-                          {instructor.secondary ? ` · ${instructor.secondary}` : ""}
-                        </option>
-                      ))
-                    )}
-                  </select>
+                  <input
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={instructorPickerOpen}
+                    aria-controls="sync-instructor-options"
+                    value={instructorQuery}
+                    onFocus={() => setInstructorPickerOpen(true)}
+                    onBlur={() => window.setTimeout(() => setInstructorPickerOpen(false), 100)}
+                    onChange={(event) => {
+                      const nextQuery = event.target.value;
+                      const match = findInstructorByTypedName(activeInstructors, nextQuery);
+                      setInstructorQuery(nextQuery);
+                      setInstructorId(match?.id ?? "");
+                      setInstructorPickerOpen(true);
+                    }}
+                    placeholder="강사명을 입력하거나 선택"
+                    className={`sync-input w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none focus:ring-2 ${
+                      instructorMatchWarning
+                        ? "border-amber-300 bg-amber-50 text-amber-950 focus:border-amber-400 focus:ring-amber-100"
+                        : "border-slate-300 focus:border-blue-400 focus:ring-blue-100"
+                    }`}
+                  />
+                  {instructorPickerOpen ? (
+                    <div id="sync-instructor-options" role="listbox" className="absolute z-20 mt-1 max-h-56 w-full space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+                      {filteredInstructors.length > 0 ? filteredInstructors.map((instructor) => {
+                        const family = getInstructorSubjectFamily(instructor);
+                        return (
+                          <button
+                            key={instructor.id}
+                            type="button"
+                            role="option"
+                            aria-selected={instructor.id === instructorId}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setInstructorId(instructor.id);
+                              setInstructorQuery(instructor.name);
+                              setInstructorPickerOpen(false);
+                            }}
+                            className={`sync-pressable sync-focus flex min-h-10 w-full items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-xs font-black ${INSTRUCTOR_TONES[family]} ${
+                              instructor.id === instructorId ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                            }`}
+                          >
+                            <span className="min-w-0 truncate">{instructor.name}{instructor.secondary ? ` · ${instructor.secondary}` : ""}</span>
+                            <span className="shrink-0 rounded bg-white/75 px-1.5 py-0.5 text-[10px] font-black">{getInstructorSubjectLabel(instructor)}</span>
+                          </button>
+                        );
+                      }) : (
+                        <p className="px-2.5 py-3 text-center text-xs font-bold text-slate-500">조건에 맞는 활성 강사가 없습니다.</p>
+                      )}
+                    </div>
+                  ) : null}
+                  <span className={`block min-h-4 text-[11px] font-bold ${instructorMatchWarning ? "text-amber-700" : "text-slate-500"}`}>
+                    {instructorMatchWarning ?? (selectedInstructor ? `${selectedInstructor.name} 강사가 선택되었습니다.` : "퇴사·중지 강사는 목록에서 제외됩니다.")}
+                  </span>
                 </label>
 
                 <label className="space-y-1 text-xs font-semibold text-slate-700">

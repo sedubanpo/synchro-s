@@ -27,6 +27,7 @@
     "verify:eight-am-group-memos": "node --import tsx scripts/verify-eight-am-and-group-memos.mts",
     "verify:dense-timetable-layout": "node --import tsx scripts/verify-dense-timetable-layout.mts",
     "verify:schedule-creation-draft": "node --import tsx scripts/verify-schedule-creation-draft.mts",
+    "verify:schedule-teacher-matching": "node --import tsx scripts/verify-schedule-teacher-matching.mts",
     "verify:prospect-saved-groups": "node --import tsx scripts/verify-prospect-saved-groups.mts",
     "verify:notion-immediate-refresh": "node --import tsx scripts/verify-notion-immediate-refresh.mts",
     "verify:hidden-time-slots": "node --import tsx scripts/verify-hidden-time-slots.mts",

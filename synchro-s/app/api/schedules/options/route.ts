@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/firestoreRoster";
 import { type SupabaseStudentMirrorRow } from "@/lib/server/firebaseStudentMirror";
 import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
+import { isInstructorRosterActive, parseInstructorRosterActive } from "@/lib/instructorRoster";
 import { NextResponse } from "next/server";
 
 const DEFAULT_SPREADSHEET_ID = "1ByPeH0bZZrZDvW_yPkCpQCIuk724_Gt7uudUj_Ue8Ho";
@@ -290,6 +291,7 @@ async function selectSingleInstructorWithFallback(runQuery: (selectClause: strin
 
 type SheetMetaMap = {
   teacherSubjectByName: Map<string, string>;
+  teacherActiveByName: Map<string, boolean>;
   studentSchoolByName: Map<string, string>;
 };
 
@@ -298,6 +300,7 @@ const sheetMetaCache = new Map<string, { value?: SheetMetaMap; expiresAt: number
 
 async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
   const teacherSubjectByName = new Map<string, string>();
+  const teacherActiveByName = new Map<string, boolean>();
   const studentSchoolByName = new Map<string, string>();
 
   try {
@@ -307,6 +310,7 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
       const headers = teacherRows[0];
       const nameIdx = findColumnIndex(headers, ["선생님성함", "강사명", "teacher", "name"]);
       const subjectIdx = findColumnIndex(headers, ["과목", "subject"]);
+      const activeIdx = findColumnIndex(headers, ["재직", "재직여부", "활성", "active", "is_active"]);
       const safeNameIdx = nameIdx >= 0 ? nameIdx : 1;
       for (const row of teacherRows.slice(1)) {
         const name = normalizeName(row[safeNameIdx] ?? "");
@@ -314,6 +318,10 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
         const subject = (row[subjectIdx] ?? "").trim();
         if (subject) {
           teacherSubjectByName.set(name, subject);
+        }
+        if (activeIdx >= 0) {
+          const active = parseInstructorRosterActive(row[activeIdx] ?? "");
+          if (active !== null) teacherActiveByName.set(name, active);
         }
       }
     }
@@ -350,7 +358,7 @@ async function loadSheetMetaMap(spreadsheetId: string): Promise<SheetMetaMap> {
     console.error("[options] student 시트 메타 로드 실패", error);
   }
 
-  return { teacherSubjectByName, studentSchoolByName };
+  return { teacherSubjectByName, teacherActiveByName, studentSchoolByName };
 }
 
 async function loadSheetMetaMapCached(spreadsheetId: string, forceRefresh: boolean): Promise<SheetMetaMap> {
@@ -407,6 +415,7 @@ export async function GET(req: Request) {
     const spreadsheetId = process.env.GOOGLE_SHEETS_SYNC_ID || DEFAULT_SPREADSHEET_ID;
     const {
       teacherSubjectByName,
+      teacherActiveByName,
       studentSchoolByName
     } = await loadSheetMetaMapCached(spreadsheetId, forceSheetRefresh);
     const firebaseRoster = await loadFirebaseRoster(getBearerIdToken(req), { forceRefresh: forceSheetRefresh });
@@ -512,12 +521,15 @@ export async function GET(req: Request) {
           availableTimeSlotsByDay
         };
       };
-      const isInstructorRosterActive = (row: InstructorRow) => row.is_active !== false;
       instructors = instructorRows
-        .filter(isInstructorRosterActive)
+        .filter((row: InstructorRow) =>
+          isInstructorRosterActive(row.is_active, teacherActiveByName.get(normalizeName(row.instructor_name)))
+        )
         .map((row: InstructorRow) => toInstructorOption(row, true));
       suspendedInstructors = instructorRows
-        .filter((row: InstructorRow) => !isInstructorRosterActive(row))
+        .filter((row: InstructorRow) =>
+          !isInstructorRosterActive(row.is_active, teacherActiveByName.get(normalizeName(row.instructor_name)))
+        )
         .map((row: InstructorRow) => toInstructorOption(row, false));
 
       const isStudentRosterActive = (row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
