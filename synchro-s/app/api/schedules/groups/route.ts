@@ -334,6 +334,7 @@ export async function POST(req: Request) {
 
     const payload = (await req.json()) as GroupCreatePayload;
     if (!payload.name?.trim()) return jsonError("name is required", 400);
+    if (payload.name.trim().length > 100) return jsonError("시간표 이름은 100자 이하로 입력해 주세요.", 400);
     if (!isRoleView(payload.roleView)) return jsonError("roleView must be student or instructor", 400);
     if (!payload.targetId) return jsonError("targetId is required", 400);
     if (!payload.weekStart) return jsonError("weekStart is required", 400);
@@ -445,6 +446,7 @@ export async function PATCH(req: Request) {
     if (payload.action === "rename") {
       const nextName = payload.name?.trim();
       if (!nextName) return jsonError("name is required", 400);
+      if (nextName.length > 100) return jsonError("시간표 이름은 100자 이하로 입력해 주세요.", 400);
       const { error } = await supabase
         .from("timetable_groups")
         .update({ name: nextName, updated_at: nowIso() })

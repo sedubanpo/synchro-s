@@ -111,6 +111,8 @@ export function ScheduleCreationWorkspace({
   const [savedGroupSearch, setSavedGroupSearch] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
   const [dayDateOverrides, setDayDateOverrides] = useState<Partial<Record<Weekday, string>>>({});
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
+  const [renamingGroupName, setRenamingGroupName] = useState("");
 
   const activeStudents = useMemo(() => students.filter((student) => student.isActive !== false), [students]);
   const effectiveScheduleTagId = scheduleTagId ?? scheduleTags.find((tag) => tag.isCurrent && tag.isActive)?.id ?? null;
@@ -280,7 +282,7 @@ export function ScheduleCreationWorkspace({
             studentIds: [studentId],
             subjectCode: event.subjectCode,
             classTypeCode: event.classTypeCode,
-            note: event.note ?? "시간표 생성",
+            note: event.note?.trim() || "시간표 생성",
             scheduleMode: event.scheduleMode,
             weekday: event.scheduleMode === "recurring" ? event.weekday : undefined,
             classDate: event.scheduleMode === "one_off" ? event.classDate : undefined,
@@ -410,7 +412,9 @@ export function ScheduleCreationWorkspace({
     setError(null);
     try {
       const url = group.kind === "resident" ? "/api/schedules/groups" : "/api/schedule-creation/prospects";
-      const body = group.kind === "resident" ? { action: "activate", id: group.id } : { action: "activate", groupId: group.id };
+      const body = group.kind === "resident"
+        ? { action: "activate", id: group.id, isActive: !group.isActive }
+        : { action: "activate", groupId: group.id };
       const res = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const payload = (await res.json().catch(() => ({}))) as { error?: string; isActive?: boolean };
       if (!res.ok) throw new Error(payload.error ?? "시간표 활성화에 실패했습니다.");
@@ -420,6 +424,44 @@ export function ScheduleCreationWorkspace({
       setNotice(payload.isActive === false ? "시간표를 비활성화했습니다." : "활성 시간표를 변경하고 운영 화면에 반영했습니다.");
     } catch (activateError) {
       setError(activateError instanceof Error ? activateError.message : "시간표 활성화에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startRenamingGroup = (group: CreationGroup) => {
+    setRenamingGroupId(group.id);
+    setRenamingGroupName(group.name);
+    setError(null);
+  };
+
+  const handleRenameGroup = async (group: CreationGroup) => {
+    const nextName = renamingGroupName.trim();
+    if (!nextName) {
+      setError("시간표 이름을 입력해 주세요.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const url = group.kind === "resident" ? "/api/schedules/groups" : "/api/schedule-creation/prospects";
+      const body = group.kind === "resident"
+        ? { action: "rename", id: group.id, name: nextName }
+        : { action: "rename", groupId: group.id, name: nextName };
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "시간표 이름 저장에 실패했습니다.");
+      if (group.kind === "resident") await loadResidentGroups(group.targetId);
+      else await loadProspects();
+      setRenamingGroupId(null);
+      setRenamingGroupName("");
+      setNotice(`시간표 이름을 “${nextName}”(으)로 서버에 저장했습니다.`);
+    } catch (renameError) {
+      setError(renameError instanceof Error ? renameError.message : "시간표 이름 저장에 실패했습니다.");
     } finally {
       setSaving(false);
     }
@@ -510,7 +552,13 @@ export function ScheduleCreationWorkspace({
             )}
             <label className="space-y-1 text-xs font-bold text-slate-600">
               시간표 이름
-              <input value={groupName} onChange={(event) => setGroupName(event.target.value)} className="sync-input h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold" />
+              <input
+                value={groupName}
+                maxLength={100}
+                onChange={(event) => setGroupName(event.target.value)}
+                className="sync-input h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold"
+              />
+              <span className="block text-[11px] font-semibold text-slate-400">새 버전을 저장하면 이 이름이 서버에 보관됩니다.</span>
             </label>
           </div>
 
@@ -662,8 +710,32 @@ export function ScheduleCreationWorkspace({
             const prospect = group.kind === "prospect" ? prospectById.get(group.targetId) : null;
             return (
               <article key={`${group.kind}-${group.id}`} className={`rounded-lg border p-3 ${group.isActive ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
+                {renamingGroupId === group.id ? (
+                  <form
+                    className="mb-3 rounded-lg border border-blue-200 bg-white p-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleRenameGroup(group);
+                    }}
+                  >
+                    <label className="block text-[11px] font-black text-slate-600">
+                      시간표 이름
+                      <input
+                        autoFocus
+                        value={renamingGroupName}
+                        maxLength={100}
+                        onChange={(event) => setRenamingGroupName(event.target.value)}
+                        className="sync-input mt-1 h-9 w-full rounded-md border border-slate-300 px-2.5 text-xs font-semibold text-slate-800"
+                      />
+                    </label>
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button type="button" disabled={saving} onClick={() => setRenamingGroupId(null)} className="sync-pressable sync-focus rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600">취소</button>
+                      <button type="submit" disabled={saving || !renamingGroupName.trim()} className="sync-pressable sync-focus rounded-md bg-blue-600 px-3 py-1.5 text-xs font-black text-white disabled:opacity-40">{saving ? "저장 중" : "서버에 저장"}</button>
+                    </div>
+                  </form>
+                ) : null}
                 <div className="flex items-start justify-between gap-2">
-                  <button type="button" onClick={() => selectGroup(group)} className="min-w-0 flex-1 text-left">
+                  <button type="button" onClick={() => selectGroup(group)} className="sync-focus min-w-0 flex-1 rounded-md text-left">
                     {prospect ? (
                       <>
                         <p className="truncate text-sm font-black text-slate-900">{prospect.name}</p>
@@ -690,6 +762,7 @@ export function ScheduleCreationWorkspace({
                 ) : null}
                 <div className="mt-3 flex gap-2">
                   <button type="button" onClick={() => selectGroup(group)} className="sync-pressable sync-focus flex-1 rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-600">불러오기</button>
+                  <button type="button" disabled={saving} onClick={() => startRenamingGroup(group)} className="sync-pressable sync-focus flex-1 rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-600">이름 수정</button>
                   <button type="button" disabled={saving} onClick={() => void handleActivate(group)} className={`sync-pressable sync-focus flex-1 rounded-md px-2 py-2 text-xs font-black ${group.isActive ? "border border-slate-200 bg-white text-slate-600" : "bg-blue-600 text-white"}`}>{group.isActive ? "비활성" : "활성"}</button>
                 </div>
               </article>

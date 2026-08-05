@@ -29,6 +29,7 @@ const modal = fs.readFileSync(path.join(root, "components/schedule/SyncScheduleD
 const grid = fs.readFileSync(path.join(root, "components/schedule/TimetableGrid.tsx"), "utf8");
 const page = fs.readFileSync(path.join(root, "app/synchro-s/page.tsx"), "utf8");
 const prospectRoute = fs.readFileSync(path.join(root, "app/api/schedule-creation/prospects/route.ts"), "utf8");
+const groupRoute = fs.readFileSync(path.join(root, "app/api/schedules/groups/route.ts"), "utf8");
 
 assert.ok(workspace.includes("resolveSubjectOption(subjects, input.subjectLabel)"));
 assert.ok(workspace.includes("hideEmptyDays={hideEmptyDays}"));
@@ -37,6 +38,7 @@ assert.ok(workspace.includes("빈 요일 숨기기"));
 assert.ok(workspace.includes("빈 시간 숨기기"));
 assert.ok(modal.includes("if (accepted !== false) onClose()"), "검증 실패 시 입력창을 닫지 않아야 합니다.");
 assert.ok(workspace.includes("scheduleTagId: effectiveScheduleTagId"), "재원생 수업 저장 요청에도 선택 태그를 전달해야 합니다.");
+assert.ok(workspace.includes('event.note?.trim() || "시간표 생성"'), "빈 수업 메모는 저장 가능한 기본 메모로 정규화해야 합니다.");
 assert.ok(workspace.includes('placeholder="이름 또는 학교 검색"'), "재원생을 이름으로 검색할 수 있어야 합니다.");
 assert.ok(workspace.includes("시간표 태그"));
 assert.ok(workspace.includes("onScheduleTagChange(tag.id)"), "초안 위 태그 버튼은 전역 태그 선택과 같은 상태를 갱신해야 합니다.");
@@ -49,5 +51,12 @@ assert.ok(page.includes('scheduleMode: draft.scheduleMode'));
 assert.ok(page.includes('classDate: draft.scheduleMode === "one_off" ? draft.classDate : undefined'));
 assert.ok(prospectRoute.includes('scheduleMode: item.scheduleMode === "one_off" ? "one_off" : "recurring"'));
 assert.ok(prospectRoute.includes('item.scheduleMode === "one_off" && item.classDate'));
+assert.ok(workspace.includes('action: "rename"'), "저장된 시간표 이름은 서버 수정 API로 저장해야 합니다.");
+assert.ok(workspace.includes('isActive: !group.isActive'), "재원생 시간표 활성/비활성 요청은 목표 상태를 서버에 전달해야 합니다.");
+assert.ok(workspace.includes("await loadResidentGroups(group.targetId)"), "재원생 시간표 이름 저장 후 서버 값을 다시 불러와야 합니다.");
+assert.ok(workspace.includes("else await loadProspects()"), "가안 시간표 이름 저장 후 서버 값을 다시 불러와야 합니다.");
+assert.ok(prospectRoute.includes('payload.action === "rename"'), "가안 시간표 이름 수정 API가 있어야 합니다.");
+assert.ok(prospectRoute.includes('.from("prospect_timetable_groups")'), "가안 시간표 이름은 서버 테이블에 저장해야 합니다.");
+assert.ok(groupRoute.includes('payload.action === "rename"'), "재원생 시간표 이름 수정 API가 있어야 합니다.");
 
 console.log("schedule creation draft verification passed");

@@ -31,7 +31,9 @@ type SavePayload = {
   scheduleTagId?: string;
 };
 
-type ActivatePayload = { action: "activate"; groupId: string };
+type MutationPayload =
+  | { action: "activate"; groupId: string }
+  | { action: "rename"; groupId: string; name: string };
 
 function isDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -139,6 +141,7 @@ export async function POST(req: Request) {
     if (!name) return jsonError("신규문의 학생 이름을 입력해 주세요.", 400);
     if (!isDate(payload.weekStart)) return jsonError("weekStart must be YYYY-MM-DD", 400);
     if (!payload.groupName?.trim()) return jsonError("시간표 이름을 입력해 주세요.", 400);
+    if (payload.groupName.trim().length > 100) return jsonError("시간표 이름은 100자 이하로 입력해 주세요.", 400);
     validateItems(payload.items ?? []);
 
     const prospectValues = {
@@ -219,8 +222,20 @@ export async function PATCH(req: Request) {
     const { supabase, user, profile } = await getAuthenticatedProfile();
     if (!user) return jsonError("Unauthorized", 401);
     if (!profile || !canManageSchedules(profile.role)) return jsonError("Forbidden", 403);
-    const payload = (await req.json()) as ActivatePayload;
-    if (payload.action !== "activate" || !payload.groupId) return jsonError("groupId is required", 400);
+    const payload = (await req.json()) as MutationPayload;
+    if (!payload.groupId) return jsonError("groupId is required", 400);
+    if (payload.action === "rename") {
+      const nextName = payload.name?.trim();
+      if (!nextName) return jsonError("시간표 이름을 입력해 주세요.", 400);
+      if (nextName.length > 100) return jsonError("시간표 이름은 100자 이하로 입력해 주세요.", 400);
+      const { error } = await supabase
+        .from("prospect_timetable_groups")
+        .update({ name: nextName, updated_at: new Date().toISOString() })
+        .eq("id", payload.groupId);
+      if (error) throw error;
+      return NextResponse.json({ ok: true, name: nextName });
+    }
+    if (payload.action !== "activate") return jsonError("Unsupported action", 400);
     const { data, error } = await supabase.rpc("toggle_prospect_timetable_group", { p_group_id: payload.groupId });
     if (error) throw error;
     return NextResponse.json({ ok: true, isActive: data === true });
