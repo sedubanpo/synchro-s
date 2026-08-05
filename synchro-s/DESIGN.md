@@ -42,6 +42,7 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Timetable cell inner padding: `0.25rem`.
 - Multi-date timetable column minimum: `9.5rem`, preserving student names before horizontal scrolling.
 - Minimum practical hit area: `2.5rem` when layout allows.
+- Instructor picker: one horizontally stable board with six fixed subject-family columns in `국어 → 수학 → 영어 → 사회 → 과학 → 기타` order. Keep a single outer scroll container, sticky family headings, Korean alphabetical name order, and explicit selected text.
 
 ## Shape
 

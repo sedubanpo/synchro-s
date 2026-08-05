@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { planFirebaseStudentSync, planMissingFirebaseStudentInserts } from "../lib/server/firebaseStudentMirror";
 import {
   deduplicateFirebaseRosterStudents,
+  isFirebaseInstructorAccountActive,
   isFirebaseRosterStudentActive,
   isStudentActiveFromCanonicalRoster,
   loadFirebaseRoster,
@@ -28,6 +29,15 @@ const hajimin: FirebaseStudentRosterItem = {
   status: "ACTIVE",
   active: true
 };
+
+assert.equal(isFirebaseInstructorAccountActive({ role: "INSTRUCTOR", status: "DISABLED" }), false);
+assert.equal(isFirebaseInstructorAccountActive({ role: "INSTRUCTOR", status: "INACTIVE" }), false);
+assert.equal(isFirebaseInstructorAccountActive({ role: "INSTRUCTOR", status: "ACTIVE" }), true);
+assert.equal(
+  isFirebaseInstructorAccountActive({ role: "INSTRUCTOR", status: "ACTIVE" }, { isActive: false }),
+  false,
+  "Users 또는 userProfiles 어느 쪽이든 명시적으로 비활성이면 강사 계정은 제외해야 합니다."
+);
 
 for (const status of ["중지", "보류", "퇴원", "휴원", "미등록", "비활성", "PAUSED", "STOPPED", "INACTIVE", "RETURNING", "HOLD"]) {
   assert.equal(
@@ -280,6 +290,60 @@ globalThis.fetch = async (input) => {
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   }
+  if (url.includes("/documents/users")) {
+    return new Response(
+      JSON.stringify({
+        documents: [
+          {
+            name: "projects/fir-lms-prod/databases/(default)/documents/users/minsik-uid",
+            fields: {
+              name: { stringValue: "박민식" },
+              role: { stringValue: "INSTRUCTOR" },
+              status: { stringValue: "DISABLED" }
+            }
+          },
+          {
+            name: "projects/fir-lms-prod/databases/(default)/documents/users/kyungmin-uid",
+            fields: {
+              name: { stringValue: "김경민" },
+              role: { stringValue: "INSTRUCTOR" },
+              status: { stringValue: "DISABLED" }
+            }
+          },
+          {
+            name: "projects/fir-lms-prod/databases/(default)/documents/users/active-uid",
+            fields: {
+              name: { stringValue: "김광수" },
+              role: { stringValue: "INSTRUCTOR" },
+              status: { stringValue: "ACTIVE" }
+            }
+          }
+        ]
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  if (url.includes("/documents/userProfiles")) {
+    return new Response(
+      JSON.stringify({
+        documents: [
+          {
+            name: "projects/fir-lms-prod/databases/(default)/documents/userProfiles/minsik-uid",
+            fields: { displayName: { stringValue: "박민식" }, department: { stringValue: "국어" } }
+          },
+          {
+            name: "projects/fir-lms-prod/databases/(default)/documents/userProfiles/kyungmin-uid",
+            fields: { displayName: { stringValue: "김경민" }, department: { stringValue: "화학" } }
+          },
+          {
+            name: "projects/fir-lms-prod/databases/(default)/documents/userProfiles/active-uid",
+            fields: { displayName: { stringValue: "김광수" }, department: { stringValue: "수학" } }
+          }
+        ]
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
   throw new Error(`Unexpected Firestore URL: ${url}`);
 };
 
@@ -290,6 +354,11 @@ try {
   assert.equal(studentRoster.students.length, 1, "Duplicate Firebase documents must not leak into the user-facing roster.");
   assert.equal(studentRoster.duplicateStudentDocuments, 1);
   assert.equal(studentRoster.students[0]?.secondary, "세화여고 · 2학년", "Canonical student details must be preserved.");
+  assert.equal(studentRoster.instructorAccountsAvailable, true, "Firebase 강사 계정 상태를 함께 읽어야 합니다.");
+  assert.equal(studentRoster.instructorAccounts.length, 3);
+  assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "박민식")?.active, false);
+  assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "김경민")?.active, false);
+  assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "김광수")?.active, true);
 } finally {
   globalThis.fetch = originalFetch;
 }
@@ -361,6 +430,8 @@ assert.match(
 const rosterSource = fs.readFileSync(path.join(repoRoot, "lib/server/firestoreRoster.ts"), "utf8");
 assert.doesNotMatch(rosterSource, /listFirestoreCollection\(idToken, ["']instructors["']\)/, "The runtime roster must not request Firestore instructors.");
 assert.match(rosterSource, /createHash\(["']sha256["']\)/, "Roster cache entries must be isolated by a non-reversible token fingerprint.");
+assert.match(rosterSource, /listFirestoreCollection\(idToken, ["']users["']\)/, "Firebase users 상태를 강사 활성 판정에 사용해야 합니다.");
+assert.match(rosterSource, /listFirestoreCollection\(idToken, ["']userProfiles["']\)/, "Firebase 강사 표시명과 연결 ID를 읽어야 합니다.");
 
 const pageSource = fs.readFileSync(path.join(repoRoot, "app/synchro-s/page.tsx"), "utf8");
 const reviewStudentScopeSource = pageSource.slice(
@@ -392,4 +463,4 @@ assert.match(pageSource, /controller\.abort\(\), 45_000/, "Manual roster sync mu
 assert.match(pageSource, /window\.clearTimeout\(timeoutId\)/, "Manual roster sync must always release its timeout.");
 assert.match(pageSource, /명단 동기화 중\.\.\./, "The pending label must describe roster synchronization truthfully.");
 
-console.log("Firebase roster sync verification passed: student authority, ID-first review guard, side-effect-free options, and no Firestore instructor dependency.");
+console.log("Firebase roster sync verification passed: student authority, Firebase account status, ID-first review guard, and side-effect-free options.");

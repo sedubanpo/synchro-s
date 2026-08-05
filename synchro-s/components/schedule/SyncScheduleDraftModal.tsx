@@ -4,7 +4,6 @@ import { DAYS } from "@/lib/constants";
 import {
   findInstructorByTypedName,
   getInstructorSubjectFamily,
-  getInstructorSubjectLabel,
   instructorMatchesSubject,
   normalizeInstructorToken,
   type InstructorSubjectFamily
@@ -53,6 +52,16 @@ const INSTRUCTOR_TONES: Record<InstructorSubjectFamily, string> = {
   other: "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100"
 };
 
+const INSTRUCTOR_FAMILY_ORDER: InstructorSubjectFamily[] = ["korean", "math", "english", "social", "science", "other"];
+const INSTRUCTOR_FAMILY_LABELS: Record<InstructorSubjectFamily, string> = {
+  korean: "국어",
+  math: "수학",
+  english: "영어",
+  social: "사회",
+  science: "과학",
+  other: "기타"
+};
+
 function timeToMinutes(time: string): number {
   const [hour, minute] = time.split(":").map(Number);
   return hour * 60 + minute;
@@ -99,13 +108,20 @@ export function SyncScheduleDraftModal({
   const [instructorQuery, setInstructorQuery] = useState("");
   const [autoSelectBySubject, setAutoSelectBySubject] = useState(false);
   const [instructorPickerOpen, setInstructorPickerOpen] = useState(false);
+  const [activeInstructorIndex, setActiveInstructorIndex] = useState(0);
   const [classTypeCode, setClassTypeCode] = useState("");
   const [durationHours, setDurationHours] = useState("1");
   const [note, setNote] = useState("");
   const [isSelfStudy, setIsSelfStudy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const activeInstructors = useMemo(() => instructors.filter((instructor) => instructor.isActive !== false), [instructors]);
+  const activeInstructors = useMemo(
+    () =>
+      instructors
+        .filter((instructor) => instructor.isActive === true)
+        .sort((a, b) => a.name.localeCompare(b.name, "ko")),
+    [instructors]
+  );
   const subjectMatchedInstructors = useMemo(() => {
     const trimmedSubject = subjectLabel.trim();
     if (!autoSelectBySubject || !trimmedSubject) return activeInstructors;
@@ -113,11 +129,23 @@ export function SyncScheduleDraftModal({
   }, [activeInstructors, autoSelectBySubject, subjectLabel]);
   const filteredInstructors = useMemo(() => {
     const query = normalizeInstructorToken(instructorQuery);
-    if (!query) return subjectMatchedInstructors;
-    return subjectMatchedInstructors.filter((instructor) =>
+    if (!query) return activeInstructors;
+    return activeInstructors.filter((instructor) =>
       normalizeInstructorToken(`${instructor.name} ${instructor.secondary ?? ""}`).includes(query)
     );
-  }, [instructorQuery, subjectMatchedInstructors]);
+  }, [activeInstructors, instructorQuery]);
+  const groupedInstructors = useMemo(
+    () =>
+      INSTRUCTOR_FAMILY_ORDER.map((family) => ({
+        family,
+        instructors: filteredInstructors.filter((instructor) => getInstructorSubjectFamily(instructor) === family)
+      })),
+    [filteredInstructors]
+  );
+  const orderedFilteredInstructors = useMemo(
+    () => groupedInstructors.flatMap((group) => group.instructors),
+    [groupedInstructors]
+  );
   const selectedInstructor = activeInstructors.find((instructor) => instructor.id === instructorId) ?? null;
   const instructorMatchWarning = instructorQuery.trim() && !selectedInstructor
     ? "입력한 강사명을 활성 강사 명단에서 찾지 못했습니다. 이름을 확인하거나 아래 목록에서 선택해 주세요."
@@ -136,6 +164,7 @@ export function SyncScheduleDraftModal({
     setInstructorQuery("");
     setAutoSelectBySubject(false);
     setInstructorPickerOpen(false);
+    setActiveInstructorIndex(0);
     setClassTypeCode(nextClassType);
     setDurationHours("1");
     setNote("");
@@ -149,6 +178,10 @@ export function SyncScheduleDraftModal({
     setInstructorId(firstMatch?.id ?? "");
     setInstructorQuery(firstMatch?.name ?? "");
   }, [autoSelectBySubject, isSelfStudy, open, subjectLabel, subjectMatchedInstructors]);
+
+  useEffect(() => {
+    setActiveInstructorIndex((current) => Math.min(current, Math.max(orderedFilteredInstructors.length - 1, 0)));
+  }, [orderedFilteredInstructors.length]);
 
   if (!open) return null;
 
@@ -204,12 +237,23 @@ export function SyncScheduleDraftModal({
     ? `${Number(initialCell.classDate.slice(5, 7))}/${Number(initialCell.classDate.slice(8, 10))}(${weekdayLabel})`
     : `${weekdayLabel}요일`;
 
+  const selectInstructor = (instructor: SelectOption) => {
+    setInstructorId(instructor.id);
+    setInstructorQuery(instructor.name);
+    setInstructorPickerOpen(false);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
-      <div className="sync-surface w-full max-w-lg rounded-2xl bg-white p-5">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-schedule-draft-title"
+        className="sync-surface max-h-[calc(100vh-2rem)] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-5"
+      >
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <p className="sync-heading text-lg font-extrabold text-slate-950">싱크로 시간표 추가</p>
+            <p id="sync-schedule-draft-title" className="sync-heading text-lg font-extrabold text-slate-950">싱크로 시간표 추가</p>
             <p className="sync-copy mt-1 text-xs font-semibold text-slate-500">
               {dateLabel} {startTime}부터 입력한 시간만큼 미리보기에 반영됩니다.
             </p>
@@ -263,14 +307,19 @@ export function SyncScheduleDraftModal({
                 </datalist>
               </label>
 
-              <div className="grid items-start gap-3 sm:grid-cols-2">
-                <label className="relative space-y-1 text-xs font-semibold text-slate-700">
-                  강사
+              <div className="relative space-y-1 text-xs font-semibold text-slate-700">
+                <label className="block space-y-1">
+                  <span>강사</span>
                   <input
                     role="combobox"
                     aria-autocomplete="list"
                     aria-expanded={instructorPickerOpen}
                     aria-controls="sync-instructor-options"
+                    aria-activedescendant={
+                      instructorPickerOpen && orderedFilteredInstructors[activeInstructorIndex]
+                        ? `sync-instructor-option-${orderedFilteredInstructors[activeInstructorIndex]!.id}`
+                        : undefined
+                    }
                     value={instructorQuery}
                     onFocus={() => setInstructorPickerOpen(true)}
                     onBlur={() => window.setTimeout(() => setInstructorPickerOpen(false), 100)}
@@ -281,6 +330,22 @@ export function SyncScheduleDraftModal({
                       setInstructorId(match?.id ?? "");
                       setInstructorPickerOpen(true);
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        if (!instructorPickerOpen) setInstructorPickerOpen(true);
+                        const direction = event.key === "ArrowDown" ? 1 : -1;
+                        setActiveInstructorIndex((current) => {
+                          if (orderedFilteredInstructors.length === 0) return 0;
+                          return (current + direction + orderedFilteredInstructors.length) % orderedFilteredInstructors.length;
+                        });
+                      } else if (event.key === "Enter" && instructorPickerOpen && orderedFilteredInstructors[activeInstructorIndex]) {
+                        event.preventDefault();
+                        selectInstructor(orderedFilteredInstructors[activeInstructorIndex]!);
+                      } else if (event.key === "Escape") {
+                        setInstructorPickerOpen(false);
+                      }
+                    }}
                     placeholder="강사명을 입력하거나 선택"
                     className={`sync-input w-full rounded-lg border px-3 py-2 text-sm font-semibold outline-none focus:ring-2 ${
                       instructorMatchWarning
@@ -288,40 +353,70 @@ export function SyncScheduleDraftModal({
                         : "border-slate-300 focus:border-blue-400 focus:ring-blue-100"
                     }`}
                   />
-                  {instructorPickerOpen ? (
-                    <div id="sync-instructor-options" role="listbox" className="absolute z-20 mt-1 max-h-56 w-full space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
-                      {filteredInstructors.length > 0 ? filteredInstructors.map((instructor) => {
-                        const family = getInstructorSubjectFamily(instructor);
-                        return (
-                          <button
-                            key={instructor.id}
-                            type="button"
-                            role="option"
-                            aria-selected={instructor.id === instructorId}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              setInstructorId(instructor.id);
-                              setInstructorQuery(instructor.name);
-                              setInstructorPickerOpen(false);
-                            }}
-                            className={`sync-pressable sync-focus flex min-h-10 w-full items-center justify-between gap-2 rounded-md border px-2.5 py-2 text-left text-xs font-black ${INSTRUCTOR_TONES[family]} ${
-                              instructor.id === instructorId ? "ring-2 ring-blue-500 ring-offset-1" : ""
-                            }`}
-                          >
-                            <span className="min-w-0 truncate">{instructor.name}{instructor.secondary ? ` · ${instructor.secondary}` : ""}</span>
-                            <span className="shrink-0 rounded bg-white/75 px-1.5 py-0.5 text-[10px] font-black">{getInstructorSubjectLabel(instructor)}</span>
-                          </button>
-                        );
-                      }) : (
-                        <p className="px-2.5 py-3 text-center text-xs font-bold text-slate-500">조건에 맞는 활성 강사가 없습니다.</p>
-                      )}
-                    </div>
-                  ) : null}
+                </label>
+                {instructorPickerOpen ? (
+                  <div
+                    id="sync-instructor-options"
+                    role="listbox"
+                    aria-label="과목별 활성 강사"
+                    className="absolute left-0 z-20 mt-1 max-h-72 w-[min(46rem,calc(100vw-2rem))] overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+                  >
+                    {filteredInstructors.length > 0 ? (
+                      <div className="grid min-w-[42rem] grid-cols-6 gap-1.5">
+                        {groupedInstructors.map(({ family, instructors: familyInstructors }) => (
+                          <section key={family} aria-labelledby={`sync-instructor-family-${family}`} className="min-w-0">
+                            <h3
+                              id={`sync-instructor-family-${family}`}
+                              className={`sticky top-0 z-10 mb-1 rounded-md border px-2 py-1.5 text-center text-[11px] font-black ${INSTRUCTOR_TONES[family]}`}
+                            >
+                              {INSTRUCTOR_FAMILY_LABELS[family]}
+                            </h3>
+                            <div className="space-y-1">
+                              {familyInstructors.length > 0 ? familyInstructors.map((instructor) => {
+                                const optionIndex = orderedFilteredInstructors.findIndex((item) => item.id === instructor.id);
+                                const selected = instructor.id === instructorId;
+                                const keyboardActive = optionIndex === activeInstructorIndex;
+                                return (
+                                  <button
+                                    id={`sync-instructor-option-${instructor.id}`}
+                                    key={instructor.id}
+                                    type="button"
+                                    role="option"
+                                    tabIndex={-1}
+                                    aria-selected={selected}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onMouseEnter={() => setActiveInstructorIndex(optionIndex)}
+                                    onClick={() => selectInstructor(instructor)}
+                                    className={`sync-pressable sync-focus min-h-10 w-full rounded-md border px-2 py-1.5 text-left ${INSTRUCTOR_TONES[family]} ${
+                                      selected || keyboardActive ? "ring-2 ring-blue-500 ring-offset-1" : ""
+                                    }`}
+                                  >
+                                    <span className="block truncate text-xs font-black">{instructor.name}</span>
+                                    {selected ? (
+                                      <span className="mt-0.5 block text-[9px] font-black opacity-80">선택됨</span>
+                                    ) : instructor.secondary ? (
+                                      <span className="mt-0.5 block truncate text-[9px] font-bold opacity-70">{instructor.secondary}</span>
+                                    ) : null}
+                                  </button>
+                                );
+                              }) : (
+                                <p className="rounded-md bg-slate-50 px-2 py-3 text-center text-[10px] font-bold text-slate-400">없음</p>
+                              )}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="px-3 py-6 text-center text-xs font-bold text-slate-500">검색어와 일치하는 활성 강사가 없습니다.</p>
+                    )}
+                  </div>
+                ) : null}
                   <span className={`block min-h-4 text-[11px] font-bold ${instructorMatchWarning ? "text-amber-700" : "text-slate-500"}`}>
                     {instructorMatchWarning ?? (selectedInstructor ? `${selectedInstructor.name} 강사가 선택되었습니다.` : "퇴사·중지 강사는 목록에서 제외됩니다.")}
                   </span>
-                </label>
+              </div>
 
+              <div className="grid items-start gap-3 sm:grid-cols-2">
                 <label className="space-y-1 text-xs font-semibold text-slate-700">
                   수업 유형
                   <select
@@ -336,36 +431,34 @@ export function SyncScheduleDraftModal({
                     ))}
                   </select>
                 </label>
+                <label className="space-y-1 text-xs font-semibold text-slate-700">
+                  수업 시간
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={MIN_DURATION_HOURS}
+                      max={MAX_DURATION_HOURS}
+                      step={0.5}
+                      value={durationHours}
+                      onChange={(event) => setDurationHours(event.target.value)}
+                      className="sync-input sync-tabular w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                    <span className="shrink-0 text-xs font-bold text-slate-500">시간</span>
+                  </div>
+                  <p className="sync-tabular text-[11px] font-bold text-blue-700">반영 시간 {startTime}-{endTime}</p>
+                </label>
               </div>
             </>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1 text-xs font-semibold text-slate-700">
-              시작 시간
-              <input
-                value={`${dateLabel} ${startTime}`}
-                readOnly
-                className="sync-input sync-tabular w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700"
-              />
-            </label>
-            <label className="space-y-1 text-xs font-semibold text-slate-700">
-              수업 시간
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={MIN_DURATION_HOURS}
-                  max={MAX_DURATION_HOURS}
-                  step={0.5}
-                  value={durationHours}
-                  onChange={(event) => setDurationHours(event.target.value)}
-                  className="sync-input sync-tabular w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                />
-                <span className="shrink-0 text-xs font-bold text-slate-500">시간</span>
-              </div>
-              <p className="sync-tabular text-[11px] font-bold text-blue-700">반영 시간 {startTime}-{endTime}</p>
-            </label>
-          </div>
+          <label className="space-y-1 text-xs font-semibold text-slate-700">
+            시작 시간
+            <input
+              value={`${dateLabel} ${startTime}`}
+              readOnly
+              className="sync-input sync-tabular w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700"
+            />
+          </label>
 
           <label className="block space-y-1 text-xs font-semibold text-slate-700">
             메모

@@ -35,12 +35,23 @@ export type FirebaseStudentRosterItem = {
   firebaseUid?: string;
 };
 
+export type FirebaseInstructorAccountItem = {
+  uid: string;
+  name: string;
+  instructorIds: string[];
+  status: string;
+  active: boolean;
+};
+
 export type FirebaseRoster = {
   available: boolean;
   studentsAvailable: boolean;
   students: FirebaseStudentRosterItem[];
+  instructorAccountsAvailable: boolean;
+  instructorAccounts: FirebaseInstructorAccountItem[];
   duplicateStudentDocuments?: number;
   studentError?: string;
+  instructorAccountError?: string;
   error?: string;
 };
 
@@ -121,6 +132,14 @@ export function isFirebaseRosterStudentActive(data: Record<string, unknown>): bo
   const explicitActive = data.active !== false && data.isActive !== false;
   const status = normalizeStatus(data.status, explicitActive).replace(/\s+/g, "");
   return explicitActive && !INACTIVE_ROSTER_STATUSES.has(status);
+}
+
+export function isFirebaseInstructorAccountActive(...records: Record<string, unknown>[]): boolean {
+  return records.every((data) => {
+    const explicitActive = data.active !== false && data.isActive !== false;
+    const status = normalizeStatus(data.status, explicitActive).replace(/\s+/g, "");
+    return explicitActive && !INACTIVE_ROSTER_STATUSES.has(status);
+  });
 }
 
 export function isStudentActiveFromCanonicalRoster(
@@ -207,6 +226,45 @@ function normalizeStudent(id: string, data: Record<string, unknown>): FirebaseSt
   };
 }
 
+function normalizeInstructorAccount(
+  uid: string,
+  user: Record<string, unknown>,
+  profile: Record<string, unknown>
+): FirebaseInstructorAccountItem | null {
+  const role = (asString(user.role) || asString(profile.role)).toUpperCase();
+  const instructorIds = Array.from(
+    new Set(
+      [
+        profile.synchroInstructorId,
+        profile.supabaseInstructorId,
+        profile.instructorId,
+        user.synchroInstructorId,
+        user.supabaseInstructorId,
+        user.instructorId
+      ]
+        .map(asString)
+        .filter(Boolean)
+    )
+  );
+  const isInstructorRole = ["INSTRUCTOR", "TEACHER", "ADMIN", "COORDINATOR", "STAFF"].includes(role);
+  if (instructorIds.length === 0 && !isInstructorRole) return null;
+
+  const name =
+    asString(user.name) ||
+    asString(user.displayName) ||
+    asString(profile.displayName) ||
+    asString(profile.name) ||
+    asString(profile.synchroInstructorName);
+  const status = asString(user.status) || asString(profile.status) || "ACTIVE";
+  return {
+    uid,
+    name,
+    instructorIds,
+    status,
+    active: isFirebaseInstructorAccountActive(user, profile)
+  };
+}
+
 function rosterItemScore(student: FirebaseStudentRosterItem): number {
   return (
     (student.active ? 16 : 0) +
@@ -266,6 +324,8 @@ export async function loadFirebaseRoster(idToken: string | null, options?: { for
       available: false,
       studentsAvailable: false,
       students: [],
+      instructorAccountsAvailable: false,
+      instructorAccounts: [],
       error: "missing-firebase-id-token"
     };
   }
@@ -280,30 +340,49 @@ export async function loadFirebaseRoster(idToken: string | null, options?: { for
     return cached.value;
   }
 
-  try {
-    const studentDocuments = await listFirestoreCollection(idToken, "students");
-    const normalizedStudents = studentDocuments
-      .map((doc) => normalizeStudent(doc.id, doc.data))
-      .filter((item): item is FirebaseStudentRosterItem => Boolean(item));
-    const deduplicated = deduplicateFirebaseRosterStudents(normalizedStudents);
-    const value: FirebaseRoster = {
-      available: true,
-      studentsAvailable: true,
-      students: deduplicated.students,
-      duplicateStudentDocuments: deduplicated.duplicateCount
-    };
-    rosterCache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
-    return value;
-  } catch (error) {
-    const studentError = error instanceof Error ? error.message : "Firestore students 원장을 불러오지 못했습니다.";
-    const value: FirebaseRoster = {
-      available: false,
-      studentsAvailable: false,
-      students: [],
-      studentError,
-      error: studentError
-    };
-    rosterCache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
-    return value;
-  }
+  const [studentResult, userResult, profileResult] = await Promise.allSettled([
+    listFirestoreCollection(idToken, "students"),
+    listFirestoreCollection(idToken, "users"),
+    listFirestoreCollection(idToken, "userProfiles")
+  ]);
+
+  const studentDocuments = studentResult.status === "fulfilled" ? studentResult.value : [];
+  const normalizedStudents = studentDocuments
+    .map((doc) => normalizeStudent(doc.id, doc.data))
+    .filter((item): item is FirebaseStudentRosterItem => Boolean(item));
+  const deduplicated = deduplicateFirebaseRosterStudents(normalizedStudents);
+
+  const userDocuments = userResult.status === "fulfilled" ? userResult.value : [];
+  const profileDocuments = profileResult.status === "fulfilled" ? profileResult.value : [];
+  const usersByUid = new Map(userDocuments.map((doc) => [doc.id, doc.data]));
+  const profilesByUid = new Map(profileDocuments.map((doc) => [doc.id, doc.data]));
+  const accountUids = new Set([...usersByUid.keys(), ...profilesByUid.keys()]);
+  const instructorAccounts = [...accountUids]
+    .map((uid) => normalizeInstructorAccount(uid, usersByUid.get(uid) ?? {}, profilesByUid.get(uid) ?? {}))
+    .filter((item): item is FirebaseInstructorAccountItem => Boolean(item));
+
+  const studentsAvailable = studentResult.status === "fulfilled";
+  const instructorAccountsAvailable = userResult.status === "fulfilled" || profileResult.status === "fulfilled";
+  const studentError = studentResult.status === "rejected"
+    ? studentResult.reason instanceof Error
+      ? studentResult.reason.message
+      : "Firestore students 원장을 불러오지 못했습니다."
+    : undefined;
+  const accountErrors = [userResult, profileResult]
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => (result.reason instanceof Error ? result.reason.message : "Firebase 강사 계정 상태를 불러오지 못했습니다."));
+  const instructorAccountError = !instructorAccountsAvailable ? accountErrors.join(" / ") : undefined;
+  const value: FirebaseRoster = {
+    available: studentsAvailable || instructorAccountsAvailable,
+    studentsAvailable,
+    students: deduplicated.students,
+    instructorAccountsAvailable,
+    instructorAccounts,
+    duplicateStudentDocuments: deduplicated.duplicateCount,
+    studentError,
+    instructorAccountError,
+    error: studentError ?? instructorAccountError
+  };
+  rosterCache.set(cacheKey, { value, expiresAt: now + CACHE_TTL_MS });
+  return value;
 }

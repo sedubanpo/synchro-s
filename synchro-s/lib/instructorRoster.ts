@@ -5,6 +5,10 @@ export function parseInstructorRosterActive(value: string): boolean | null {
   return null;
 }
 
-export function isInstructorRosterActive(databaseActive: boolean | null | undefined, sheetActive: boolean | undefined): boolean {
-  return databaseActive !== false && sheetActive !== false;
+export function isInstructorRosterActive(
+  databaseActive: boolean | null | undefined,
+  sheetActive: boolean | undefined,
+  firebaseAccountActive?: boolean
+): boolean {
+  return databaseActive !== false && sheetActive !== false && firebaseAccountActive !== false;
 }

@@ -18,6 +18,11 @@ assert.equal(parseInstructorRosterActive("FALSE"), false);
 assert.equal(parseInstructorRosterActive("퇴사"), false);
 assert.equal(parseInstructorRosterActive("TRUE"), true);
 assert.equal(isInstructorRosterActive(true, false), false, "Teachers 시트 퇴사자는 DB가 활성이어도 제외해야 합니다.");
+assert.equal(
+  isInstructorRosterActive(true, true, false),
+  false,
+  "Firebase 계정 관리에서 비활성인 강사는 DB와 Teachers 시트가 활성이어도 제외해야 합니다."
+);
 assert.equal(isInstructorRosterActive(true, true), true);
 
 assert.equal(getInstructorSubjectFamily(instructors[0]!), "math");
@@ -36,6 +41,13 @@ assert.ok(modalSource.includes("useState(false)"), "과목 기준 자동 선택�
 assert.ok(modalSource.includes("findInstructorByTypedName(activeInstructors, nextQuery)"), "강사명 입력 자동매칭이 있어야 합니다.");
 assert.ok(modalSource.includes("입력한 강사명을 활성 강사 명단에서 찾지 못했습니다"), "미매칭 경고가 있어야 합니다.");
 assert.ok(modalSource.includes("INSTRUCTOR_TONES"), "과목군별 선택 배경색이 있어야 합니다.");
+assert.ok(
+  modalSource.includes('["korean", "math", "english", "social", "science", "other"]'),
+  "강사 선택 보드는 국어-수학-영어-사회-과학-기타 순서여야 합니다."
+);
+assert.ok(modalSource.includes('localeCompare(b.name, "ko")'), "활성 강사는 가나다순으로 정렬해야 합니다.");
+assert.ok(modalSource.includes('instructor.isActive === true'), "강사 선택 보드는 활성 상태가 명시된 강사만 표시해야 합니다.");
 assert.ok(optionsSource.includes("teacherActiveByName"), "원본 Teachers 재직 상태를 옵션 필터에 반영해야 합니다.");
+assert.ok(optionsSource.includes("firebaseRoster.instructorAccountsAvailable"), "Firebase 계정 상태를 강사 옵션 필터에 반영해야 합니다.");
 
 console.log("schedule teacher matching verification passed");

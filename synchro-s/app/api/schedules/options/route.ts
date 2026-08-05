@@ -452,6 +452,28 @@ export async function GET(req: Request) {
     }
     let uniqueSupabaseStudentNameKeys = new Set<string>();
 
+    const firebaseInstructorByUid = new Map(firebaseRoster.instructorAccounts.map((account) => [account.uid, account]));
+    const firebaseInstructorById = new Map(
+      firebaseRoster.instructorAccounts.flatMap((account) => account.instructorIds.map((id) => [id, account] as const))
+    );
+    const firebaseInstructorNameCounts = new Map<string, number>();
+    const firebaseInstructorByUniqueName = new Map<string, (typeof firebaseRoster.instructorAccounts)[number]>();
+    for (const account of firebaseRoster.instructorAccounts) {
+      const nameKey = normalizeNameToken(account.name);
+      if (!nameKey) continue;
+      firebaseInstructorNameCounts.set(nameKey, (firebaseInstructorNameCounts.get(nameKey) ?? 0) + 1);
+      if (!firebaseInstructorByUniqueName.has(nameKey)) firebaseInstructorByUniqueName.set(nameKey, account);
+    }
+    for (const [nameKey, count] of firebaseInstructorNameCounts) {
+      if (count > 1) firebaseInstructorByUniqueName.delete(nameKey);
+    }
+
+    const resolveFirebaseInstructorAccount = (row: InstructorRow) =>
+      (row.firebase_uid ? firebaseInstructorByUid.get(row.firebase_uid) : undefined) ??
+      (row.firebase_instructor_id ? firebaseInstructorById.get(row.firebase_instructor_id) : undefined) ??
+      firebaseInstructorById.get(row.id) ??
+      firebaseInstructorByUniqueName.get(normalizeNameToken(row.instructor_name));
+
     const resolveFirebaseStudent = (row: { id: string; student_name: string; firebase_student_id?: string | null; firebase_uid?: string | null }) =>
       firebaseStudentById.get(row.id) ??
       (row.firebase_student_id ? firebaseStudentById.get(row.firebase_student_id) : undefined) ??
@@ -522,14 +544,28 @@ export async function GET(req: Request) {
         };
       };
       instructors = instructorRows
-        .filter((row: InstructorRow) =>
-          isInstructorRosterActive(row.is_active, teacherActiveByName.get(normalizeName(row.instructor_name)))
-        )
+        .filter((row: InstructorRow) => {
+          const firebaseAccount = firebaseRoster.instructorAccountsAvailable
+            ? resolveFirebaseInstructorAccount(row)
+            : undefined;
+          return isInstructorRosterActive(
+            row.is_active,
+            teacherActiveByName.get(normalizeName(row.instructor_name)),
+            firebaseAccount?.active
+          );
+        })
         .map((row: InstructorRow) => toInstructorOption(row, true));
       suspendedInstructors = instructorRows
-        .filter((row: InstructorRow) =>
-          !isInstructorRosterActive(row.is_active, teacherActiveByName.get(normalizeName(row.instructor_name)))
-        )
+        .filter((row: InstructorRow) => {
+          const firebaseAccount = firebaseRoster.instructorAccountsAvailable
+            ? resolveFirebaseInstructorAccount(row)
+            : undefined;
+          return !isInstructorRosterActive(
+            row.is_active,
+            teacherActiveByName.get(normalizeName(row.instructor_name)),
+            firebaseAccount?.active
+          );
+        })
         .map((row: InstructorRow) => toInstructorOption(row, false));
 
       const isStudentRosterActive = (row: { id: string; student_name: string; is_active: boolean | null; firebase_student_id?: string | null; firebase_uid?: string | null }) => {
