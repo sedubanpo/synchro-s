@@ -1,5 +1,9 @@
 import { DAYS } from "@/lib/constants";
-import type { AvailableTimeSlotsByDay, Weekday } from "@/types/schedule";
+import type {
+  AvailableTimeSlotsByDay,
+  InstructorAvailabilityDateOverrides,
+  Weekday
+} from "@/types/schedule";
 
 export type InstructorAvailabilityDaySummary = {
   availableDays: Weekday[];
@@ -36,4 +40,15 @@ export function formatInstructorTeacherName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return "강사";
   return /T$/i.test(trimmed) ? trimmed : `${trimmed}T`;
+}
+
+export function findIncompleteInstructorAvailabilityDate(
+  dateOverrides: InstructorAvailabilityDateOverrides
+): string | null {
+  return (
+    Object.entries(dateOverrides).find(
+      ([, override]) =>
+        (override.status === "available" || override.status === "temporary") && override.slots.length === 0
+    )?.[0] ?? null
+  );
 }

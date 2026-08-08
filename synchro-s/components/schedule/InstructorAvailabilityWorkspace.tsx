@@ -3,6 +3,7 @@
 import { InstructorAvailabilityAssignmentModal } from "@/components/schedule/InstructorAvailabilityAssignmentModal";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
 import {
+  findIncompleteInstructorAvailabilityDate,
   formatAvailabilityWeekdays,
   formatInstructorTeacherName,
   summarizeInstructorAvailabilityDays
@@ -233,8 +234,9 @@ export function InstructorAvailabilityWorkspace({
   const planningDates = multiSelectMode ? selectedDates : isTemporaryFocus ? [selectedDate] : [];
   const assignmentDateOverride = assignmentEditor ? draftDateOverrides[assignmentEditor.date] : undefined;
   const assignmentInitialClass = assignmentEditor ? assignmentDateOverride?.plannedClasses?.[assignmentEditor.slot] : undefined;
-  const invalidDateOverride = Object.values(draftDateOverrides).some(
-    (override) => (override.status === "available" || override.status === "temporary") && override.slots.length === 0
+  const invalidDateOverrideDate = useMemo(
+    () => findIncompleteInstructorAvailabilityDate(draftDateOverrides),
+    [draftDateOverrides]
   );
 
   const selectGroup = useCallback((group: AvailabilityGroup) => {
@@ -528,11 +530,24 @@ export function InstructorAvailabilityWorkspace({
     setNotice(null);
   };
 
-  const createGroup = async () => {
+  const validateDraftBeforeSave = () => {
     if (!draftName.trim()) {
       setError("일정 이름을 입력해 주세요.");
-      return;
+      return false;
     }
+    if (invalidDateOverrideDate) {
+      setSelectedDate(invalidDateOverrideDate);
+      setSelectedDates([invalidDateOverrideDate]);
+      setMultiSelectMode(false);
+      setAssignmentEditor(null);
+      setError(`${dateDisplayLabel(invalidDateOverrideDate)}의 한시/변동 가능 시간을 한 개 이상 선택해 주세요.`);
+      return false;
+    }
+    return true;
+  };
+
+  const createGroup = async () => {
+    if (!validateDraftBeforeSave()) return;
     setSaving(true);
     setError(null);
     try {
@@ -560,7 +575,7 @@ export function InstructorAvailabilityWorkspace({
   };
 
   const saveSelectedGroup = async () => {
-    if (!selectedGroup || !draftName.trim()) return;
+    if (!selectedGroup || !validateDraftBeforeSave()) return;
     setSaving(true);
     setError(null);
     try {
@@ -708,7 +723,7 @@ export function InstructorAvailabilityWorkspace({
             {selectedGroup ? (
               <button
                 type="button"
-                disabled={loading || saving || invalidDateOverride}
+                disabled={loading || saving}
                 onClick={() => void saveSelectedGroup()}
                 className="sync-pressable sync-focus min-h-9 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-50"
               >
@@ -717,7 +732,7 @@ export function InstructorAvailabilityWorkspace({
             ) : null}
             <button
               type="button"
-              disabled={loading || saving || invalidDateOverride}
+              disabled={loading || saving}
               onClick={() => void createGroup()}
               className="sync-pressable sync-focus min-h-9 rounded-lg bg-blue-600 px-3 text-xs font-black text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
             >
