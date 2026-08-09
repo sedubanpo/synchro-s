@@ -27,11 +27,8 @@ export function TimeSlotVisibilityControl({
   };
 
   return (
-    <section
-      aria-labelledby="time-slot-visibility-title"
-      className={`rounded-xl border border-slate-200 bg-slate-50/80 p-3 ${className}`}
-    >
-      <div className="flex items-start justify-between gap-3">
+    <details className={`group rounded-xl border border-slate-200 bg-slate-50/80 ${className}`}>
+      <summary className="sync-focus flex min-h-12 cursor-pointer list-none items-start justify-between gap-3 rounded-xl p-3 marker:hidden hover:bg-blue-50/60 [&::-webkit-details-marker]:hidden">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-700">
@@ -41,19 +38,24 @@ export function TimeSlotVisibilityControl({
               </svg>
             </span>
             <div>
-              <h3 id="time-slot-visibility-title" className="text-xs font-black text-slate-800">
+              <h3 className="text-xs font-black text-slate-800">
                 시간대 숨김
               </h3>
               <p className="mt-0.5 text-[10px] font-semibold text-slate-500">숨길 시간을 선택하세요.</p>
             </div>
           </div>
         </div>
-        <span className="sync-tabular shrink-0 rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-600">
-          {hiddenCount}개 숨김
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="sync-tabular rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-600">
+            {hiddenCount}개 숨김
+          </span>
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </span>
-      </div>
+      </summary>
 
-      <div className="mt-3 grid grid-cols-2 gap-1.5">
+      <div className="grid grid-cols-2 gap-1.5 border-t border-slate-200 px-3 pt-3">
         {timeSlots.map((slot) => {
           const isHidden = hiddenSet.has(slot);
           return (
@@ -66,7 +68,7 @@ export function TimeSlotVisibilityControl({
               className={`sync-pressable sync-focus min-h-9 rounded-lg border px-2 py-2 text-[11px] font-black ${
                 isHidden
                   ? "border-slate-700 bg-slate-800 text-white shadow-sm"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                  : "border-slate-200 bg-white text-blue-950 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               }`}
             >
               {formatTimeSlotRange(slot)}
@@ -75,7 +77,7 @@ export function TimeSlotVisibilityControl({
         })}
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3">
+      <div className="mx-3 mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pb-3 pt-3">
         <p className="text-[10px] font-semibold leading-4 text-slate-500">
           표와 캡처에서만 숨겨지며 저장 데이터는 유지됩니다.
         </p>
@@ -89,6 +91,6 @@ export function TimeSlotVisibilityControl({
           </button>
         ) : null}
       </div>
-    </section>
+    </details>
   );
 }

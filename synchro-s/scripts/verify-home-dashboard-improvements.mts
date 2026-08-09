@@ -52,6 +52,24 @@ const legacyIdMerged = mergeHomeInstructorEvents([
 assert.equal(legacyIdMerged.length, 1, "이미 한 강사로 확인된 연결 전·후 ID, 별칭, 반복 시작일이 달라도 홈 정규 수업은 한 카드여야 합니다.");
 assert.deepEqual(legacyIdMerged[0]?.studentNames, ["류우석", "김도현"]);
 
+const reusedLegacyStudentId = mergeHomeInstructorEvents([
+  event({
+    id: "legacy-shared-id-a",
+    studentIds: ["legacy-shared", "legacy-shared"],
+    studentNames: ["백송연", "장지우"]
+  }),
+  event({
+    id: "legacy-shared-id-b",
+    studentIds: ["legacy-shared", "student-song"],
+    studentNames: ["김동현b", "송정현"]
+  })
+]);
+assert.deepEqual(
+  reusedLegacyStudentId[0]?.studentNames,
+  ["백송연", "장지우", "김동현b", "송정현"],
+  "구형 데이터가 같은 임시 학생 ID를 재사용해도 서로 다른 이름은 모두 강사 폴더에 남아야 합니다."
+);
+
 const strict = mergeHomeInstructorEvents([
   event({ id: "one-to-one-a", classTypeCode: "ONE_TO_ONE", classTypeLabel: "1:1", badgeText: "[1:1]" }),
   event({ id: "one-to-one-b", classTypeCode: "ONE_TO_ONE", classTypeLabel: "1:1", badgeText: "[1:1]" })
@@ -94,5 +112,11 @@ assert.match(fullTimetable, /role="dialog"/, "전체 시간표는 대화상자 �
 assert.match(fullTimetable, /aria-modal="true"/, "전체 시간표는 모달 상태를 보조기기에 알려야 합니다.");
 assert.match(fullTimetable, /event\.key === "Escape"/, "전체 시간표는 Escape 키로 닫혀야 합니다.");
 assert.match(fullTimetable, /강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다/, "강의실 변경 결과를 명확히 안내해야 합니다.");
+assert.match(fullTimetable, /max-w-\[1480px\]/, "전체 시간표 팝업은 검토 맥락을 유지하면서 화면을 과도하게 덮지 않아야 합니다.");
+assert.match(fullTimetable, /highlightedStudent/, "전체 시간표에서 선택한 학생을 모든 강의실에 걸쳐 강조할 수 있어야 합니다.");
+assert.match(fullTimetable, /aria-pressed=\{selected\}/, "학생 강조 선택 상태를 보조기기에 전달해야 합니다.");
+assert.match(fullTimetable, /if \(open\) setHighlightedStudent\(null\);[\s\S]*?\}, \[open\]\);/, "학생 강조는 팝업을 새로 열 때만 초기화되어야 합니다.");
+assert.match(page, /border-2 border-blue-300[\s\S]*?Global Search/, "전역 검색창은 명확한 파란색 테두리로 검색 위치를 강조해야 합니다.");
+assert.match(page, /이 날짜가 지나면 현재 시간표는 자동으로 적용 대상에서 제외되고/, "만료일 이후 동작을 저장 그룹에서 설명해야 합니다.");
 
 console.log("Home dashboard improvements verification passed.");

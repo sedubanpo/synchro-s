@@ -16,8 +16,8 @@ function normalizePersonName(value: string): string {
 function mergeRosters(a: ScheduleEvent, b: ScheduleEvent): Pick<ScheduleEvent, "studentIds" | "studentNames"> {
   const studentIds: string[] = [];
   const studentNames: string[] = [];
-  const seenIds = new Set<string>();
-  const seenNames = new Set<string>();
+  const indexById = new Map<string, number>();
+  const indexByName = new Map<string, number>();
 
   for (const event of [a, b]) {
     const length = Math.max(event.studentIds.length, event.studentNames.length);
@@ -25,11 +25,38 @@ function mergeRosters(a: ScheduleEvent, b: ScheduleEvent): Pick<ScheduleEvent, "
       const id = (event.studentIds[index] ?? "").trim();
       const name = (event.studentNames[index] ?? "").trim();
       const nameKey = normalizePersonName(name);
-      if ((id && seenIds.has(id)) || (nameKey && seenNames.has(nameKey)) || (!id && !nameKey)) continue;
+
+      if (!id && !nameKey) continue;
+
+      // 이름이 있는 기록은 이름을 주 식별자로 사용한다. 일부 구형 데이터는
+      // 서로 다른 학생에게 같은 임시 ID를 넣었으므로 ID만으로 제거하면 실제
+      // 학생이 강사 폴더에서 누락된다.
+      if (nameKey) {
+        const existingByName = indexByName.get(nameKey);
+        if (existingByName !== undefined) {
+          if (!studentIds[existingByName] && id) studentIds[existingByName] = id;
+          if (id && !indexById.has(id)) indexById.set(id, existingByName);
+          continue;
+        }
+
+        const existingById = id ? indexById.get(id) : undefined;
+        if (
+          existingById !== undefined &&
+          normalizePersonName(studentNames[existingById] ?? "") === normalizePersonName(studentIds[existingById] ?? "")
+        ) {
+          studentNames[existingById] = name;
+          indexByName.set(nameKey, existingById);
+          continue;
+        }
+      } else if (id && indexById.has(id)) {
+        continue;
+      }
+
+      const rosterIndex = studentNames.length;
       studentIds.push(id);
       studentNames.push(name || id);
-      if (id) seenIds.add(id);
-      if (nameKey) seenNames.add(nameKey);
+      if (id && !indexById.has(id)) indexById.set(id, rosterIndex);
+      if (nameKey) indexByName.set(nameKey, rosterIndex);
     }
   }
 

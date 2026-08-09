@@ -41,7 +41,12 @@ export function HomeFullTimetableDialog({
 }: Props) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [assignments, setAssignments] = useState<HomeClassroomAssignment>({});
+  const [highlightedStudent, setHighlightedStudent] = useState<string | null>(null);
   const instructorIds = useMemo(() => instructorSummaries.map((item) => item.id), [instructorSummaries]);
+
+  useEffect(() => {
+    if (open) setHighlightedStudent(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,7 +121,7 @@ export function HomeFullTimetableDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="home-full-timetable-title"
-        className="flex max-h-[96vh] w-full max-w-[1780px] flex-col overflow-hidden rounded-2xl border border-white/20 bg-slate-100 shadow-2xl"
+        className="flex max-h-[94vh] w-full max-w-[1480px] flex-col overflow-hidden rounded-xl border border-white/20 bg-slate-100 shadow-2xl"
       >
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-700 bg-slate-950 px-4 py-3 text-white sm:px-5">
           <div>
@@ -137,7 +142,7 @@ export function HomeFullTimetableDialog({
               type="button"
               onClick={onClose}
               aria-label="전체 시간표 닫기"
-              className="sync-pressable sync-focus flex min-h-10 min-w-10 items-center justify-center rounded-lg bg-white text-xl font-black text-slate-950 hover:bg-blue-50"
+              className="sync-pressable sync-focus flex min-h-10 min-w-10 items-center justify-center rounded-lg bg-white text-xl font-black text-blue-950 hover:bg-blue-50"
             >
               ×
             </button>
@@ -150,9 +155,22 @@ export function HomeFullTimetableDialog({
               <p className="text-sm font-black text-slate-900">강사별 강의실 지정</p>
               <p className="mt-0.5 text-[11px] font-semibold text-slate-500">강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다.</p>
             </div>
-            <p role="status" className={`rounded-md px-2 py-1 text-[11px] font-black ${collisionCount ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
-              {collisionCount ? `강의실 중복 ${collisionCount}곳` : "강의실 중복 없음"}
-            </p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {highlightedStudent ? (
+                <button
+                  type="button"
+                  onClick={() => setHighlightedStudent(null)}
+                  className="sync-pressable sync-focus rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-800 hover:bg-amber-100"
+                >
+                  {highlightedStudent} 강조 해제
+                </button>
+              ) : (
+                <span className="text-[11px] font-semibold text-slate-500">학생명을 누르면 같은 학생을 강조합니다.</span>
+              )}
+              <p role="status" className={`rounded-md px-2 py-1 text-[11px] font-black ${collisionCount ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                {collisionCount ? `강의실 중복 ${collisionCount}곳` : "강의실 중복 없음"}
+              </p>
+            </div>
           </div>
           <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
             {instructorSummaries.map((instructor) => (
@@ -176,8 +194,8 @@ export function HomeFullTimetableDialog({
           {visibleClassrooms.length === 0 ? (
             <div className="flex min-h-80 items-center justify-center p-8 text-center text-sm font-bold text-slate-500">표시할 강사 수업이 없습니다.</div>
           ) : (
-            <div className="min-w-max" style={{ width: `${Math.max(100, visibleClassrooms.length * 220 + 84)}px` }}>
-              <div className="sticky top-0 z-30 grid border-b border-slate-300 bg-slate-950 text-white" style={{ gridTemplateColumns: `84px repeat(${visibleClassrooms.length}, minmax(220px, 1fr))` }}>
+            <div className="min-w-max" style={{ width: `${Math.max(100, visibleClassrooms.length * 188 + 76)}px` }}>
+              <div className="sticky top-0 z-30 grid border-b border-slate-300 bg-slate-950 text-white" style={{ gridTemplateColumns: `76px repeat(${visibleClassrooms.length}, minmax(188px, 1fr))` }}>
                 <div className="sticky left-0 z-40 flex items-center justify-center border-r border-slate-700 bg-slate-950 px-2 py-3 text-xs font-black">시간</div>
                 {visibleClassrooms.map((classroom) => {
                   const ids = occupancy.get(classroom) ?? [];
@@ -195,8 +213,8 @@ export function HomeFullTimetableDialog({
               </div>
 
               {TIME_SLOTS.map((slot) => (
-                <div key={slot} className="grid border-b border-slate-300" style={{ gridTemplateColumns: `84px repeat(${visibleClassrooms.length}, minmax(220px, 1fr))` }}>
-                  <div className="sticky left-0 z-20 flex min-h-24 items-start justify-center border-r border-slate-300 bg-slate-100 px-2 py-3 text-xs font-black tabular-nums text-slate-600">{hourRange(slot)}</div>
+                <div key={slot} className="grid border-b border-slate-300" style={{ gridTemplateColumns: `76px repeat(${visibleClassrooms.length}, minmax(188px, 1fr))` }}>
+                  <div className="sticky left-0 z-20 flex min-h-20 items-start justify-center border-r border-slate-300 bg-slate-100 px-2 py-3 text-[11px] font-black tabular-nums text-slate-600">{hourRange(slot)}</div>
                   {visibleClassrooms.map((classroom) => {
                     const ids = occupancy.get(classroom) ?? [];
                     const placements = ids.flatMap((id) => {
@@ -206,13 +224,26 @@ export function HomeFullTimetableDialog({
                         .map((event) => ({ instructor, event }));
                     });
                     return (
-                      <div key={`${slot}-${classroom}`} className="min-h-24 border-r border-slate-300 bg-white p-1.5">
+                      <div key={`${slot}-${classroom}`} className="min-h-20 border-r border-slate-300 bg-white p-1.5">
                         {placements.length === 0 ? (
-                          <span className="flex min-h-20 items-center justify-center text-[10px] font-semibold text-slate-300">수업 없음</span>
+                          <span className="flex min-h-16 items-center justify-center text-[10px] font-semibold text-slate-300">수업 없음</span>
                         ) : (
                           <div className="space-y-1.5">
-                            {placements.map(({ instructor, event }, index) => (
-                              <article key={`${instructor?.id}-${event.id}-${index}`} className="rounded-md border border-blue-200 bg-blue-50 p-2 shadow-sm">
+                            {placements.map(({ instructor, event }, index) => {
+                              const containsHighlightedStudent = Boolean(
+                                highlightedStudent && event.studentNames.some((name) => name.trim() === highlightedStudent)
+                              );
+                              return (
+                              <article
+                                key={`${instructor?.id}-${event.id}-${index}`}
+                                className={`rounded-md border p-2 shadow-sm ${
+                                  containsHighlightedStudent
+                                    ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300"
+                                    : highlightedStudent
+                                      ? "border-slate-200 bg-slate-50 opacity-55"
+                                      : "border-blue-200 bg-blue-50"
+                                }`}
+                              >
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
                                     <p className="truncate text-xs font-black text-slate-950">{instructor?.name || event.instructorName}</p>
@@ -220,9 +251,33 @@ export function HomeFullTimetableDialog({
                                   </div>
                                   <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-[9px] font-black text-white">{event.studentNames.length}명</span>
                                 </div>
-                                <p className="mt-1.5 line-clamp-2 text-[10px] font-semibold leading-4 text-slate-600">{event.studentNames.join(" · ") || "학생 미지정"}</p>
+                                {event.studentNames.length > 0 ? (
+                                  <div className="mt-1.5 flex flex-wrap gap-1">
+                                    {event.studentNames.map((studentName, studentIndex) => {
+                                      const selected = highlightedStudent === studentName.trim();
+                                      return (
+                                        <button
+                                          key={`${studentName}-${studentIndex}`}
+                                          type="button"
+                                          aria-pressed={selected}
+                                          onClick={() => setHighlightedStudent(selected ? null : studentName.trim())}
+                                          className={`sync-focus rounded px-1.5 py-1 text-[10px] font-bold leading-none transition ${
+                                            selected
+                                              ? "bg-amber-400 text-amber-950"
+                                              : "bg-white text-blue-950 hover:bg-blue-100 hover:text-blue-800"
+                                          }`}
+                                        >
+                                          {studentName}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <p className="mt-1.5 text-[10px] font-semibold text-slate-500">학생 미지정</p>
+                                )}
                               </article>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>

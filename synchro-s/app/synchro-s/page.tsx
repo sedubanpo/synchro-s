@@ -7337,15 +7337,15 @@ export default function SynchroSPage() {
               </div>
             </div>
 
-            <label className="flex min-h-[88px] items-center gap-3 rounded-lg border border-slate-200 bg-white px-5">
-              <span className="flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
+            <label className="flex min-h-[88px] items-center gap-3 rounded-lg border-2 border-blue-300 bg-blue-50/40 px-5 shadow-[0_0_0_3px_rgba(59,130,246,0.10)] transition focus-within:border-blue-600 focus-within:bg-white focus-within:shadow-[0_0_0_4px_rgba(37,99,235,0.14)]">
+              <span className="flex h-10 w-10 items-center justify-center rounded-md border border-blue-200 bg-white text-blue-700">
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
                   <circle cx="11" cy="11" r="6" />
                   <path d="m20 20-3.5-3.5" strokeLinecap="round" />
                 </svg>
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400">Global Search</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-blue-600">Global Search</p>
                 <input
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
@@ -8285,7 +8285,7 @@ export default function SynchroSPage() {
               const hasClass = eventDateSet.has(cell.date);
               return (
                 <div key={cell.date} className="relative flex h-9 items-center justify-center rounded-full text-sm font-semibold">
-                  <span className={hasClass ? "rounded-full bg-blue-600 px-2 py-1 text-white shadow-sm" : "text-slate-700"}>{cell.day}</span>
+                  <span className={hasClass ? "rounded-full bg-blue-600 px-2 py-1 text-white shadow-sm" : "text-blue-950"}>{cell.day}</span>
                   {hasClass ? <span className="absolute bottom-0.5 h-1.5 w-1.5 rounded-full bg-amber-400" /> : null}
                 </div>
               );
@@ -8376,7 +8376,7 @@ export default function SynchroSPage() {
                                       ? "border-blue-600 bg-blue-600 text-white shadow-sm ring-2 ring-blue-100"
                                       : "border-slate-700 bg-slate-700 text-white shadow-sm ring-2 ring-slate-200"
                                     : group.isActive || isEffectiveGroup
-                                      ? "border-slate-200 bg-white text-slate-900 hover:border-blue-300 hover:bg-blue-50"
+                                      ? "border-slate-200 bg-white text-blue-950 hover:border-blue-300 hover:bg-blue-50"
                                       : "border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:bg-slate-200"
                                 }`}
                               >
@@ -8550,7 +8550,15 @@ export default function SynchroSPage() {
                                   className={`mt-2 block text-[10px] font-semibold ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`}
                                   onClick={(event) => event.stopPropagation()}
                                 >
-                                  만료일
+                                  <span className="inline-flex items-center gap-1">
+                                    만료일
+                                    {group.expiresOn ? (
+                                      <svg aria-label="만료 예정" role="img" viewBox="0 0 24 24" className={`h-3.5 w-3.5 ${isSelectedGroup ? "text-amber-200" : "text-amber-600"}`} fill="none" stroke="currentColor" strokeWidth="1.8">
+                                        <circle cx="12" cy="13" r="6.5" />
+                                        <path d="M15.5 7.5 18 5m-1.5 0H19v2.5M9 3.5h6M12 3.5V6m-7 7H2.5m19 0H19M6.5 17.5 4.5 19.5m13-2 2 2" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    ) : null}
+                                  </span>
                                   <input
                                     type="date"
                                     value={group.expiresOn ?? ""}
@@ -8573,6 +8581,11 @@ export default function SynchroSPage() {
                                   <span className={`mt-1 block text-[10px] ${isSelectedGroup ? "text-blue-100" : "text-slate-400"}`}>
                                     {timetableGroupExpirationSupported ? getGroupExpirationLabel(group) : "DB 마이그레이션 적용 후 사용 가능"}
                                   </span>
+                                  {timetableGroupExpirationSupported && group.expiresOn ? (
+                                    <span className={`mt-1 block text-[10px] font-bold leading-4 ${isSelectedGroup ? "text-amber-200" : "text-amber-700"}`}>
+                                      이 날짜가 지나면 현재 시간표는 자동으로 적용 대상에서 제외되고, 대기 시간표가 있으면 이어서 활성화됩니다.
+                                    </span>
+                                  ) : null}
                                 </label>
                                 <div className="mt-2 flex items-center gap-2">
                                   <button
@@ -8639,9 +8652,9 @@ export default function SynchroSPage() {
             data-testid="schedule-review-workspace"
             data-server-review-count={scheduleReviews.length}
             data-mapped-review-count={reviewByStudentId.size}
-            className="rounded-[30px] border border-white/50 bg-white/40 p-4 shadow-xl shadow-slate-900/5 backdrop-blur-md"
+            className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
           >
-            <div className="rounded-[26px] border border-white/55 bg-white/45 p-3 shadow-sm">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Instructor Overview</p>
@@ -8657,23 +8670,23 @@ export default function SynchroSPage() {
                     <button
                       type="button"
                       onClick={() => setShowRosterActions((prev) => !prev)}
-                      className={`rounded-full border px-3 py-2 text-xs font-black transition ${
+                      className={`sync-pressable sync-focus rounded-md border px-3 py-2 text-xs font-black transition ${
                         showRosterActions
-                          ? "border-amber-200 bg-amber-50 text-amber-800 shadow-[0_8px_20px_rgba(245,158,11,0.12)]"
-                          : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                          ? "border-amber-300 bg-amber-50 text-amber-800"
+                          : "border-slate-300 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
                       }`}
                     >
                       {showRosterActions ? "중지 숨김" : "중지 표시"}
                     </button>
                   ) : null}
-                  <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-right">
+                  <div className="rounded-md border border-slate-200 bg-white px-4 py-2 text-right">
                     <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Selected</p>
                     <p className="text-sm font-black text-slate-800">{currentTargetLabel}</p>
                   </div>
                 </div>
               </div>
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <div className="inline-flex rounded-full border border-white/60 bg-white/65 p-1 shadow-[0_10px_30px_rgba(59,130,246,0.12)]">
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+                <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1">
                   {([
                     { key: "instructor", label: "강사 전체 요약" },
                     { key: "student", label: "학생 전체 요약" }
@@ -8692,17 +8705,17 @@ export default function SynchroSPage() {
                           setSelectedStudentId(students[0]!.id);
                         }
                       }}
-                      className={`rounded-full px-4 py-2 text-xs font-black transition ${
+                      className={`sync-pressable sync-focus rounded-md px-4 py-2 text-xs font-black transition ${
                         overviewEntity === tab.key
-                          ? "bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
-                          : "text-slate-600 hover:bg-white/80"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-100"
                       }`}
                     >
                       {tab.label}
                     </button>
                   ))}
                 </div>
-                <div className="inline-flex rounded-full border border-white/60 bg-white/60 p-1">
+                <div className="inline-flex flex-wrap rounded-lg border border-slate-300 bg-white p-1">
                   {(overviewEntity === "instructor"
                     ? ([
                         { key: "subject", label: "과목별" },
@@ -8730,10 +8743,10 @@ export default function SynchroSPage() {
                             setStudentOverviewMode(tab.key as StudentOverviewMode);
                           }
                         }}
-                        className={`rounded-full px-4 py-2 text-xs font-bold transition ${
+                        className={`sync-pressable sync-focus rounded-md px-4 py-2 text-xs font-bold transition ${
                           active
-                            ? "bg-white text-slate-900 shadow-[0_8px_18px_rgba(148,163,184,0.22)]"
-                            : "text-slate-600 hover:bg-white/75"
+                            ? "bg-blue-50 text-blue-800 shadow-sm ring-1 ring-blue-200"
+                            : "text-slate-600 hover:bg-slate-100"
                         }`}
                       >
                         {tab.label}
@@ -8747,16 +8760,16 @@ export default function SynchroSPage() {
                     setShowSuspendedRoster((prev) => !prev);
                     setShowRosterActions(false);
                   }}
-                  className={`rounded-full border px-4 py-2 text-xs font-black transition ${
+                  className={`sync-pressable sync-focus rounded-md border px-4 py-2 text-xs font-black transition ${
                     showSuspendedRoster
-                      ? "border-rose-200 bg-rose-50 text-rose-700 shadow-[0_8px_20px_rgba(244,63,94,0.12)]"
-                      : "border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                      ? "border-rose-300 bg-rose-50 text-rose-700"
+                      : "border-slate-300 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700"
                   }`}
                 >
                   {showSuspendedRoster ? "활성 명단 보기" : "중지된 명단"}
                 </button>
               </div>
-              <div className="mt-4 rounded-3xl border border-white/55 bg-white/40 p-3">
+              <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
                 {showSuspendedRoster ? (
                   <div>
                     <div className="flex items-center justify-between gap-3 px-1 pb-3">
@@ -8768,7 +8781,7 @@ export default function SynchroSPage() {
                           복구하면 다시 전체 요약과 시간표 검토 대상에 포함됩니다.
                         </p>
                       </div>
-                      <span className="rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-black text-rose-700">
+                      <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-black text-rose-700">
                         {(overviewEntity === "instructor" ? suspendedInstructors : suspendedStudents).length}명
                       </span>
                     </div>
@@ -8777,7 +8790,7 @@ export default function SynchroSPage() {
                         {(overviewEntity === "instructor" ? suspendedInstructors : suspendedStudents).map((item) => (
                           <div
                             key={`suspended-${overviewEntity}-${item.id}`}
-                            className="flex items-center justify-between gap-3 rounded-2xl border border-rose-100/80 bg-white/75 px-3 py-2.5 shadow-sm"
+                            className="flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-white px-3 py-2.5"
                           >
                             {overviewEntity === "student" ? <SchoolEmblem student={item} size="sm" /> : null}
                             <div className="min-w-0 flex-1">
@@ -8788,7 +8801,7 @@ export default function SynchroSPage() {
                               type="button"
                               disabled={statusUpdatingId === `${overviewEntity}-${item.id}`}
                               onClick={() => void handleToggleRosterStatus(overviewEntity, item, true)}
-                              className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                              className="sync-pressable sync-focus shrink-0 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                             >
                               복구
                             </button>
@@ -8796,7 +8809,7 @@ export default function SynchroSPage() {
                         ))}
                       </div>
                     ) : (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white/55 px-4 py-8 text-center text-sm font-semibold text-slate-500">
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-500">
                         중지된 명단이 없습니다.
                       </div>
                     )}
@@ -8806,10 +8819,10 @@ export default function SynchroSPage() {
                     {overviewDisplayGroups.map((group) => (
                       <div
                         key={`overview-group-${overviewEntity}-${group.label}`}
-                        className={`rounded-2xl border px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] ${group.toneClass ?? "border-white/60 bg-white/55"}`}
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex rounded-full border border-slate-200 bg-slate-100/85 px-2.5 py-1 text-[11px] font-black tracking-[0.16em] text-slate-600">
+                          <span className="inline-flex rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-black tracking-[0.12em] text-slate-700">
                             {group.label}
                           </span>
                           <span className="text-[11px] font-semibold text-slate-400">{group.items.length}명</span>
@@ -8820,10 +8833,10 @@ export default function SynchroSPage() {
                             return (
                               <span
                                 key={`overview-chip-${overviewEntity}-${item.id}`}
-                                className={`inline-flex items-center overflow-hidden rounded-full border text-sm font-black leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition ${
+                                className={`inline-flex items-center overflow-hidden rounded-md border text-sm font-black leading-none transition ${
                                   active
-                                    ? "border-sky-300 bg-[linear-gradient(135deg,rgba(37,99,235,0.92),rgba(96,165,250,0.84))] text-white shadow-[0_10px_24px_rgba(59,130,246,0.24)]"
-                                    : "border-slate-200/80 bg-white/88 text-slate-700 hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
+                                    ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                                    : "border-slate-200 bg-white text-blue-950 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                                 }`}
                               >
                                 <button
@@ -8885,32 +8898,32 @@ export default function SynchroSPage() {
                 )}
               </div>
 
-              <aside className="rounded-3xl border border-white/40 bg-[linear-gradient(180deg,rgba(255,255,255,0.46),rgba(219,234,254,0.42),rgba(224,231,255,0.4))] p-4 shadow-lg shadow-slate-900/5 backdrop-blur-md">
+              <aside className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Quick Read</p>
                 <p className="mt-2 text-xl font-black text-slate-900">{currentTargetLabel}</p>
                 <p className="mt-1 text-sm font-semibold text-slate-500">{profileSecondary || "추가 정보 없음"}</p>
-                <div className="mt-4 rounded-2xl border border-white/60 bg-white/60 p-4">
+                <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
                   <p className="text-xs font-bold text-slate-500">이번 주 배치 수업</p>
                   <p className="mt-2 text-3xl font-black text-slate-900">{displayEvents.length}개</p>
                   <p className="mt-2 text-xs font-semibold text-slate-500">심플 뷰 기준으로 동일 시간대는 유형 배지를 중앙에 압축 표시합니다.</p>
                 </div>
-                <div className="mt-4 rounded-2xl border border-white/60 bg-white/55 p-4">
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
                   <p className="text-xs font-bold text-slate-500">범례</p>
                   <div className="mt-3 space-y-2">
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <span className="inline-flex min-h-[26px] items-center justify-center rounded-full border border-green-200/70 bg-green-500/80 px-2.5 py-1 text-[11px] font-black text-white">
+                      <span className="inline-flex min-h-[26px] items-center justify-center rounded-md border border-emerald-600 bg-emerald-600 px-2.5 py-1 text-[11px] font-black text-white">
                         1:1
                       </span>
                       1:1 / 2:1 수업
                     </div>
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <span className="inline-flex min-h-[26px] items-center justify-center rounded-full border border-blue-200/70 bg-blue-500/80 px-2.5 py-1 text-[11px] font-black text-white">
+                      <span className="inline-flex min-h-[26px] items-center justify-center rounded-md border border-blue-600 bg-blue-600 px-2.5 py-1 text-[11px] font-black text-white">
                         개별정규
                       </span>
                       개별정규 및 다대일 수업
                     </div>
                     <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <span className="inline-flex rounded-full border border-slate-300 bg-slate-200/80 px-2 py-0.5 text-[11px] font-bold text-slate-700">휴무</span>
+                      <span className="inline-flex rounded-md border border-slate-300 bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700">휴무</span>
                       휴무일 컬럼
                     </div>
                   </div>
@@ -9254,7 +9267,7 @@ export default function SynchroSPage() {
                             <p className="mt-1 truncate text-sm font-semibold text-slate-500">{selectedReviewStudent.secondary || "상세 정보 없음"}</p>
                           </div>
                         </div>
-                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReviewIsStale ? "border-amber-300 bg-amber-50 text-amber-700" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-slate-400"}`}>
+                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReviewIsStale ? "border-amber-300 bg-amber-50 text-amber-700" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-blue-700"}`}>
                           {selectedReviewIsStale ? "재검토 필요" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
                         </span>
                       </div>
