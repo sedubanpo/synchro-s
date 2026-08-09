@@ -125,6 +125,8 @@ export type SelectOption = {
   id: string;
   name: string;
   secondary?: string;
+  school?: string;
+  schoolIconUrl?: string;
   isActive?: boolean;
   daysOff?: Weekday[];
   availableTimeSlots?: string[];

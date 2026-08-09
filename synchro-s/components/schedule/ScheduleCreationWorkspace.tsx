@@ -1,6 +1,7 @@
 "use client";
 
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
+import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
@@ -601,9 +602,12 @@ export function ScheduleCreationWorkspace({
             </p>
           </div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
-            <div>
-              <p className="text-sm font-black text-slate-900">{targetName || "대상 미선택"} 시간표 초안</p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">빈칸을 눌러 수업을 추가하고, 블록의 삭제 버튼으로 제거할 수 있습니다.</p>
+            <div className="flex items-center gap-2">
+              {mode === "resident" && selectedStudent ? <SchoolEmblem student={selectedStudent} size="sm" /> : null}
+              <div>
+                <p className="text-sm font-black text-slate-900">{targetName || "대상 미선택"} 시간표 초안</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">빈칸을 눌러 수업을 추가하고, 블록의 삭제 버튼으로 제거할 수 있습니다.</p>
+              </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">초안 {draftEvents.length}건</span>

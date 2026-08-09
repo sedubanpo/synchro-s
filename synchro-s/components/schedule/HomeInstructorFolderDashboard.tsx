@@ -1,6 +1,7 @@
 "use client";
 
 import { TIME_SLOTS } from "@/lib/constants";
+import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { getSubjectColorClass } from "@/lib/subjectColors";
 import type { ScheduleEvent } from "@/types/schedule";
@@ -10,6 +11,8 @@ export type HomeDashboardPersonSummary = {
   id: string;
   name: string;
   secondary?: string;
+  school?: string;
+  schoolIconUrl?: string;
   events: ScheduleEvent[];
 };
 
@@ -373,7 +376,10 @@ export function HomeInstructorFolderDashboard({
                                               : "border-white/80 bg-white/90 text-slate-800 hover:border-slate-300 hover:bg-white"
                                         }`}
                                       >
-                                        <span className="block text-sm font-black leading-4">{summary?.name ?? studentName}</span>
+                                        <span className="flex items-center gap-2">
+                                          {summary ? <SchoolEmblem student={summary} size="xs" /> : null}
+                                          <span className="block text-sm font-black leading-4">{summary?.name ?? studentName}</span>
+                                        </span>
                                         <span className={`mt-1 block text-[10px] font-bold leading-3 ${highlighted ? "text-slate-200" : "text-slate-500"}`}>
                                           {summary?.secondary || "학교·학년 정보 없음"}
                                         </span>
@@ -413,7 +419,10 @@ export function HomeInstructorFolderDashboard({
                 studentSummaries.map((item) => (
                   <button key={item.id} type="button" onClick={() => onOpenStudent(item.id)} className="sync-pressable sync-focus w-full rounded-lg border border-emerald-100 bg-white p-2.5 text-left shadow-sm transition-[background-color,border-color,box-shadow,transform] hover:border-emerald-300 hover:bg-emerald-50">
                     <span className="flex items-center justify-between gap-2">
-                      <span className="font-black text-slate-900">{item.name}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <SchoolEmblem student={item} size="xs" />
+                        <span className="truncate font-black text-slate-900">{item.name}</span>
+                      </span>
                       <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-black tabular-nums text-white">{item.events.length}개</span>
                     </span>
                     <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{item.secondary || "학교 정보 없음"}</span>

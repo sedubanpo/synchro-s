@@ -492,7 +492,7 @@ export async function GET(req: Request) {
       availableTimeSlotsByDay?: Record<string, string[]>;
     }[] = [];
     let suspendedInstructors: typeof instructors = [];
-    let students: { id: string; name: string; secondary?: string; isActive?: boolean }[] = [];
+    let students: { id: string; name: string; secondary?: string; school?: string; isActive?: boolean }[] = [];
     let suspendedStudents: typeof students = [];
     const profileInstructorId = (profile as { instructor_id?: string | null }).instructor_id ?? null;
     const profileStudentId = (profile as { student_id?: string | null }).student_id ?? null;
@@ -580,6 +580,7 @@ export async function GET(req: Request) {
           id: row.id,
           name: firebaseStudent?.name || row.student_name,
           secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name)),
+          school: firebaseStudent?.school || studentSchoolByName.get(normalizeName(row.student_name))?.split("·")[0]?.trim(),
           isActive: true
           };
         });
@@ -591,6 +592,7 @@ export async function GET(req: Request) {
           id: row.id,
           name: firebaseStudent?.name || row.student_name,
           secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name)),
+          school: firebaseStudent?.school || studentSchoolByName.get(normalizeName(row.student_name))?.split("·")[0]?.trim(),
           isActive: false
           };
         });
@@ -662,7 +664,8 @@ export async function GET(req: Request) {
               return {
               id: row.id,
               name: firebaseStudent?.name || row.student_name,
-              secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name))
+              secondary: firebaseStudent?.secondary || studentSchoolByName.get(normalizeName(row.student_name)),
+              school: firebaseStudent?.school || studentSchoolByName.get(normalizeName(row.student_name))?.split("·")[0]?.trim()
               };
             });
         }
@@ -686,7 +689,8 @@ export async function GET(req: Request) {
           {
             id: ownStudent.id,
             name: firebaseStudent?.name || ownStudent.student_name,
-            secondary: firebaseStudent?.secondary || studentSchoolByName.get(ownStudentName)
+            secondary: firebaseStudent?.secondary || studentSchoolByName.get(ownStudentName),
+            school: firebaseStudent?.school || studentSchoolByName.get(ownStudentName)?.split("·")[0]?.trim()
           }
         ];
       } else {

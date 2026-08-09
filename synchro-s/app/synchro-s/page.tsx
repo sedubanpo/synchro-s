@@ -2,6 +2,7 @@
 
 import { InstructorAvailabilityWorkspace } from "@/components/schedule/InstructorAvailabilityWorkspace";
 import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
+import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
 import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { StudentAvailabilityWorkspace } from "@/components/schedule/StudentAvailabilityWorkspace";
@@ -12,6 +13,8 @@ import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibil
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
 import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
+import { loadSchoolIconRegistry } from "@/lib/firebase/sharedIcons";
+import { getSchoolName, resolveSchoolIconUrl } from "@/lib/sharedIcons";
 import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
@@ -367,6 +370,8 @@ type HomePersonSummary = {
   id: string;
   name: string;
   secondary?: string;
+  school?: string;
+  schoolIconUrl?: string;
   events: ScheduleEvent[];
 };
 
@@ -1993,6 +1998,8 @@ export default function SynchroSPage() {
           id: key,
           name: option?.name ?? name,
           secondary: option?.secondary,
+          school: option?.school,
+          schoolIconUrl: option?.schoolIconUrl,
           events: [event]
         });
       });
@@ -3112,10 +3119,25 @@ export default function SynchroSPage() {
 
     const data = (await res.json()) as OptionsResponse;
 
+    let decoratedStudents = data.students;
+    let decoratedSuspendedStudents = data.suspendedStudents ?? [];
+    try {
+      const schoolIcons = await loadSchoolIconRegistry(Boolean(opts?.refreshSheets));
+      const decorate = (student: SelectOption): SelectOption => ({
+        ...student,
+        school: getSchoolName(student) || undefined,
+        schoolIconUrl: resolveSchoolIconUrl(schoolIcons, student)
+      });
+      decoratedStudents = data.students.map(decorate);
+      decoratedSuspendedStudents = (data.suspendedStudents ?? []).map(decorate);
+    } catch (iconError) {
+      console.warn("학교 엠블럼을 불러오지 못해 이니셜로 표시합니다.", iconError);
+    }
+
     setInstructors(data.instructors);
     setSuspendedInstructors(data.suspendedInstructors ?? []);
-    setStudents(data.students);
-    setSuspendedStudents(data.suspendedStudents ?? []);
+    setStudents(decoratedStudents);
+    setSuspendedStudents(decoratedSuspendedStudents);
     setSubjects(data.subjects);
     setClassTypes(data.classTypes);
     if (data.viewerRole) {
@@ -7565,9 +7587,13 @@ export default function SynchroSPage() {
             <div className="flex flex-wrap items-center justify-end gap-3">
               <div className="min-w-[240px] rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-base font-black text-slate-800">
-                    {showIntroPage ? "홈" : profileInitial}
-                  </div>
+                  {!showIntroPage && isWorkspaceTab && roleView === "student" && selectedStudentOption ? (
+                    <SchoolEmblem student={selectedStudentOption} size="lg" />
+                  ) : (
+                    <div className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-base font-black text-slate-800">
+                      {showIntroPage ? "홈" : profileInitial}
+                    </div>
+                  )}
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold uppercase tracking-[0.18em]">
                       {showIntroPage ? (isInstructorReadOnly ? "My Timetable" : "Today Dashboard") : mainTab === "overview" ? "Overview Dashboard" : profileTitle}
@@ -7618,7 +7644,7 @@ export default function SynchroSPage() {
                                 setSelectedInstructorId(instructor.id);
                                 setShowInstructorPicker(false);
                               }}
-                              className={`block w-full rounded-md px-3 py-2 text-left text-sm font-semibold ${
+                              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold ${
                                 instructor.id === selectedInstructorId
                                   ? "bg-indigo-100 text-indigo-800"
                                   : "text-slate-800 hover:bg-slate-100/70"
@@ -7663,10 +7689,11 @@ export default function SynchroSPage() {
                                   : "text-slate-800 hover:bg-slate-100/70"
                               }`}
                             >
-                              학생: {student.name}
-                              {student.secondary ? (
-                                <span className="ml-2 text-xs font-medium text-slate-500">({student.secondary})</span>
-                              ) : null}
+                              <SchoolEmblem student={student} size="xs" />
+                              <span className="min-w-0">
+                                <span className="block truncate">학생: {student.name}</span>
+                                {student.secondary ? <span className="block truncate text-xs font-medium text-slate-500">{student.secondary}</span> : null}
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -8752,7 +8779,8 @@ export default function SynchroSPage() {
                             key={`suspended-${overviewEntity}-${item.id}`}
                             className="flex items-center justify-between gap-3 rounded-2xl border border-rose-100/80 bg-white/75 px-3 py-2.5 shadow-sm"
                           >
-                            <div className="min-w-0">
+                            {overviewEntity === "student" ? <SchoolEmblem student={item} size="sm" /> : null}
+                            <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-black text-slate-800">{item.name}</p>
                               <p className="truncate text-xs font-semibold text-slate-400">{item.secondary || "추가 정보 없음"}</p>
                             </div>
@@ -8809,8 +8837,9 @@ export default function SynchroSPage() {
                                       setRoleView("student");
                                     }
                                   }}
-                                  className="px-3 py-1.5"
+                                  className="flex items-center gap-1.5 px-3 py-1.5"
                                 >
+                                  {overviewEntity === "student" ? <SchoolEmblem student={item} size="xs" className="border-white/50" /> : null}
                                   {item.name}
                                 </button>
                                 {!isInstructorReadOnly && showRosterActions ? (
@@ -9040,6 +9069,7 @@ export default function SynchroSPage() {
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
+                                  <SchoolEmblem student={row.student} size="sm" />
                                   <p className="text-base font-black text-slate-900">{row.student.name}</p>
                                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">
                                     {row.events.length}개
@@ -9217,9 +9247,12 @@ export default function SynchroSPage() {
                     <>
                       <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Selected Student</p>
                       <div className="mt-2 flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-2xl font-black text-slate-900">{selectedReviewStudent.name}</h3>
-                          <p className="mt-1 text-sm font-semibold text-slate-500">{selectedReviewStudent.secondary || "상세 정보 없음"}</p>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <SchoolEmblem student={selectedReviewStudent} size="lg" />
+                          <div className="min-w-0">
+                            <h3 className="truncate text-2xl font-black text-slate-900">{selectedReviewStudent.name}</h3>
+                            <p className="mt-1 truncate text-sm font-semibold text-slate-500">{selectedReviewStudent.secondary || "상세 정보 없음"}</p>
+                          </div>
                         </div>
                         <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReviewIsStale ? "border-amber-300 bg-amber-50 text-amber-700" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-slate-400"}`}>
                           {selectedReviewIsStale ? "재검토 필요" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
