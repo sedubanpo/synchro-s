@@ -11,6 +11,8 @@ type SessionPayload = {
   studentId?: string | null;
   firebaseUid?: string | null;
   authSource?: "firebase" | "sheet";
+  staffPosition?: string | null;
+  actorIconUrl?: string | null;
   issuedAt: number;
   expiresAt: number;
 };
@@ -42,6 +44,8 @@ export function buildSessionToken(input: {
   studentId?: string | null;
   firebaseUid?: string | null;
   authSource?: "firebase" | "sheet";
+  staffPosition?: string | null;
+  actorIconUrl?: string | null;
 }): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: SessionPayload = {
@@ -51,6 +55,8 @@ export function buildSessionToken(input: {
     studentId: input.studentId ?? null,
     firebaseUid: input.firebaseUid ?? null,
     authSource: input.authSource ?? "sheet",
+    staffPosition: input.staffPosition ?? null,
+    actorIconUrl: input.actorIconUrl ?? null,
     issuedAt: now,
     expiresAt: now + DEFAULT_TTL_SECONDS
   };

@@ -38,6 +38,8 @@ export type SynchroFirebaseIdentity = {
   instructorId: string | null;
   studentId: string | null;
   rawRole: string;
+  staffPosition: string | null;
+  actorIconUrl: string | null;
 };
 
 const CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
@@ -188,6 +190,26 @@ function mapFirebaseRole(rawRole: string): SynchroFirebaseIdentity["role"] {
   return "instructor";
 }
 
+function sharedIconDocumentId(lookupKey: string): string {
+  return crypto.createHash("sha256").update(lookupKey).digest("hex").slice(0, 32);
+}
+
+async function resolveStaffIconUrl(
+  idToken: string,
+  uid: string,
+  staffPosition: string,
+  profileImageUrl: string
+): Promise<string | null> {
+  const lookupKeys = [`user:${uid}`, staffPosition ? `staff-position:${staffPosition}` : ""].filter(Boolean);
+  for (const lookupKey of lookupKeys) {
+    const iconDoc = await getFirestoreDoc(idToken, "sharedIconAssets", sharedIconDocumentId(lookupKey));
+    const status = asString(iconDoc.status).toUpperCase();
+    const imageUrl = asString(iconDoc.imageUrl);
+    if (imageUrl && status !== "DISABLED" && status !== "INACTIVE") return imageUrl;
+  }
+  return profileImageUrl || null;
+}
+
 export async function resolveSynchroFirebaseIdentity(idToken: string): Promise<SynchroFirebaseIdentity> {
   const verified = await verifyFirebaseIdToken(idToken);
   const [userDoc, profileDoc, accessDoc] = await Promise.all([
@@ -201,6 +223,12 @@ export async function resolveSynchroFirebaseIdentity(idToken: string): Promise<S
   const rawRole = asString(userDoc.role) || asString(profileDoc.role) || asString(synchroAccess.role) || "INSTRUCTOR";
   const mappedRole = mapFirebaseRole(rawRole);
   const status = (asString(userDoc.status) || asString(profileDoc.status) || rawRole).toUpperCase();
+  const staffPosition = asString(userDoc.staffPosition) || asString(profileDoc.staffPosition);
+  const profileImageUrl =
+    asString(userDoc.profileImageUrl) ||
+    asString(profileDoc.profileImageUrl) ||
+    asString(profileDoc.photoURL) ||
+    asString(profileDoc.photoUrl);
 
   if (status === "DISABLED" || rawRole.toUpperCase() === "DISABLED") {
     throw new Error("비활성화된 Firebase 계정입니다.");
@@ -208,6 +236,11 @@ export async function resolveSynchroFirebaseIdentity(idToken: string): Promise<S
   if (apps.synchroS !== true && mappedRole !== "admin" && mappedRole !== "coordinator") {
     throw new Error("Synchro-S 접근 권한이 없는 Firebase 계정입니다.");
   }
+
+  const actorIconUrl =
+    mappedRole === "admin" || mappedRole === "coordinator"
+      ? await resolveStaffIconUrl(idToken, verified.uid, staffPosition, profileImageUrl)
+      : profileImageUrl || null;
 
   return {
     uid: verified.uid,
@@ -226,6 +259,8 @@ export async function resolveSynchroFirebaseIdentity(idToken: string): Promise<S
       asString(profileDoc.supabaseStudentId) ||
       asString(profileDoc.studentId) ||
       asString(synchroAccess.supabaseStudentId) ||
-      null
+      null,
+    staffPosition: staffPosition || null,
+    actorIconUrl
   };
 }

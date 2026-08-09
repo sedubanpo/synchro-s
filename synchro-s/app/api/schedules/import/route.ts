@@ -3,6 +3,7 @@ import { isInstructorSourceMatch } from "@/lib/instructorMatchGuard";
 import { normalizeInstructorAlias } from "@/lib/notionScheduleParser";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { insertSaveHistory } from "@/lib/server/saveHistory";
+import { getStaffAttribution } from "@/lib/server/staffAttribution";
 import { importScheduleRow, INSTRUCTOR_DAY_OFF_MESSAGE } from "@/lib/server/scheduleService";
 import type { CreateScheduleRequest } from "@/types/schedule";
 import { NextResponse } from "next/server";
@@ -168,7 +169,8 @@ export async function POST(req: Request) {
             payload.targetType,
             payload.targetName,
             payload.items[0]?.scheduleTagId ?? null,
-            payload.historySource ?? "student_timetable"
+            payload.historySource ?? "student_timetable",
+            getStaffAttribution(user, profile)
           );
         } catch (historyError) {
           console.error("[save-history] insert failed", historyError);

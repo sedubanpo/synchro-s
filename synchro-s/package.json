@@ -33,7 +33,8 @@
     "verify:hidden-time-slots": "node --import tsx scripts/verify-hidden-time-slots.mts",
     "verify:schedule-review-snapshots": "node --import tsx scripts/verify-schedule-review-snapshots.mts",
     "verify:schedule-review-rendering": "node --import tsx scripts/verify-schedule-review-rendering.mts",
-    "verify:login-resilience": "node --import tsx scripts/verify-login-resilience.mts"
+    "verify:login-resilience": "node --import tsx scripts/verify-login-resilience.mts",
+    "verify:staff-attribution": "node --env-file=.env.local scripts/verify-staff-attribution-and-shared-state.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

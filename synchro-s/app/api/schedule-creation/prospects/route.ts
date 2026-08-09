@@ -1,6 +1,7 @@
 import { errorMessage, jsonError } from "@/lib/http";
 import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { insertSaveHistory } from "@/lib/server/saveHistory";
+import { getStaffAttribution } from "@/lib/server/staffAttribution";
 import type { ScheduleEvent, Weekday } from "@/types/schedule";
 import { NextResponse } from "next/server";
 
@@ -205,7 +206,8 @@ export async function POST(req: Request) {
         "학생",
         name,
         payload.scheduleTagId?.trim() || null,
-        "schedule_creation"
+        "schedule_creation",
+        getStaffAttribution(user, profile)
       );
     } catch (historyError) {
       console.error("[save-history] prospect schedule creation insert failed", historyError);

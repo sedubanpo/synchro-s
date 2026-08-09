@@ -66,7 +66,9 @@ export async function POST(req: Request) {
         instructorId,
         studentId,
         firebaseUid: identity.uid,
-        authSource: "firebase"
+        authSource: "firebase",
+        staffPosition: identity.staffPosition,
+        actorIconUrl: identity.actorIconUrl
       });
 
       const response = NextResponse.json({

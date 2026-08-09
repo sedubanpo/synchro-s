@@ -23,7 +23,9 @@ export async function getAuthenticatedProfile() {
         auth_source: sheetSession.authSource ?? "sheet",
         firebase_uid: sheetSession.firebaseUid ?? null,
         instructor_id: sheetSession.instructorId ?? null,
-        student_id: sheetSession.studentId ?? null
+        student_id: sheetSession.studentId ?? null,
+        staff_position: sheetSession.staffPosition ?? null,
+        actor_icon_url: sheetSession.actorIconUrl ?? null
       },
       profileError: null
     } as const;
@@ -44,7 +46,12 @@ export async function getAuthenticatedProfile() {
     .eq("id", user.id)
     .single();
 
-  return { supabase: serverSupabase, user, profile, profileError: profileError?.message ?? null } as const;
+  return {
+    supabase: serverSupabase,
+    user,
+    profile: profile ? { ...profile, staff_position: null, actor_icon_url: null, firebase_uid: null } : null,
+    profileError: profileError?.message ?? null
+  } as const;
 }
 
 export function canManageSchedules(role?: AppUserRole | null): boolean {

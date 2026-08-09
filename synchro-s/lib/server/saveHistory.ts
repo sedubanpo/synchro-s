@@ -10,6 +10,17 @@ type SaveHistoryRow = {
   target_id?: string | null;
   tag_id?: string | null;
   schedule_tags?: { name?: string | null } | { name?: string | null }[] | null;
+  created_by_uid?: string | null;
+  created_by_name?: string | null;
+  created_by_position?: string | null;
+  created_by_icon_url?: string | null;
+};
+
+type SaveHistoryActor = {
+  uid?: string | null;
+  name?: string | null;
+  position?: string | null;
+  iconUrl?: string | null;
 };
 
 export type SaveHistorySource = "student_timetable" | "schedule_creation";
@@ -61,7 +72,8 @@ export async function insertSaveHistory(
   targetType?: string | null,
   targetName?: string | null,
   tagId?: string | null,
-  source: SaveHistorySource = "student_timetable"
+  source: SaveHistorySource = "student_timetable",
+  actor?: SaveHistoryActor | null
 ): Promise<void> {
   if ((targetType !== "학생" && targetType !== "강사") || !targetName?.trim()) {
     return;
@@ -70,7 +82,11 @@ export async function insertSaveHistory(
   const { error } = await supabase.from("save_history").insert({
     target_type: targetType,
     target_name: encodeTargetName(targetName, source),
-    tag_id: tagId?.trim() || null
+    tag_id: tagId?.trim() || null,
+    created_by_uid: actor?.uid?.trim() || null,
+    created_by_name: actor?.name?.trim() || null,
+    created_by_position: actor?.position?.trim() || null,
+    created_by_icon_url: actor?.iconUrl?.trim() || null
   });
 
   if (error) {
@@ -81,7 +97,7 @@ export async function insertSaveHistory(
 export async function fetchRecentSaveHistory(supabase: SupabaseLike, limit = 20) {
   const { data, error } = await supabase
     .from("save_history")
-    .select("id,created_at,target_type,target_name,tag_id,schedule_tags(name)")
+    .select("id,created_at,target_type,target_name,tag_id,created_by_uid,created_by_name,created_by_position,created_by_icon_url,schedule_tags(name)")
     .order("created_at", { ascending: false })
     .limit(limit);
 

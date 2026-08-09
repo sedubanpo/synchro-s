@@ -116,6 +116,22 @@ type TimetableGroup = {
   snapshotEvents?: ScheduleEvent[];
   isActive: boolean;
   createdAt: string;
+  creator: StaffActor;
+  activity: TimetableGroupActivity[];
+};
+
+type StaffActor = {
+  uid?: string | null;
+  name?: string | null;
+  position?: string | null;
+  iconUrl?: string | null;
+};
+
+type TimetableGroupActivity = {
+  id: string;
+  createdAt: string;
+  action: "created" | "activated" | "deactivated";
+  actor: StaffActor;
 };
 
 type TimetableGroupMonthSection = {
@@ -231,6 +247,7 @@ type SaveHistoryEntry = {
   tagId?: string | null;
   tagLabel: string;
   source: "student_timetable" | "schedule_creation";
+  actor: StaffActor;
 };
 
 type SaveHistoryResponse = {
@@ -243,6 +260,10 @@ type SaveHistoryResponse = {
     tag_id?: string | null;
     tag_name?: string | null;
     source?: "student_timetable" | "schedule_creation";
+    created_by_uid?: string | null;
+    created_by_name?: string | null;
+    created_by_position?: string | null;
+    created_by_icon_url?: string | null;
   }[];
 };
 
@@ -259,6 +280,8 @@ type TimetableGroupApiItem = {
   classIds: string[];
   snapshotEvents?: ScheduleEvent[];
   isActive: boolean;
+  creator?: StaffActor;
+  activity?: TimetableGroupActivity[];
 };
 
 type TimetableGroupsResponse = {
@@ -548,7 +571,9 @@ function cloneTimetableGroups(items: TimetableGroup[]): TimetableGroup[] {
   return items.map((group) => ({
     ...group,
     classIds: [...group.classIds],
-    snapshotEvents: group.snapshotEvents ? cloneEvents(group.snapshotEvents) : undefined
+    snapshotEvents: group.snapshotEvents ? cloneEvents(group.snapshotEvents) : undefined,
+    creator: { ...group.creator },
+    activity: group.activity.map((item) => ({ ...item, actor: { ...item.actor } }))
   }));
 }
 
@@ -564,7 +589,9 @@ function mapApiGroupToState(item: TimetableGroupApiItem): TimetableGroup {
     classIds: Array.isArray(item.classIds) ? item.classIds : [],
     snapshotEvents: Array.isArray(item.snapshotEvents) ? cloneEvents(item.snapshotEvents) : [],
     isActive: item.isActive === true,
-    createdAt: item.createdAt
+    createdAt: item.createdAt,
+    creator: item.creator ?? {},
+    activity: Array.isArray(item.activity) ? item.activity : []
   };
 }
 
@@ -1025,6 +1052,23 @@ function formatSpecialNoteTimestamp(dateISO: string): string {
   }).formatToParts(new Date(dateISO));
   const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return `${pick("year")}.${pick("month")}.${pick("day")} ${pick("hour")}:${pick("minute")}`;
+}
+
+function StaffAvatar({ actor, size = "sm" }: { actor: StaffActor; size?: "xs" | "sm" }) {
+  const name = actor.name?.trim() || "담당자 미상";
+  const initial = name.charAt(0) || "?";
+  const dimension = size === "xs" ? "h-5 w-5 text-[9px]" : "h-6 w-6 text-[10px]";
+  return (
+    <span
+      role="img"
+      aria-label={`${name}${actor.position ? ` ${actor.position}` : ""}`}
+      title={`${name}${actor.position ? ` · ${actor.position}` : ""}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-md border border-white/50 bg-slate-700 bg-cover bg-center font-black text-white shadow-sm ${dimension}`}
+      style={actor.iconUrl ? { backgroundImage: `url("${actor.iconUrl.replace(/["\\]/g, "")}")` } : undefined}
+    >
+      {actor.iconUrl ? <span className="sr-only">{name}</span> : initial}
+    </span>
+  );
 }
 
 function formatConflictLogTimestamp(dateISO: string): string {
@@ -1569,6 +1613,7 @@ export default function SynchroSPage() {
   const [timetableGroupExpirationSupported, setTimetableGroupExpirationSupported] = useState(true);
   const [expandedGroupMonths, setExpandedGroupMonths] = useState<Record<string, boolean>>({});
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [isCreatingNewSyncTimetable, setIsCreatingNewSyncTimetable] = useState(false);
   const [capturingTimetable, setCapturingTimetable] = useState(false);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [showActiveOnly, setShowActiveOnly] = useState(false);
@@ -2375,6 +2420,10 @@ export default function SynchroSPage() {
       return filterInstructorStudent(onlyActiveRosterEvents(activeStudentEventsForInstructor));
     }
 
+    if (isCreatingNewSyncTimetable && studentScheduleInputTab === "sync") {
+      return draftEvents;
+    }
+
     const preferredGroup = selectedGroup ?? activeGroup;
     if (preferredGroup) {
       const snapshot = preferredGroup.snapshotEvents ?? [];
@@ -2400,12 +2449,14 @@ export default function SynchroSPage() {
     filteredEvents,
     instructorStudentKeyword,
     instructorStudentKeywordToken,
+    isCreatingNewSyncTimetable,
     mainTab,
     overviewDisplayEvents,
     roleView,
     selectedScheduleTagId,
     selectedGroup,
     selectedStudentId,
+    studentScheduleInputTab,
     studentGroupTargetIdsForWeek
   ]);
   const timetableEmptyMessage = useMemo(() => {
@@ -3303,7 +3354,13 @@ export default function SynchroSPage() {
         targetLabel: `${item.target_type}: ${item.target_name}`,
         tagId: item.tag_id ?? null,
         tagLabel: item.tag_name?.trim() || "기록 없음",
-        source: item.source ?? "student_timetable"
+        source: item.source ?? "student_timetable",
+        actor: {
+          uid: item.created_by_uid ?? null,
+          name: item.created_by_name ?? null,
+          position: item.created_by_position ?? null,
+          iconUrl: item.created_by_icon_url ?? null
+        }
       }))
     );
     setError(null);
@@ -3616,9 +3673,9 @@ export default function SynchroSPage() {
     [loadConflictLogs, mainTab, moveToLogin]
   );
 
-  const loadTimetableGroups = useCallback(async () => {
+  const loadTimetableGroups = useCallback(async (opts?: { silent?: boolean }) => {
     const requestId = ++timetableGroupsLoadRequestRef.current;
-    setTimetableGroupsLoading(true);
+    if (!opts?.silent) setTimetableGroupsLoading(true);
 
     try {
       const fetchGroups = async (query: URLSearchParams) => {
@@ -4148,6 +4205,18 @@ export default function SynchroSPage() {
     setNotice("싱크로 시간표 초안을 초기화했습니다.");
   }, [syncDraftItems.length]);
 
+  const handleStartNewSyncTimetable = useCallback(() => {
+    if (syncDraftItems.length > 0 && !window.confirm("작성 중인 싱크로 시간표 초안을 지우고 새 시간표를 만들까요?")) {
+      return;
+    }
+    setSyncDraftItems([]);
+    setParsedNotionItems([]);
+    setSelectedGroupId(null);
+    setIsCreatingNewSyncTimetable(true);
+    setError(null);
+    setNotice("새 싱크로 시간표를 시작했습니다. 기존 저장본은 변경되지 않습니다.");
+  }, [syncDraftItems.length]);
+
   const handleSaveSyncDraftsToServer = useCallback(async () => {
     if (savingSyncDrafts) return;
     if (!selectedScheduleTagId) {
@@ -4408,6 +4477,7 @@ export default function SynchroSPage() {
         });
         if (created?.id) {
           setSelectedGroupId(created.id);
+          setIsCreatingNewSyncTimetable(false);
         }
       }
 
@@ -6498,6 +6568,7 @@ export default function SynchroSPage() {
 
   const handleSelectGroup = useCallback(
     (groupId: string) => {
+      setIsCreatingNewSyncTimetable(false);
       setParsedNotionItems([]);
       const selected = timetableGroups.find((group) => group.id === groupId);
       if (selected) setSelectedScheduleTagId(selected.tagId ?? null);
@@ -6855,6 +6926,24 @@ export default function SynchroSPage() {
   }, [loadTimetableGroups, scheduleTagSelectionReady, viewerRoleResolved]);
 
   useEffect(() => {
+    if (!viewerRoleResolved || !scheduleTagSelectionReady) return;
+    const refreshSharedState = () => {
+      if (document.visibilityState !== "visible") return;
+      void Promise.all([loadTimetableGroups({ silent: true }), loadSaveHistory()]).catch((refreshError) => {
+        console.error("[shared-timetable-state] refresh failed", refreshError);
+      });
+    };
+    const intervalId = window.setInterval(refreshSharedState, 15_000);
+    window.addEventListener("focus", refreshSharedState);
+    document.addEventListener("visibilitychange", refreshSharedState);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshSharedState);
+      document.removeEventListener("visibilitychange", refreshSharedState);
+    };
+  }, [loadSaveHistory, loadTimetableGroups, scheduleTagSelectionReady, viewerRoleResolved]);
+
+  useEffect(() => {
     if (mainTab !== "overview" && !(showIntroPage && !isInstructorReadOnly)) {
       return;
     }
@@ -6963,6 +7052,7 @@ export default function SynchroSPage() {
 
   useEffect(() => {
     setSelectedGroupId(null);
+    setIsCreatingNewSyncTimetable(false);
     autoSelectedGroupScopeRef.current = null;
   }, [currentTargetId, roleView]);
 
@@ -7183,6 +7273,13 @@ export default function SynchroSPage() {
                         <p className="mt-1 inline-flex max-w-full rounded bg-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-950">
                           <span className="truncate">분류: {entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</span>
                         </p>
+                        <span className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold text-white/90">
+                          <StaffAvatar actor={entry.actor} size="xs" />
+                          <span className="min-w-0 truncate">
+                            {entry.actor.name || "담당자 기록 없음"}
+                            {entry.actor.position ? ` · ${entry.actor.position}` : ""}
+                          </span>
+                        </span>
                       </button>
                     </div>
                     );
@@ -7727,6 +7824,18 @@ export default function SynchroSPage() {
                     시간표의 빈칸을 누르면 과목, 강사, 수업 유형, 수업 시간을 입력할 수 있습니다. 초안은 아래 시간표에 바로 표시되고, DB 저장 전에는 실제 데이터가 바뀌지 않습니다.
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={savingSyncDrafts || !selectedStudentId}
+                      onClick={handleStartNewSyncTimetable}
+                      className={`sync-pressable sync-focus min-h-9 rounded-lg border px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 ${
+                        isCreatingNewSyncTimetable
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      }`}
+                    >
+                      {isCreatingNewSyncTimetable ? "새 시간표 작성 중" : "새 시간표 만들기"}
+                    </button>
                     <span className="sync-tabular rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600">
                       초안 {syncDraftItems.length}건
                     </span>
@@ -8332,6 +8441,40 @@ export default function SynchroSPage() {
                                   </span>
                                   {group.weekStart} | 수업 {group.classIds.length}개
                                 </p>
+                                <div className={`mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-bold ${
+                                  isSelectedGroup ? "bg-white/15 text-white" : "bg-slate-100 text-slate-600"
+                                }`}>
+                                  <StaffAvatar actor={group.creator} size="xs" />
+                                  <span className="min-w-0 truncate">
+                                    생성 · {group.creator.name || "기존 기록"}
+                                    {group.creator.position ? ` · ${group.creator.position}` : ""}
+                                  </span>
+                                </div>
+                                {group.activity.length > 0 ? (
+                                  <details
+                                    className="mt-1.5 rounded-md border border-slate-200 bg-white text-slate-700"
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    <summary className="sync-focus cursor-pointer list-none px-2 py-1.5 text-[10px] font-black [&::-webkit-details-marker]:hidden">
+                                      상태 이력 {group.activity.filter((item) => item.action !== "created").length}건 ▾
+                                    </summary>
+                                    <div className="max-h-32 space-y-1 overflow-y-auto border-t border-slate-100 p-1.5">
+                                      {group.activity.map((item) => (
+                                        <div key={item.id} className="flex items-center gap-1.5 rounded bg-slate-50 px-1.5 py-1 text-[9px] font-bold text-slate-600">
+                                          <StaffAvatar actor={item.actor} size="xs" />
+                                          <span className="min-w-0 flex-1 truncate">
+                                            {item.action === "created" ? "생성" : item.action === "activated" ? "활성" : "비활성"}
+                                            {` · ${item.actor.name || "담당자 기록 없음"}`}
+                                          </span>
+                                          <time className="sync-tabular shrink-0 text-slate-400" dateTime={item.createdAt}>
+                                            {formatSaveHistoryTimestamp(new Date(item.createdAt))}
+                                          </time>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
+                                ) : null}
                                 {groupNotes.length > 0 ? (
                                   <details
                                     className="group/memo relative mt-2"

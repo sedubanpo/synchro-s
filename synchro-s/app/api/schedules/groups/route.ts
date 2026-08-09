@@ -3,6 +3,7 @@ import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { fetchEventsForClassIdsInWeek } from "@/lib/server/scheduleService";
 import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
 import { insertSaveHistory } from "@/lib/server/saveHistory";
+import { getStaffAttribution, type StaffAttribution } from "@/lib/server/staffAttribution";
 import { selectEffectiveStudentTimetableGroup } from "@/lib/timetableGroupSelection";
 import { NextResponse } from "next/server";
 
@@ -69,7 +70,32 @@ function normalizeDateOrNull(value: unknown): string | null {
   return value;
 }
 
-function mapGroupRow(row: any, snapshotEvents: unknown[]) {
+type GroupActivityRow = {
+  id: string;
+  group_id: string;
+  created_at: string;
+  action: "created" | "activated" | "deactivated";
+  actor_uid?: string | null;
+  actor_name?: string | null;
+  actor_position?: string | null;
+  actor_icon_url?: string | null;
+};
+
+function mapActivityRow(row: GroupActivityRow) {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    action: row.action,
+    actor: {
+      uid: row.actor_uid ?? null,
+      name: row.actor_name ?? null,
+      position: row.actor_position ?? null,
+      iconUrl: row.actor_icon_url ?? null
+    }
+  };
+}
+
+function mapGroupRow(row: any, snapshotEvents: unknown[], activity: GroupActivityRow[] = []) {
   return {
     id: row.id,
     createdAt: row.created_at,
@@ -82,7 +108,23 @@ function mapGroupRow(row: any, snapshotEvents: unknown[]) {
     name: row.name,
     classIds: Array.isArray(row.class_ids) ? row.class_ids : [],
     snapshotEvents,
-    isActive: row.is_active === true
+    isActive: row.is_active === true,
+    creator: {
+      uid: row.created_by_uid ?? null,
+      name: row.created_by_name ?? null,
+      position: row.created_by_position ?? null,
+      iconUrl: row.created_by_icon_url ?? null
+    },
+    activity: activity.map(mapActivityRow)
+  };
+}
+
+function actorRpcPayload(actor: StaffAttribution) {
+  return {
+    p_actor_uid: actor.uid,
+    p_actor_name: actor.name,
+    p_actor_position: actor.position,
+    p_actor_icon_url: actor.iconUrl
   };
 }
 
@@ -190,8 +232,8 @@ export async function GET(req: Request) {
         .from("timetable_groups")
         .select(
           includeExpiration
-            ? "id,created_at,updated_at,role_view,target_id,week_start,expires_on,tag_id,name,class_ids,snapshot_events,is_active"
-            : "id,created_at,updated_at,role_view,target_id,week_start,tag_id,name,class_ids,snapshot_events,is_active"
+            ? "id,created_at,updated_at,role_view,target_id,week_start,expires_on,tag_id,name,class_ids,snapshot_events,is_active,created_by_uid,created_by_name,created_by_position,created_by_icon_url"
+            : "id,created_at,updated_at,role_view,target_id,week_start,tag_id,name,class_ids,snapshot_events,is_active,created_by_uid,created_by_name,created_by_position,created_by_icon_url"
         )
         .order("created_at", { ascending: false });
 
@@ -282,6 +324,22 @@ export async function GET(req: Request) {
       ? await fetchEventsForClassIdsInWeek(supabase, { weekStart: effectiveWeekStart, classIds: missingSnapshotClassIds })
       : [];
 
+    const groupIds = rows.map((row) => row.id).filter(Boolean);
+    const { data: activityRows, error: activityError } = groupIds.length > 0
+      ? await supabase
+          .from("timetable_group_activity_history")
+          .select("id,group_id,created_at,action,actor_uid,actor_name,actor_position,actor_icon_url")
+          .in("group_id", groupIds)
+          .order("created_at", { ascending: false })
+      : { data: [], error: null };
+    if (activityError) throw activityError;
+    const activityByGroupId = new Map<string, GroupActivityRow[]>();
+    for (const activityRow of (activityRows ?? []) as GroupActivityRow[]) {
+      const bucket = activityByGroupId.get(activityRow.group_id) ?? [];
+      bucket.push(activityRow);
+      activityByGroupId.set(activityRow.group_id, bucket);
+    }
+
     const mappedItems = await Promise.all(
       rows.map(async (row: any) => {
         const classIds = Array.isArray(row.class_ids) ? row.class_ids : [];
@@ -296,7 +354,7 @@ export async function GET(req: Request) {
           }
         }
 
-        return mapGroupRow(row, snapshotEvents);
+        return mapGroupRow(row, snapshotEvents, activityByGroupId.get(row.id) ?? []);
       })
     );
 
@@ -318,7 +376,10 @@ export async function GET(req: Request) {
         })
       : mappedItems;
 
-    return NextResponse.json({ items, supportsExpiration });
+    return NextResponse.json(
+      { items, supportsExpiration },
+      { headers: { "Cache-Control": "private, no-store, max-age=0, must-revalidate" } }
+    );
   } catch (error) {
     return jsonError(errorMessage(error), 500);
   }
@@ -346,6 +407,7 @@ export async function POST(req: Request) {
     const classIds = Array.from(new Set((payload.classIds ?? []).filter(Boolean)));
     const snapshotEvents = Array.isArray(payload.snapshotEvents) ? payload.snapshotEvents : [];
     const setActive = payload.isActive !== false;
+    const actor = getStaffAttribution(user, profile);
 
     const insertPayload: Record<string, unknown> = {
       name: payload.name.trim(),
@@ -360,13 +422,16 @@ export async function POST(req: Request) {
       // inserted. Activation is applied atomically by the RPC below.
       is_active: false,
       created_by_name: (profile as { full_name?: string | null }).full_name ?? null,
+      created_by_uid: actor.uid,
+      created_by_position: actor.position,
+      created_by_icon_url: actor.iconUrl,
       updated_at: nowIso()
     };
 
     let { data, error } = (await supabase
       .from("timetable_groups")
       .insert(insertPayload)
-      .select("id,created_at,updated_at,role_view,target_id,week_start,expires_on,tag_id,name,class_ids,snapshot_events,is_active")
+      .select("id,created_at,updated_at,role_view,target_id,week_start,expires_on,tag_id,name,class_ids,snapshot_events,is_active,created_by_uid,created_by_name,created_by_position,created_by_icon_url")
       .single()) as { data: any | null; error: any };
 
     if (error && isMissingColumnError(error, "expires_on")) {
@@ -374,7 +439,7 @@ export async function POST(req: Request) {
       const fallback = (await supabase
         .from("timetable_groups")
         .insert(insertPayload)
-        .select("id,created_at,updated_at,role_view,target_id,week_start,tag_id,name,class_ids,snapshot_events,is_active")
+        .select("id,created_at,updated_at,role_view,target_id,week_start,tag_id,name,class_ids,snapshot_events,is_active,created_by_uid,created_by_name,created_by_position,created_by_icon_url")
         .single()) as { data: any | null; error: any };
       data = fallback.data;
       error = fallback.error;
@@ -383,10 +448,27 @@ export async function POST(req: Request) {
     if (error) throw error;
     if (!data) throw new Error("시간표 그룹 저장 결과를 찾지 못했습니다.");
 
+    const createdActivity = {
+      group_id: data.id,
+      action: "created",
+      actor_uid: actor.uid,
+      actor_name: actor.name,
+      actor_position: actor.position,
+      actor_icon_url: actor.iconUrl
+    };
+    const { error: createdActivityError } = await supabase
+      .from("timetable_group_activity_history")
+      .insert(createdActivity);
+    if (createdActivityError) {
+      await supabase.from("timetable_groups").delete().eq("id", data.id);
+      throw createdActivityError;
+    }
+
     if (setActive) {
-      const { data: activationState, error: activationError } = await supabase.rpc("set_timetable_group_active", {
+      const { data: activationState, error: activationError } = await supabase.rpc("set_timetable_group_active_with_actor", {
         p_group_id: data.id,
-        p_is_active: true
+        p_is_active: true,
+        ...actorRpcPayload(actor)
       });
       if (activationError) {
         await supabase.from("timetable_groups").delete().eq("id", data.id);
@@ -407,15 +489,22 @@ export async function POST(req: Request) {
           "학생",
           student?.student_name ?? payload.name.trim(),
           payload.tagId ?? null,
-          "schedule_creation"
+          "schedule_creation",
+          actor
         );
       } catch (historyError) {
         console.error("[save-history] schedule creation insert failed", historyError);
       }
     }
 
+    const { data: activity } = await supabase
+      .from("timetable_group_activity_history")
+      .select("id,group_id,created_at,action,actor_uid,actor_name,actor_position,actor_icon_url")
+      .eq("group_id", data.id)
+      .order("created_at", { ascending: false });
+
     return NextResponse.json({
-      item: mapGroupRow(data, Array.isArray(data.snapshot_events) ? data.snapshot_events : [])
+      item: mapGroupRow(data, Array.isArray(data.snapshot_events) ? data.snapshot_events : [], (activity ?? []) as GroupActivityRow[])
     });
   } catch (error) {
     return jsonError(errorMessage(error), 500);
@@ -435,9 +524,11 @@ export async function PATCH(req: Request) {
 
     if (payload.action === "activate") {
       if (typeof payload.isActive !== "boolean") return jsonError("isActive must be boolean", 400);
-      const { data, error } = await supabase.rpc("set_timetable_group_active", {
+      const actor = getStaffAttribution(user, profile);
+      const { data, error } = await supabase.rpc("set_timetable_group_active_with_actor", {
         p_group_id: payload.id,
-        p_is_active: payload.isActive
+        p_is_active: payload.isActive,
+        ...actorRpcPayload(actor)
       });
       if (error) throw error;
       return NextResponse.json({ ok: true, isActive: data === true });
