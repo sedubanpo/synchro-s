@@ -2,10 +2,11 @@
 
 import { TIME_SLOTS } from "@/lib/constants";
 import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
+import { HomeFullTimetableDialog } from "@/components/schedule/HomeFullTimetableDialog";
 import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { getSubjectColorClass } from "@/lib/subjectColors";
 import type { ScheduleEvent } from "@/types/schedule";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type HomeDashboardPersonSummary = {
   id: string;
@@ -110,6 +111,8 @@ export function HomeInstructorFolderDashboard({
 }: Props) {
   const [selectedInstructorId, setSelectedInstructorId] = useState("");
   const [highlightedStudentId, setHighlightedStudentId] = useState("");
+  const [fullTimetableOpen, setFullTimetableOpen] = useState(false);
+  const fullTimetableButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (instructorSummaries.length === 0) {
@@ -217,7 +220,18 @@ export function HomeInstructorFolderDashboard({
               <p className="text-sm font-black text-slate-900">강사 폴더</p>
               <p className="sync-copy mt-0.5 text-[11px] font-semibold text-slate-500">강사를 선택하면 아래 격자에서 하루 수업을 확인할 수 있습니다.</p>
             </div>
-            <span className="shrink-0 pb-2 text-[11px] font-bold text-blue-700">수평으로 밀어 전체 강사 보기</span>
+            <div className="flex shrink-0 items-center gap-2 pb-2">
+              <span className="hidden text-[11px] font-bold text-slate-500 sm:inline">수평으로 밀어 전체 강사 보기</span>
+              <button
+                ref={fullTimetableButtonRef}
+                type="button"
+                onClick={() => setFullTimetableOpen(true)}
+                disabled={loading || instructorSummaries.length === 0}
+                className="sync-pressable sync-focus min-h-10 rounded-lg bg-blue-600 px-3 text-[11px] font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                전체 시간표로 보기
+              </button>
+            </div>
           </div>
           <div role="tablist" aria-label={`${dateISO} 강사 목록`} className="mt-3 flex items-end gap-1.5 overflow-x-auto pb-0.5">
             {loading ? (
@@ -439,6 +453,17 @@ export function HomeInstructorFolderDashboard({
           </aside>
         </div>
       </div>
+      <HomeFullTimetableDialog
+        open={fullTimetableOpen}
+        dateISO={dateISO}
+        weekdayLabel={weekdayLabel}
+        selectedTagLabel={selectedTagLabel}
+        instructorSummaries={instructorSummaries}
+        onClose={() => {
+          setFullTimetableOpen(false);
+          window.requestAnimationFrame(() => fullTimetableButtonRef.current?.focus());
+        }}
+      />
     </section>
   );
 }

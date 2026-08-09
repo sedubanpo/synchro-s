@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { mergeHomeInstructorEvents } from "../lib/homeDashboardGrouping";
+import {
+  createDefaultHomeClassroomAssignments,
+  getHomeClassroomOccupancy,
+  HOME_CLASSROOM_OPTIONS
+} from "../lib/homeFullTimetable";
 import type { ScheduleEvent } from "../types/schedule";
 
 function event(overrides: Partial<ScheduleEvent>): ScheduleEvent {
@@ -40,17 +45,39 @@ const merged = mergeHomeInstructorEvents([
 assert.equal(merged.length, 1, "같은 강사·시간의 개별정규 수업은 과목 표기 차이와 관계없이 한 그룹이어야 합니다.");
 assert.deepEqual(merged[0]?.studentNames, ["류우석", "김도현", "김나린"]);
 
+const legacyIdMerged = mergeHomeInstructorEvents([
+  event({ id: "legacy", instructorId: "legacy-teacher-yoo", studentIds: ["student-1"], studentNames: ["류우석"] }),
+  event({ id: "firebase", instructorId: "firebase-teacher-yoo", instructorName: "유소연T", classDate: "2026-08-01", studentIds: ["student-2"], studentNames: ["김도현"] })
+]);
+assert.equal(legacyIdMerged.length, 1, "이미 한 강사로 확인된 연결 전·후 ID, 별칭, 반복 시작일이 달라도 홈 정규 수업은 한 카드여야 합니다.");
+assert.deepEqual(legacyIdMerged[0]?.studentNames, ["류우석", "김도현"]);
+
 const strict = mergeHomeInstructorEvents([
   event({ id: "one-to-one-a", classTypeCode: "ONE_TO_ONE", classTypeLabel: "1:1", badgeText: "[1:1]" }),
   event({ id: "one-to-one-b", classTypeCode: "ONE_TO_ONE", classTypeLabel: "1:1", badgeText: "[1:1]" })
 ]);
 assert.equal(strict.length, 2, "서로 다른 1:1 수업은 자동 병합하면 안 됩니다.");
 
+const classroomAssignments = createDefaultHomeClassroomAssignments(["teacher-1", "teacher-2", "teacher-3"]);
+assert.deepEqual(classroomAssignments, {
+  "teacher-1": HOME_CLASSROOM_OPTIONS[0],
+  "teacher-2": HOME_CLASSROOM_OPTIONS[1],
+  "teacher-3": HOME_CLASSROOM_OPTIONS[2]
+});
+const changedAssignments = { ...classroomAssignments, "teacher-2": HOME_CLASSROOM_OPTIONS[0] };
+assert.deepEqual(
+  getHomeClassroomOccupancy(["teacher-1", "teacher-2", "teacher-3"], changedAssignments).get(HOME_CLASSROOM_OPTIONS[0]),
+  ["teacher-1", "teacher-2"],
+  "강의실을 바꾸면 같은 방의 강사 배치와 중복 감지가 즉시 다시 계산되어야 합니다."
+);
+
 const root = process.cwd();
 const page = fs.readFileSync(path.join(root, "app/synchro-s/page.tsx"), "utf8");
 const workspace = fs.readFileSync(path.join(root, "components/schedule/ScheduleCreationWorkspace.tsx"), "utf8");
 const history = fs.readFileSync(path.join(root, "lib/server/saveHistory.ts"), "utf8");
 const prospectRoute = fs.readFileSync(path.join(root, "app/api/schedule-creation/prospects/route.ts"), "utf8");
+const dashboard = fs.readFileSync(path.join(root, "components/schedule/HomeInstructorFolderDashboard.tsx"), "utf8");
+const fullTimetable = fs.readFileSync(path.join(root, "components/schedule/HomeFullTimetableDialog.tsx"), "utf8");
 
 assert.match(page, /!scheduleTagSelectionReady \|\| overviewLoading \|\| timetableGroupsLoading/, "초기 홈은 태그 선택이 끝난 뒤 그룹을 표시해야 합니다.");
 assert.match(page, /if \(!viewerRoleResolved \|\| !scheduleTagSelectionReady\) return;/, "태그 확정 전 대용량 그룹 중복 요청을 막아야 합니다.");
@@ -62,5 +89,10 @@ assert.match(workspace, /historySource: "schedule_creation"/, "그룹 저장 성
 assert.match(prospectRoute, /"schedule_creation"/, "신규문의 시간표 생성도 최근 기록에 남아야 합니다.");
 assert.match(history, /\.in\("student_name", studentNames\)/, "최근 20건의 대상 확인에 학생 전체 명단을 다시 훑으면 안 됩니다.");
 assert.doesNotMatch(history, /fetchAllSupabaseRows/, "최근 기록 조회는 전체 명단 페이지 순회를 사용하지 않아야 합니다.");
+assert.match(dashboard, /전체 시간표로 보기/, "강사 폴더에서 전체 시간표 팝업을 열 수 있어야 합니다.");
+assert.match(fullTimetable, /role="dialog"/, "전체 시간표는 대화상자 의미를 제공해야 합니다.");
+assert.match(fullTimetable, /aria-modal="true"/, "전체 시간표는 모달 상태를 보조기기에 알려야 합니다.");
+assert.match(fullTimetable, /event\.key === "Escape"/, "전체 시간표는 Escape 키로 닫혀야 합니다.");
+assert.match(fullTimetable, /강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다/, "강의실 변경 결과를 명확히 안내해야 합니다.");
 
 console.log("Home dashboard improvements verification passed.");

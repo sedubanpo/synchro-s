@@ -40,15 +40,15 @@ export function mergeHomeInstructorEvents(events: ScheduleEvent[]): ScheduleEven
   const grouped = new Map<string, ScheduleEvent>();
 
   for (const event of events) {
-    const instructorKey = event.instructorId || normalizePersonName(event.instructorName);
+    // This function receives events that the Home summary has already resolved
+    // to one instructor. Legacy ids and aliases can both differ, so neither may
+    // split a regular class back into multiple cards here.
     const key = isRegularMultiEvent(event)
       ? [
           "regular-multi",
-          event.classDate,
           event.weekday,
           event.startTime,
-          event.endTime,
-          instructorKey
+          event.endTime
         ].join("::")
       : `single::${event.id}::${event.classDate}::${event.startTime}`;
     const existing = grouped.get(key);
