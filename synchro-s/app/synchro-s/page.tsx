@@ -332,6 +332,11 @@ type ScheduleReviewItem = {
   snapshotEvents?: ScheduleEvent[];
   snapshotFingerprint?: string | null;
   snapshotEventCount?: number | null;
+  snapshotTagId?: string | null;
+  snapshotTagName?: string | null;
+  snapshotGroupId?: string | null;
+  snapshotGroupName?: string | null;
+  snapshotGroupWeekStart?: string | null;
 };
 
 type ScheduleReviewsResponse = {
@@ -2678,18 +2683,10 @@ export default function SynchroSPage() {
 
     return byStudentId;
   }, [reviewStudentAlias, reviewStudents, selectedScheduleTagId, timetableGroups, todayISO, weekStart]);
-  const reviewHasGroupByStudentId = useMemo(() => {
-    const byStudentId = new Set<string>();
-
-    for (const targetId of studentGroupTargetIdsForWeek) {
-      const canonicalStudent = reviewStudentAlias.idToCanonical.get(targetId);
-      if (canonicalStudent) {
-        byStudentId.add(canonicalStudent.id);
-      }
-    }
-
-    return byStudentId;
-  }, [reviewStudentAlias, studentGroupTargetIdsForWeek]);
+  const reviewEligibleStudents = useMemo(
+    () => reviewStudents.filter((student) => reviewActiveGroupByStudentId.has(student.id)),
+    [reviewActiveGroupByStudentId, reviewStudents]
+  );
   const reviewEventsByStudentId = useMemo(() => {
     const map = new Map<string, ScheduleEvent[]>();
 
@@ -2721,12 +2718,7 @@ export default function SynchroSPage() {
           ? mergeScheduleReviewEvents(activeGroup.snapshotEvents ?? [], liveLinkedEvents)
           : activeGroup?.classIds.length
             ? liveLinkedEvents
-            : reviewHasGroupByStudentId.has(student.id)
-              ? []
-            : reviewEvents.filter((event) =>
-                event.studentIds.some((studentId) => reviewStudentAlias.idToCanonical.get(studentId)?.id === student.id) ||
-                event.studentNames.some((studentName) => reviewStudentAlias.nameToCanonical.get(normalizePersonName(studentName))?.id === student.id)
-              );
+            : [];
 
       const studentEvents: ScheduleEvent[] = [];
 
@@ -2769,7 +2761,6 @@ export default function SynchroSPage() {
     activeStudentNameSet,
     reviewActiveGroupByStudentId,
     reviewEvents,
-    reviewHasGroupByStudentId,
     reviewStudentAlias,
     reviewStudents,
     targetedReviewEventsByStudentId
@@ -2813,7 +2804,7 @@ export default function SynchroSPage() {
     return Array.from(new Set(hints)).slice(0, 3);
   }, []);
   const reviewRows = useMemo(() => {
-    return reviewStudents
+    return reviewEligibleStudents
       .map((student) => {
         const eventsForStudent = reviewEventsByStudentId.get(student.id) ?? [];
         const review = reviewByStudentId.get(student.id) ?? null;
@@ -2857,19 +2848,24 @@ export default function SynchroSPage() {
         }
         return b.events.length - a.events.length || a.student.name.localeCompare(b.student.name, "ko");
       });
-  }, [getReviewHints, reviewByStudentId, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, reviewStudents, staleReviewStudentIds]);
+  }, [getReviewHints, reviewByStudentId, reviewEligibleStudents, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, staleReviewStudentIds]);
   const reviewStats = useMemo(() => {
-    const effectiveReviews = [...reviewByStudentId.entries()].filter(([studentId]) => !staleReviewStudentIds.has(studentId));
+    const eligibleStudentIds = new Set(reviewEligibleStudents.map((student) => student.id));
+    const effectiveReviews = [...reviewByStudentId.entries()].filter(
+      ([studentId]) => eligibleStudentIds.has(studentId) && !staleReviewStudentIds.has(studentId)
+    );
     const reviewedIds = new Set(effectiveReviews.map(([studentId]) => studentId));
     return {
-      total: reviewStudents.length,
+      total: reviewEligibleStudents.length,
       normal: effectiveReviews.filter(([, item]) => item.status === "normal").length,
       needsCheck: effectiveReviews.filter(([, item]) => item.status === "needs_check").length,
       issue: effectiveReviews.filter(([, item]) => item.status === "issue").length,
-      unreviewed: reviewStudents.filter((student) => !reviewedIds.has(student.id)).length,
-      memo: [...reviewByStudentId.values()].filter((item) => item.memo.trim().length > 0).length
+      unreviewed: reviewEligibleStudents.filter((student) => !reviewedIds.has(student.id)).length,
+      memo: [...reviewByStudentId.entries()].filter(
+        ([studentId, item]) => eligibleStudentIds.has(studentId) && item.memo.trim().length > 0
+      ).length
     };
-  }, [reviewByStudentId, reviewStudents, staleReviewStudentIds]);
+  }, [reviewByStudentId, reviewEligibleStudents, staleReviewStudentIds]);
   const selectedReviewStudent = useMemo(
     () => reviewRows.find((row) => row.student.id === selectedReviewStudentId)?.student ?? reviewRows[0]?.student ?? null,
     [reviewRows, selectedReviewStudentId]
@@ -3001,8 +2997,8 @@ export default function SynchroSPage() {
 
       if (next === "review") {
         setRoleView("student");
-        if (!selectedReviewStudentId && reviewStudents.length > 0) {
-          setSelectedReviewStudentId(reviewStudents[0]!.id);
+        if (!selectedReviewStudentId && reviewEligibleStudents.length > 0) {
+          setSelectedReviewStudentId(reviewEligibleStudents[0]!.id);
         }
         return;
       }
@@ -3018,7 +3014,7 @@ export default function SynchroSPage() {
 
       setRoleView(next);
     },
-    [overviewEntity, overviewVisibleInstructors, reviewStudents, selectedInstructorId, selectedReviewStudentId, selectedStudentId, students]
+    [overviewEntity, overviewVisibleInstructors, reviewEligibleStudents, selectedInstructorId, selectedReviewStudentId, selectedStudentId, students]
   );
 
   const handleToggleInstructorDayOff = useCallback(
@@ -3467,10 +3463,16 @@ export default function SynchroSPage() {
       return;
     }
 
+    const selectedReviewGroup = reviewActiveGroupByStudentId.get(selectedReviewStudentId);
+    if (!selectedReviewGroup) {
+      setTargetedReviewEventsByStudentId((current) => ({ ...current, [selectedReviewStudentId]: [] }));
+      return;
+    }
+
     const controller = new AbortController();
     const selectedStudent = reviewStudents.find((student) => student.id === selectedReviewStudentId);
     const selectedName = normalizePersonName(selectedStudent?.name ?? "");
-    const savedGroupTargetId = reviewActiveGroupByStudentId.get(selectedReviewStudentId)?.targetId;
+    const savedGroupTargetId = selectedReviewGroup.targetId;
     const candidateStudentIds = Array.from(
       new Set([
         selectedReviewStudentId,
@@ -3487,6 +3489,7 @@ export default function SynchroSPage() {
         const groupQuery = new URLSearchParams({
           roleView: "student",
           targetId: studentId,
+          tagId: selectedScheduleTagId ?? "",
           includeSnapshots: "1"
         });
         const [weekResponse, groupResponse] = await Promise.all([
@@ -3524,7 +3527,7 @@ export default function SynchroSPage() {
           ? snapshotEvents
           : selectedGroup
             ? weekData.events.filter((event) => selectedGroup.classIds.includes(event.id))
-            : weekData.events;
+            : [];
         return { ...weekData, events: selectedEvents };
       })
     )
@@ -3566,6 +3569,11 @@ export default function SynchroSPage() {
       const previousHistory = scheduleReviewHistory;
       const studentName = reviewStudents.find((student) => student.id === studentId)?.name ?? "";
       const existingReview = reviewByStudentId.get(studentId) ?? null;
+      const reviewGroup = reviewActiveGroupByStudentId.get(studentId) ?? null;
+      if (!reviewGroup) {
+        setError(`#${selectedScheduleTagLabel}에 저장된 시간표가 없어 판정을 저장할 수 없습니다.`);
+        return;
+      }
       const shouldPreserveReviewSnapshot = action === "memo" && Boolean(existingReview?.snapshotFingerprint);
       const snapshot = createScheduleReviewSnapshot(
         shouldPreserveReviewSnapshot
@@ -3582,6 +3590,11 @@ export default function SynchroSPage() {
         status,
         memo: memo.trim(),
         reviewedAt: new Date().toISOString(),
+        snapshotTagId: shouldPreserveReviewSnapshot ? existingReview?.snapshotTagId ?? selectedScheduleTagId : selectedScheduleTagId,
+        snapshotTagName: shouldPreserveReviewSnapshot ? existingReview?.snapshotTagName ?? selectedScheduleTagLabel : selectedScheduleTagLabel,
+        snapshotGroupId: shouldPreserveReviewSnapshot ? existingReview?.snapshotGroupId ?? reviewGroup.id : reviewGroup.id,
+        snapshotGroupName: shouldPreserveReviewSnapshot ? existingReview?.snapshotGroupName ?? reviewGroup.name : reviewGroup.name,
+        snapshotGroupWeekStart: shouldPreserveReviewSnapshot ? existingReview?.snapshotGroupWeekStart ?? reviewGroup.weekStart : reviewGroup.weekStart,
         ...(action === "status" || shouldPreserveReviewSnapshot
           ? snapshot
           : {
@@ -3609,6 +3622,8 @@ export default function SynchroSPage() {
             status,
             memo,
             action,
+            snapshotGroupId: shouldPreserveReviewSnapshot ? existingReview?.snapshotGroupId ?? reviewGroup.id : reviewGroup.id,
+            snapshotTagName: shouldPreserveReviewSnapshot ? existingReview?.snapshotTagName ?? selectedScheduleTagLabel : selectedScheduleTagLabel,
             ...(action === "status" || shouldPreserveReviewSnapshot ? { snapshotEvents: snapshot.snapshotEvents } : {})
           })
         });
@@ -3645,12 +3660,14 @@ export default function SynchroSPage() {
       moveToLogin,
       reviewEventsByStudentId,
       reviewByStudentId,
+      reviewActiveGroupByStudentId,
       reviewSavingId,
       reviewStudents,
       scheduleReviewHistory,
       scheduleReviews,
       selectedReviewStudentId,
       selectedScheduleTagId,
+      selectedScheduleTagLabel,
       weekStart
     ]
   );
@@ -7033,14 +7050,14 @@ export default function SynchroSPage() {
     if (mainTab !== "review") {
       return;
     }
-    if (!selectedReviewStudentId && reviewStudents.length > 0) {
-      setSelectedReviewStudentId(reviewStudents[0]!.id);
+    if (!selectedReviewStudentId && reviewEligibleStudents.length > 0) {
+      setSelectedReviewStudentId(reviewEligibleStudents[0]!.id);
       return;
     }
-    if (selectedReviewStudentId && !reviewStudents.some((student) => student.id === selectedReviewStudentId)) {
-      setSelectedReviewStudentId(reviewStudents[0]?.id ?? "");
+    if (selectedReviewStudentId && !reviewEligibleStudents.some((student) => student.id === selectedReviewStudentId)) {
+      setSelectedReviewStudentId(reviewEligibleStudents[0]?.id ?? "");
     }
-  }, [mainTab, reviewStudents, selectedReviewStudentId]);
+  }, [mainTab, reviewEligibleStudents, selectedReviewStudentId]);
 
   useEffect(() => {
     setReviewMemoDraft(selectedReview?.memo ?? "");
@@ -8948,6 +8965,7 @@ export default function SynchroSPage() {
           ) : null}
           <section
             data-review-loaded-group-count={timetableGroups.length}
+            data-review-eligible-student-count={reviewEligibleStudents.length}
             data-review-selected-group-id={selectedReviewStudentId ? reviewActiveGroupByStudentId.get(selectedReviewStudentId)?.id ?? "" : ""}
             data-review-selected-group-event-count={
               selectedReviewStudentId
@@ -9371,6 +9389,10 @@ export default function SynchroSPage() {
                                   <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">
                                     {historyItem.reviewedByName || "담당자"}
                                     {typeof historyItem.snapshotEventCount === "number" ? ` · ${historyItem.snapshotEventCount}개 수업` : ""}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-[10px] font-bold text-slate-500">
+                                    #{historyItem.snapshotTagName || selectedScheduleTagLabel}
+                                    {historyItem.snapshotGroupName ? ` · ${historyItem.snapshotGroupName}` : ""}
                                   </p>
                                 </div>
                                 <time className="shrink-0 tabular-nums text-[11px] font-black text-slate-500" dateTime={historyItem.reviewedAt}>

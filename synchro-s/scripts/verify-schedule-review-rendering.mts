@@ -80,7 +80,7 @@ assert.match(
 );
 assert.match(
   reviewPage,
-  /savedGroupTargetId = reviewActiveGroupByStudentId\.get\(selectedReviewStudentId\)\?\.targetId/,
+  /selectedReviewGroup = reviewActiveGroupByStudentId\.get\(selectedReviewStudentId\)[\s\S]*?savedGroupTargetId = selectedReviewGroup\.targetId/,
   "the saved timetable group's legacy target ID must be queried with the student-scoped weekly API"
 );
 assert.match(
@@ -102,6 +102,21 @@ assert.match(
   reviewPage,
   /sort\(\(a, b\) => b\.events\.length - a\.events\.length\)\[0\]/,
   "duplicate roster IDs must keep the complete student timetable response"
+);
+assert.match(
+  reviewPage,
+  /reviewStudents\.filter\(\(student\) => reviewActiveGroupByStudentId\.has\(student\.id\)\)/,
+  "review roster must contain only students with an effective group in the selected tag"
+);
+assert.match(
+  reviewPage,
+  /selectedGroup\s*\?\s*weekData\.events\.filter[\s\S]*?: \[\]/,
+  "a missing selected-tag group must never fall back to another tag's weekly events"
+);
+assert.match(
+  reviewPage,
+  /tagId: selectedScheduleTagId \?\? ""/,
+  "student-scoped group requests must be filtered by the selected review tag"
 );
 
 console.log("schedule review multi-hour rendering verification passed");

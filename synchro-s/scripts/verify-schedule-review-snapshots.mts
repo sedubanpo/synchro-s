@@ -72,9 +72,17 @@ const [routeSource, pageSource] = await Promise.all([
 assert.ok(routeSource.includes("historyItems"), "review API must return append-only status history");
 assert.ok(!routeSource.includes('.from("special_notes").delete()'), "review saves must not delete earlier status records");
 assert.ok(routeSource.includes("snapshotFingerprint"), "review API must persist a server-derived snapshot fingerprint");
+assert.ok(routeSource.includes('from("timetable_groups")'), "review API must verify the saved group before accepting a status snapshot");
+assert.ok(routeSource.includes("group.target_id !== studentId"), "review API must reject another student's saved group");
+assert.ok(routeSource.includes("선택한 시간표 그룹과 검토 태그가 일치하지 않습니다"), "review API must reject cross-tag snapshot writes");
+assert.ok(routeSource.includes("snapshotTagName"), "review snapshots must preserve the tag label at judgment time");
+assert.ok(routeSource.includes("snapshotGroupName"), "review snapshots must preserve the saved timetable group identity");
+assert.ok(routeSource.includes("snapshotEvents: row.parsed.snapshotEvents"), "status history must return its immutable timetable snapshot");
 assert.ok(pageSource.includes("mergeScheduleReviewEvents(activeGroup.snapshotEvents ?? [], liveLinkedEvents)"), "review UI must supplement partial group snapshots");
 assert.ok(pageSource.includes("selectedReviewIsStale"), "review UI must detect a changed timetable");
 assert.ok(pageSource.includes("shouldPreserveReviewSnapshot"), "memo-only saves must not silently revalidate a changed timetable");
 assert.ok(pageSource.includes("판정 이력"), "review UI must expose status history beside the selected student");
+assert.ok(pageSource.includes("historyItem.snapshotTagName"), "review history must identify the snapshotted tag");
+assert.ok(pageSource.includes("historyItem.snapshotGroupName"), "review history must identify the snapshotted timetable group");
 
 console.log("schedule review snapshot verification passed");

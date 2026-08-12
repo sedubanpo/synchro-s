@@ -17,6 +17,8 @@ type ReviewPayload = {
   memo?: string;
   action?: "status" | "memo";
   snapshotEvents?: ScheduleEvent[];
+  snapshotGroupId?: string | null;
+  snapshotTagName?: string | null;
 };
 
 type ReviewNotePayload = {
@@ -31,6 +33,11 @@ type ReviewNotePayload = {
   snapshotEvents: ScheduleEvent[];
   snapshotFingerprint: string | null;
   snapshotEventCount: number | null;
+  snapshotTagId: string | null;
+  snapshotTagName: string;
+  snapshotGroupId: string | null;
+  snapshotGroupName: string;
+  snapshotGroupWeekStart: string | null;
 };
 
 function isReviewStatus(value: unknown): value is ReviewStatus {
@@ -58,7 +65,14 @@ function parseReviewNote(content: string): ReviewNotePayload | null {
       action: parsed.action === "memo" ? "memo" : "status",
       snapshotEvents: Array.isArray(parsed.snapshotEvents) ? parsed.snapshotEvents : [],
       snapshotFingerprint: typeof parsed.snapshotFingerprint === "string" ? parsed.snapshotFingerprint : null,
-      snapshotEventCount: typeof parsed.snapshotEventCount === "number" ? parsed.snapshotEventCount : null
+      snapshotEventCount: typeof parsed.snapshotEventCount === "number" ? parsed.snapshotEventCount : null,
+      snapshotTagId: typeof parsed.snapshotTagId === "string" && parsed.snapshotTagId.trim() ? parsed.snapshotTagId.trim() : parsed.tagId ?? null,
+      snapshotTagName: typeof parsed.snapshotTagName === "string" ? parsed.snapshotTagName : "",
+      snapshotGroupId: typeof parsed.snapshotGroupId === "string" && parsed.snapshotGroupId.trim() ? parsed.snapshotGroupId.trim() : null,
+      snapshotGroupName: typeof parsed.snapshotGroupName === "string" ? parsed.snapshotGroupName : "",
+      snapshotGroupWeekStart: typeof parsed.snapshotGroupWeekStart === "string" && parsed.snapshotGroupWeekStart.trim()
+        ? parsed.snapshotGroupWeekStart.trim()
+        : null
     };
   } catch {
     return null;
@@ -200,7 +214,12 @@ export async function GET(req: Request) {
         reviewedAt: row.parsed.reviewedAt || row.created_at,
         snapshotEvents: row.parsed.snapshotEvents,
         snapshotFingerprint: row.parsed.snapshotFingerprint,
-        snapshotEventCount: row.parsed.snapshotEventCount
+        snapshotEventCount: row.parsed.snapshotEventCount,
+        snapshotTagId: row.parsed.snapshotTagId,
+        snapshotTagName: row.parsed.snapshotTagName,
+        snapshotGroupId: row.parsed.snapshotGroupId,
+        snapshotGroupName: row.parsed.snapshotGroupName,
+        snapshotGroupWeekStart: row.parsed.snapshotGroupWeekStart
       })),
       historyItems: historyRows.map((row) => ({
         id: row.id,
@@ -213,8 +232,14 @@ export async function GET(req: Request) {
         memo: row.parsed.memo,
         reviewedByName: row.parsed.reviewedByName,
         reviewedAt: row.parsed.reviewedAt || row.createdAt,
+        snapshotEvents: row.parsed.snapshotEvents,
         snapshotFingerprint: row.parsed.snapshotFingerprint,
-        snapshotEventCount: row.parsed.snapshotEventCount
+        snapshotEventCount: row.parsed.snapshotEventCount,
+        snapshotTagId: row.parsed.snapshotTagId,
+        snapshotTagName: row.parsed.snapshotTagName,
+        snapshotGroupId: row.parsed.snapshotGroupId,
+        snapshotGroupName: row.parsed.snapshotGroupName,
+        snapshotGroupWeekStart: row.parsed.snapshotGroupWeekStart
       }))
     }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
   } catch (error) {
@@ -265,7 +290,46 @@ export async function PATCH(req: Request) {
 
     const reviewedAt = new Date().toISOString();
     const reviewedByName = (profile as { full_name?: string | null }).full_name ?? "";
+    const action = payload.action === "memo" ? "memo" : "status";
     const hasSnapshot = Array.isArray(payload.snapshotEvents);
+    const requestedSnapshotGroupId = payload.snapshotGroupId?.trim() || null;
+    if (action === "status" && (!hasSnapshot || !requestedSnapshotGroupId)) {
+      return jsonError("판정 저장에는 선택 태그의 시간표 스냅샷과 저장 그룹이 필요합니다.", 400);
+    }
+
+    let snapshotTagId = tagId;
+    let snapshotTagName = payload.snapshotTagName?.trim() || (tagId ? "" : "미분류");
+    let snapshotGroupId = requestedSnapshotGroupId;
+    let snapshotGroupName = "";
+    let snapshotGroupWeekStart: string | null = null;
+    if (requestedSnapshotGroupId) {
+      const groupResult = await dataSupabase
+        .from("timetable_groups")
+        .select("id,role_view,target_id,tag_id,name,week_start")
+        .eq("id", requestedSnapshotGroupId)
+        .maybeSingle();
+      if (groupResult.error) throw groupResult.error;
+      const group = groupResult.data as {
+        id: string;
+        role_view: string;
+        target_id: string;
+        tag_id: string | null;
+        name: string;
+        week_start: string;
+      } | null;
+      if (!group || group.role_view !== "student" || group.target_id !== studentId || (group.tag_id ?? null) !== tagId) {
+        return jsonError("선택한 시간표 그룹과 검토 태그가 일치하지 않습니다. 새로고침 후 다시 시도해 주세요.", 409);
+      }
+      snapshotTagId = group.tag_id ?? null;
+      snapshotGroupId = group.id;
+      snapshotGroupName = group.name;
+      snapshotGroupWeekStart = group.week_start;
+    }
+    if (snapshotTagId) {
+      const tagResult = await dataSupabase.from("schedule_tags").select("name").eq("id", snapshotTagId).maybeSingle();
+      if (tagResult.error) throw tagResult.error;
+      snapshotTagName = ((tagResult.data as { name?: string } | null)?.name ?? snapshotTagName).trim();
+    }
     const snapshot = createScheduleReviewSnapshot(hasSnapshot ? payload.snapshotEvents!.slice(0, 500) : []);
     const content = buildReviewNote({
       weekStart,
@@ -275,10 +339,15 @@ export async function PATCH(req: Request) {
       memo,
       reviewedByName,
       reviewedAt,
-      action: payload.action === "memo" ? "memo" : "status",
+      action,
       snapshotEvents: hasSnapshot ? snapshot.snapshotEvents : [],
       snapshotFingerprint: hasSnapshot ? snapshot.snapshotFingerprint : null,
-      snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null
+      snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null,
+      snapshotTagId,
+      snapshotTagName,
+      snapshotGroupId,
+      snapshotGroupName,
+      snapshotGroupWeekStart
     });
 
     const { data, error } = await dataSupabase
@@ -311,9 +380,14 @@ export async function PATCH(req: Request) {
         reviewedAt,
         snapshotEvents: hasSnapshot ? snapshot.snapshotEvents : [],
         snapshotFingerprint: hasSnapshot ? snapshot.snapshotFingerprint : null,
-        snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null
+        snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null,
+        snapshotTagId,
+        snapshotTagName,
+        snapshotGroupId,
+        snapshotGroupName,
+        snapshotGroupWeekStart
       },
-      historyItem: payload.action === "memo" ? null : {
+      historyItem: action === "memo" ? null : {
         id: data.id,
         studentId,
         studentName,
@@ -324,8 +398,14 @@ export async function PATCH(req: Request) {
         memo,
         reviewedByName,
         reviewedAt,
+        snapshotEvents: hasSnapshot ? snapshot.snapshotEvents : [],
         snapshotFingerprint: hasSnapshot ? snapshot.snapshotFingerprint : null,
-        snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null
+        snapshotEventCount: hasSnapshot ? snapshot.snapshotEventCount : null,
+        snapshotTagId,
+        snapshotTagName,
+        snapshotGroupId,
+        snapshotGroupName,
+        snapshotGroupWeekStart
       }
     });
   } catch (error) {
