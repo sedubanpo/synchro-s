@@ -23,6 +23,7 @@
     "verify:timetable-expiration-handoff": "node --import tsx scripts/verify-timetable-expiration-handoff.mts",
     "verify:home-dashboard": "node scripts/verify-home-dashboard-ux.mjs",
     "verify:home-dashboard-improvements": "node --import tsx scripts/verify-home-dashboard-improvements.mts",
+    "verify:full-timetable-classrooms": "node --import tsx scripts/verify-full-timetable-classroom-settings.mts",
     "verify:multi-hour-subject-edit": "node --import tsx scripts/verify-multi-hour-subject-edit.mts",
     "verify:eight-am-group-memos": "node --import tsx scripts/verify-eight-am-and-group-memos.mts",
     "verify:dense-timetable-layout": "node --import tsx scripts/verify-dense-timetable-layout.mts",

@@ -5,6 +5,7 @@ import {
   createDefaultHomeClassroomAssignments,
   getHomeClassroomOccupancy,
   HOME_CLASSROOM_OPTIONS,
+  sanitizeHomeClassroomAssignments,
   type HomeClassroomAssignment
 } from "@/lib/homeFullTimetable";
 import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
@@ -27,6 +28,9 @@ type Props = {
 
 const CLASSROOM_STORAGE_KEY = "synchro-s:home-full-timetable:fixed-classrooms:v1";
 
+type ClassroomSaveState = "idle" | "loading" | "saving" | "saved" | "error";
+type ClassroomSettingsScope = "fixed" | "day";
+
 function hourRange(startTime: string, endTime?: string): string {
   const start = Number(startTime.slice(0, 2));
   const end = endTime ? Number(endTime.slice(0, 2)) : start + 1;
@@ -46,13 +50,24 @@ function isOneToOne(event: ScheduleEvent): boolean {
   return classTypeLabel(event) === "1:1";
 }
 
-function validSavedAssignments(value: unknown): HomeClassroomAssignment {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value).filter(
-      ([id, classroom]) => Boolean(id) && typeof classroom === "string" && HOME_CLASSROOM_OPTIONS.includes(classroom as (typeof HOME_CLASSROOM_OPTIONS)[number])
-    )
-  );
+function subjectTone(subjectName: string): { card: string; text: string; badge: string } {
+  const value = subjectName.replace(/\s+/g, "").toLowerCase();
+  if (value.includes("국어") || value.includes("언매") || value.includes("화작")) {
+    return { card: "border-rose-200 bg-rose-50", text: "text-rose-700", badge: "bg-rose-100 text-rose-800" };
+  }
+  if (value.includes("영어")) {
+    return { card: "border-violet-200 bg-violet-50", text: "text-violet-700", badge: "bg-violet-100 text-violet-800" };
+  }
+  if (value.includes("수학") || value.includes("수1") || value.includes("수2") || value.includes("미적") || value.includes("확통") || value.includes("기하")) {
+    return { card: "border-blue-200 bg-blue-50", text: "text-blue-700", badge: "bg-blue-100 text-blue-800" };
+  }
+  if (value.includes("물리") || value.includes("화학") || value.includes("생명") || value.includes("지구") || value.includes("과학")) {
+    return { card: "border-emerald-200 bg-emerald-50", text: "text-emerald-700", badge: "bg-emerald-100 text-emerald-800" };
+  }
+  if (value.includes("사회") || value.includes("사탐") || value.includes("사문") || value.includes("세지") || value.includes("한국지리") || value.includes("윤리")) {
+    return { card: "border-amber-200 bg-amber-50", text: "text-amber-800", badge: "bg-amber-100 text-amber-900" };
+  }
+  return { card: "border-slate-200 bg-slate-50", text: "text-slate-700", badge: "bg-slate-200 text-slate-800" };
 }
 
 export function HomeFullTimetableDialog({
@@ -65,12 +80,17 @@ export function HomeFullTimetableDialog({
   onClose
 }: Props) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const [assignments, setAssignments] = useState<HomeClassroomAssignment>({});
+  const [fixedAssignments, setFixedAssignments] = useState<HomeClassroomAssignment>({});
+  const [dayOverrides, setDayOverrides] = useState<HomeClassroomAssignment>({});
   const [assignmentsReady, setAssignmentsReady] = useState(false);
+  const [saveState, setSaveState] = useState<ClassroomSaveState>("idle");
+  const [saveMessage, setSaveMessage] = useState("");
   const [highlightedStudent, setHighlightedStudent] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsScope, setSettingsScope] = useState<ClassroomSettingsScope>("fixed");
   const [selectedDateISO, setSelectedDateISO] = useState(dateISO);
   const instructorIds = useMemo(() => instructorSummaries.map((item) => item.id), [instructorSummaries]);
+  const defaultSelectedDateISO = weekDateOptions.find((item) => item.weekdayLabel === weekdayLabel)?.dateISO ?? dateISO;
   const selectedDate = useMemo(
     () => weekDateOptions.find((item) => item.dateISO === selectedDateISO) ?? weekDateOptions.find((item) => item.weekdayLabel === weekdayLabel) ?? weekDateOptions[0],
     [selectedDateISO, weekDateOptions, weekdayLabel]
@@ -81,30 +101,73 @@ export function HomeFullTimetableDialog({
     if (!open) return;
     setHighlightedStudent(null);
     setSettingsOpen(false);
-    setSelectedDateISO(weekDateOptions.find((item) => item.weekdayLabel === weekdayLabel)?.dateISO ?? dateISO);
-  }, [dateISO, open, weekDateOptions, weekdayLabel]);
+    setSettingsScope("fixed");
+    setSelectedDateISO(defaultSelectedDateISO);
+  }, [defaultSelectedDateISO, open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !selectedDateISO) return;
+    const controller = new AbortController();
     const defaults = createDefaultHomeClassroomAssignments(instructorIds);
-    let saved: HomeClassroomAssignment = {};
-    try {
-      saved = validSavedAssignments(JSON.parse(window.localStorage.getItem(CLASSROOM_STORAGE_KEY) ?? "{}"));
-    } catch {
-      saved = {};
-    }
-    setAssignments(Object.fromEntries(instructorIds.map((id) => [id, saved[id] ?? defaults[id]!])));
-    setAssignmentsReady(true);
-  }, [instructorIds, open]);
 
-  useEffect(() => {
-    if (!assignmentsReady) return;
-    try {
-      window.localStorage.setItem(CLASSROOM_STORAGE_KEY, JSON.stringify(assignments));
-    } catch {
-      // 브라우저 저장소를 사용할 수 없어도 현재 세션의 배정은 유지합니다.
+    async function loadAssignments() {
+      setAssignmentsReady(false);
+      setDayOverrides({});
+      setSaveState("loading");
+      setSaveMessage("서버 배정을 불러오는 중입니다.");
+      try {
+        const response = await fetch(`/api/settings/classrooms?dateISO=${encodeURIComponent(selectedDateISO)}`, {
+          signal: controller.signal,
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error("강의실 배정을 불러오지 못했습니다.");
+        const payload = (await response.json()) as { fixedAssignments?: unknown; dayOverrides?: unknown };
+        const serverFixed = sanitizeHomeClassroomAssignments(payload.fixedAssignments);
+        const loadedDayOverrides = sanitizeHomeClassroomAssignments(payload.dayOverrides);
+        let legacyAssignments: HomeClassroomAssignment = {};
+        try {
+          legacyAssignments = sanitizeHomeClassroomAssignments(JSON.parse(window.localStorage.getItem(CLASSROOM_STORAGE_KEY) ?? "{}"));
+        } catch {
+          legacyAssignments = {};
+        }
+        const missingAssignments = Object.fromEntries(
+          instructorIds
+            .filter((id) => !serverFixed[id])
+            .map((id) => [id, legacyAssignments[id] ?? defaults[id]!])
+        );
+        const mergedFixed = { ...missingAssignments, ...serverFixed };
+        if (controller.signal.aborted) return;
+        setFixedAssignments(mergedFixed);
+        setDayOverrides(loadedDayOverrides);
+        setAssignmentsReady(true);
+
+        if (Object.keys(missingAssignments).length > 0) {
+          setSaveState("saving");
+          setSaveMessage(Object.keys(serverFixed).length === 0 ? "기존 브라우저 배정을 서버로 옮기는 중입니다." : "새 강사의 기본 강의실을 서버에 저장하는 중입니다.");
+          const seedResponse = await fetch("/api/settings/classrooms", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scope: "fixed", assignments: missingAssignments }),
+            signal: controller.signal
+          });
+          if (!seedResponse.ok) throw new Error("초기 강의실 배정을 서버에 저장하지 못했습니다.");
+        }
+        if (!controller.signal.aborted) {
+          setSaveState("saved");
+          setSaveMessage("서버 저장됨 · 다른 PC에도 동일하게 표시됩니다.");
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setFixedAssignments((current) => Object.keys(current).length > 0 ? current : defaults);
+        setAssignmentsReady(true);
+        setSaveState("error");
+        setSaveMessage(error instanceof Error ? error.message : "강의실 배정 처리 중 오류가 발생했습니다.");
+      }
     }
-  }, [assignments, assignmentsReady]);
+
+    void loadAssignments();
+    return () => controller.abort();
+  }, [instructorIds, open, selectedDateISO]);
 
   useEffect(() => {
     if (!open) return;
@@ -155,6 +218,121 @@ export function HomeFullTimetableDialog({
     [instructorSummaries, selectedDate?.dateISO, selectedWeekday]
   );
   const dayInstructorIds = useMemo(() => dayInstructorSummaries.map((item) => item.id), [dayInstructorSummaries]);
+  const assignments = useMemo(
+    () => ({ ...fixedAssignments, ...dayOverrides }),
+    [dayOverrides, fixedAssignments]
+  );
+  const settingsInstructors = settingsScope === "fixed" ? instructorSummaries : dayInstructorSummaries;
+
+  async function persistClassroomChange(scope: ClassroomSettingsScope, instructorId: string, classroom: string) {
+    setSaveState("saving");
+    setSaveMessage(scope === "fixed" ? "고정 강의실을 서버에 저장하는 중입니다." : `${selectedDateISO} 하루 배정을 저장하는 중입니다.`);
+    const response = await fetch("/api/settings/classrooms", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope, dateISO: scope === "day" ? selectedDateISO : undefined, instructorId, classroom })
+    });
+    if (!response.ok) throw new Error("강의실 배정을 서버에 저장하지 못했습니다.");
+    setSaveState("saved");
+    setSaveMessage(scope === "fixed" ? "고정 강의실 서버 저장 완료 · 다른 PC에도 적용됩니다." : `${selectedDateISO} 하루 배정 서버 저장 완료`);
+  }
+
+  async function updateFixedAssignment(instructorId: string, classroom: string) {
+    const previous = fixedAssignments[instructorId];
+    setFixedAssignments((current) => ({ ...current, [instructorId]: classroom }));
+    try {
+      await persistClassroomChange("fixed", instructorId, classroom);
+    } catch (error) {
+      setFixedAssignments((current) => previous ? { ...current, [instructorId]: previous } : current);
+      setSaveState("error");
+      setSaveMessage(error instanceof Error ? error.message : "고정 강의실 저장에 실패했습니다.");
+    }
+  }
+
+  async function updateDayOverride(instructorId: string, classroom: string) {
+    const previous = dayOverrides[instructorId];
+    if (!classroom) {
+      setDayOverrides((current) => {
+        const next = { ...current };
+        delete next[instructorId];
+        return next;
+      });
+      setSaveState("saving");
+      setSaveMessage(`${selectedDateISO} 임시 배정을 해제하는 중입니다.`);
+      try {
+        const response = await fetch("/api/settings/classrooms", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scope: "day", dateISO: selectedDateISO, instructorId })
+        });
+        if (!response.ok) throw new Error("하루 배정 해제에 실패했습니다.");
+        setSaveState("saved");
+        setSaveMessage(`${selectedDateISO}에는 고정 강의실을 사용합니다.`);
+      } catch (error) {
+        if (previous) setDayOverrides((current) => ({ ...current, [instructorId]: previous }));
+        setSaveState("error");
+        setSaveMessage(error instanceof Error ? error.message : "하루 배정 해제에 실패했습니다.");
+      }
+      return;
+    }
+
+    setDayOverrides((current) => ({ ...current, [instructorId]: classroom }));
+    try {
+      await persistClassroomChange("day", instructorId, classroom);
+    } catch (error) {
+      setDayOverrides((current) => {
+        const next = { ...current };
+        if (previous) next[instructorId] = previous;
+        else delete next[instructorId];
+        return next;
+      });
+      setSaveState("error");
+      setSaveMessage(error instanceof Error ? error.message : "하루 배정 저장에 실패했습니다.");
+    }
+  }
+
+  async function autoAssignFixedClassrooms() {
+    const previous = fixedAssignments;
+    const next = createDefaultHomeClassroomAssignments(instructorIds);
+    setFixedAssignments(next);
+    setSaveState("saving");
+    setSaveMessage("자동 배정 결과를 서버에 저장하는 중입니다.");
+    try {
+      const response = await fetch("/api/settings/classrooms", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "fixed", assignments: next })
+      });
+      if (!response.ok) throw new Error("자동 배정 저장에 실패했습니다.");
+      setSaveState("saved");
+      setSaveMessage("자동 배정이 서버에 저장되었습니다.");
+    } catch (error) {
+      setFixedAssignments(previous);
+      setSaveState("error");
+      setSaveMessage(error instanceof Error ? error.message : "자동 배정 저장에 실패했습니다.");
+    }
+  }
+
+  async function resetDayOverrides() {
+    const previous = dayOverrides;
+    setDayOverrides({});
+    setSaveState("saving");
+    setSaveMessage(`${selectedDateISO} 하루 배정을 초기화하는 중입니다.`);
+    try {
+      const response = await fetch("/api/settings/classrooms", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "day", dateISO: selectedDateISO })
+      });
+      if (!response.ok) throw new Error("하루 배정 초기화에 실패했습니다.");
+      setSaveState("saved");
+      setSaveMessage(`${selectedDateISO}의 모든 강사가 고정 강의실을 사용합니다.`);
+    } catch (error) {
+      setDayOverrides(previous);
+      setSaveState("error");
+      setSaveMessage(error instanceof Error ? error.message : "하루 배정 초기화에 실패했습니다.");
+    }
+  }
   const mergedByInstructor = useMemo(
     () => new Map(dayInstructorSummaries.map((item) => [item.id, item.events])),
     [dayInstructorSummaries]
@@ -262,6 +440,9 @@ export function HomeFullTimetableDialog({
               <p role="status" className={`rounded-md px-2 py-1 text-[11px] font-black ${collisionCount ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
                 {collisionCount ? `강의실 중복 ${collisionCount}곳` : "강의실 중복 없음"}
               </p>
+              {Object.keys(dayOverrides).length > 0 ? (
+                <span className="rounded-md bg-blue-100 px-2 py-1 text-[11px] font-black text-blue-700">이 날짜만 조정 {Object.keys(dayOverrides).length}명</span>
+              ) : null}
             </div>
           </div>
         </div>
@@ -270,28 +451,73 @@ export function HomeFullTimetableDialog({
           <section id="home-fixed-classroom-settings" aria-label="고정 강의실 설정" className="shrink-0 border-b border-blue-200 bg-blue-50 px-4 py-3 sm:px-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-black text-slate-950">강사별 고정 강의실</h3>
-                <p className="mt-0.5 text-[11px] font-semibold text-slate-600">강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다. 한 번 지정하면 이 브라우저에 저장되어 모든 요일에 자동 적용됩니다.</p>
+                <h3 className="text-sm font-black text-slate-950">강사별 강의실 배정</h3>
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                  강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다. {" "}
+                  {settingsScope === "fixed"
+                    ? "고정 배정은 서버에 자동 저장되어 다른 PC와 모든 요일에 동일하게 적용됩니다."
+                    : `${selectedDateISO}에만 적용할 강의실입니다. 비워 두면 고정 강의실을 사용합니다.`}
+                </p>
               </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className={`rounded-md px-2 py-1 text-[11px] font-black ${
+                    saveState === "error"
+                      ? "bg-rose-100 text-rose-700"
+                      : saveState === "saving" || saveState === "loading"
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-emerald-100 text-emerald-700"
+                  }`}
+                >
+                  {saveMessage || "서버 저장 준비됨"}
+                </p>
+                <button
+                  type="button"
+                  disabled={!assignmentsReady || saveState === "saving"}
+                  onClick={() => void (settingsScope === "fixed" ? autoAssignFixedClassrooms() : resetDayOverrides())}
+                  className="sync-pressable sync-focus min-h-9 rounded-lg bg-white px-3 text-xs font-black text-blue-700 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.22)] hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {settingsScope === "fixed" ? "순서대로 자동 배정" : "이 날짜 조정 초기화"}
+                </button>
+              </div>
+            </div>
+            <div role="tablist" aria-label="강의실 설정 범위" className="mt-2 inline-grid grid-cols-2 rounded-lg bg-blue-100 p-1">
               <button
                 type="button"
-                onClick={() => setAssignments(createDefaultHomeClassroomAssignments(instructorIds))}
-                className="sync-pressable sync-focus min-h-9 rounded-lg border border-blue-200 bg-white px-3 text-xs font-black text-blue-700 hover:bg-blue-100"
+                role="tab"
+                aria-selected={settingsScope === "fixed"}
+                onClick={() => setSettingsScope("fixed")}
+                className={`sync-pressable sync-focus min-h-9 rounded-md px-3 text-xs font-black ${settingsScope === "fixed" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:text-blue-700"}`}
               >
-                순서대로 자동 배정
+                고정 배정
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsScope === "day"}
+                onClick={() => setSettingsScope("day")}
+                className={`sync-pressable sync-focus min-h-9 rounded-md px-3 text-xs font-black ${settingsScope === "day" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:text-blue-700"}`}
+              >
+                {selectedDate?.weekdayLabel ?? weekdayLabel}요일 하루 조정
               </button>
             </div>
             <div className="mt-2 grid max-h-44 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7">
-              {instructorSummaries.map((instructor) => (
+              {settingsInstructors.map((instructor) => (
                 <label key={instructor.id} className="rounded-lg bg-white p-2 shadow-sm">
                   <span className="block truncate text-xs font-black text-slate-900">{instructor.name}</span>
                   <span className="block truncate text-[10px] font-semibold text-slate-500">{instructor.secondary || "과목 정보 없음"}</span>
                   <select
-                    aria-label={`${instructor.name} 고정 강의실`}
-                    value={assignments[instructor.id] ?? ""}
-                    onChange={(event) => setAssignments((current) => ({ ...current, [instructor.id]: event.target.value }))}
+                    aria-label={`${instructor.name} ${settingsScope === "fixed" ? "고정 강의실" : `${selectedDateISO} 하루 강의실`}`}
+                    disabled={!assignmentsReady || saveState === "loading"}
+                    value={settingsScope === "fixed" ? fixedAssignments[instructor.id] ?? "" : dayOverrides[instructor.id] ?? ""}
+                    onChange={(event) => void (settingsScope === "fixed"
+                      ? updateFixedAssignment(instructor.id, event.target.value)
+                      : updateDayOverride(instructor.id, event.target.value))}
                     className="sync-focus mt-1.5 min-h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-bold text-slate-800"
                   >
+                    {settingsScope === "day" ? <option value="">고정값 사용 · {fixedAssignments[instructor.id] ?? "미지정"}</option> : null}
                     {HOME_CLASSROOM_OPTIONS.map((classroom) => <option key={classroom} value={classroom}>{classroom}</option>)}
                   </select>
                 </label>
@@ -304,17 +530,21 @@ export function HomeFullTimetableDialog({
           {visibleClassrooms.length === 0 ? (
             <div className="flex min-h-full items-center justify-center p-8 text-center text-sm font-bold text-slate-500">선택한 요일에 표시할 강사 수업이 없습니다.</div>
           ) : (
-            <div className="min-w-max" style={{ width: `${Math.max(100, visibleClassrooms.length * 174 + 72)}px` }}>
+            <div className="w-full" style={{ minWidth: `${visibleClassrooms.length * 174 + 72}px` }}>
               <div className="sticky top-0 z-30 grid border-b border-slate-300 bg-slate-950 text-white" style={{ gridTemplateColumns: `72px repeat(${visibleClassrooms.length}, minmax(174px, 1fr))` }}>
                 <div className="sticky left-0 z-40 flex items-center justify-center border-r border-slate-700 bg-slate-950 px-2 py-3 text-xs font-black">시간</div>
                 {visibleClassrooms.map((classroom) => {
                   const ids = occupancy.get(classroom) ?? [];
                   const collision = collisionClassrooms.has(classroom);
+                  const hasDayOverride = ids.some((id) => Boolean(dayOverrides[id]));
                   return (
                     <div key={classroom} className={`border-r border-slate-700 px-3 py-2 ${collision ? "bg-rose-950" : ""}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-black">{classroom}</span>
-                        {collision ? <span className="rounded bg-rose-400 px-1.5 py-0.5 text-[9px] font-black text-rose-950">중복</span> : null}
+                        <span className="flex items-center gap-1">
+                          {hasDayOverride ? <span className="rounded bg-blue-300 px-1.5 py-0.5 text-[9px] font-black text-blue-950">하루 조정</span> : null}
+                          {collision ? <span className="rounded bg-rose-400 px-1.5 py-0.5 text-[9px] font-black text-rose-950">중복</span> : null}
+                        </span>
                       </div>
                       <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-300">{ids.map((id) => dayInstructorSummaries.find((item) => item.id === id)?.name).filter(Boolean).join(" · ")}</p>
                     </div>
@@ -340,6 +570,7 @@ export function HomeFullTimetableDialog({
                             {placements.map(({ instructor, event }, index) => {
                               const oneToOne = isOneToOne(event);
                               const typeLabel = classTypeLabel(event);
+                              const tone = subjectTone(event.subjectName);
                               const containsHighlightedStudent = Boolean(highlightedStudent && event.studentNames.some((name) => name.trim() === highlightedStudent));
                               const dimmed = Boolean(highlightedStudent && !containsHighlightedStudent);
                               return (
@@ -350,17 +581,17 @@ export function HomeFullTimetableDialog({
                                     containsHighlightedStudent
                                       ? "border-amber-500 bg-amber-50 ring-2 ring-amber-300"
                                       : oneToOne
-                                        ? "border-2 border-amber-400 bg-[#fff9e8] shadow-[0_3px_10px_rgba(180,120,0,0.14)]"
-                                        : "border-blue-200 bg-blue-50"
+                                        ? `${tone.card} border-2 border-amber-400 shadow-[0_3px_10px_rgba(180,120,0,0.14)]`
+                                        : tone.card
                                   } ${dimmed ? "opacity-45" : ""}`}
                                 >
                                   <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0">
                                       <p className="truncate text-xs font-black text-slate-950">{instructor?.name || event.instructorName}</p>
-                                      <p className={`mt-0.5 truncate text-[10px] font-black ${oneToOne ? "text-amber-800" : "text-blue-700"}`}>{event.subjectName}</p>
+                                      <p className={`mt-0.5 truncate text-[10px] font-black ${oneToOne ? "text-amber-800" : tone.text}`}>{event.subjectName}</p>
                                     </div>
                                     <span className="flex shrink-0 items-center gap-1">
-                                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${oneToOne ? "bg-amber-300 text-amber-950" : "bg-blue-100 text-blue-800"}`}>{typeLabel}</span>
+                                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-black ${oneToOne ? "bg-amber-300 text-amber-950" : tone.badge}`}>{typeLabel}</span>
                                       <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[9px] font-black text-white">{event.studentNames.length}명</span>
                                     </span>
                                   </div>
@@ -375,7 +606,7 @@ export function HomeFullTimetableDialog({
                                             aria-pressed={selected}
                                             onClick={() => setHighlightedStudent(selected ? null : studentName.trim())}
                                             className={`sync-focus rounded px-1.5 py-1 text-[10px] font-bold leading-none transition ${
-                                              selected ? "bg-amber-400 text-amber-950" : oneToOne ? "bg-white text-amber-950 hover:bg-amber-100" : "bg-white text-blue-950 hover:bg-blue-100"
+                                              selected ? "bg-amber-400 text-amber-950" : oneToOne ? "bg-white text-amber-950 hover:bg-amber-100" : `bg-white ${tone.text} hover:bg-white/70`
                                             }`}
                                           >
                                             {studentName}

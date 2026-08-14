@@ -17,6 +17,17 @@ export const HOME_CLASSROOM_OPTIONS = [
 
 export type HomeClassroomAssignment = Record<string, string>;
 
+export function isHomeClassroomOption(value: unknown): value is (typeof HOME_CLASSROOM_OPTIONS)[number] {
+  return typeof value === "string" && HOME_CLASSROOM_OPTIONS.includes(value as (typeof HOME_CLASSROOM_OPTIONS)[number]);
+}
+
+export function sanitizeHomeClassroomAssignments(value: unknown): HomeClassroomAssignment {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([instructorId, classroom]) => Boolean(instructorId) && isHomeClassroomOption(classroom))
+  );
+}
+
 export function createDefaultHomeClassroomAssignments(instructorIds: string[]): HomeClassroomAssignment {
   return Object.fromEntries(
     instructorIds.map((id, index) => [id, HOME_CLASSROOM_OPTIONS[index % HOME_CLASSROOM_OPTIONS.length]])

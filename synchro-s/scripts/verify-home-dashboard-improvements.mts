@@ -182,7 +182,7 @@ assert.match(fullTimetable, /전체 시간표 요일 선택/, "전체 시간표�
 assert.match(fullTimetable, /시간표 분류 \$\{selectedTagLabel\}/, "선택한 시간표 태그를 보조기기에 명확히 설명해야 합니다.");
 assert.match(fullTimetable, /bg-amber-300[\s\S]*?text-base[\s\S]*?#\{selectedTagLabel\}/, "선택한 시간표 태그를 최상단에 크고 노란색으로 강조해야 합니다.");
 assert.match(fullTimetable, /고정 강의실 설정/, "강사별 고정 강의실 설정창을 열 수 있어야 합니다.");
-assert.match(fullTimetable, /localStorage\.setItem\(CLASSROOM_STORAGE_KEY/, "고정 강의실은 브라우저에 저장되어 요일 전환 후에도 유지되어야 합니다.");
+assert.match(fullTimetable, /\/api\/settings\/classrooms/, "고정 강의실은 서버에 저장되어 다른 PC와 요일 전환 후에도 유지되어야 합니다.");
 assert.match(fullTimetable, /border-2 border-amber-400/, "1:1 수업 카드는 금색 테두리로 구분해야 합니다.");
 assert.match(fullTimetable, /\{typeLabel\}[\s\S]*?\{event\.studentNames\.length\}명/, "수업 유형은 학생 명수 왼쪽에 배치해야 합니다.");
 assert.match(fullTimetable, /highlightedStudent/, "전체 시간표에서 선택한 학생을 모든 강의실에 걸쳐 강조할 수 있어야 합니다.");
