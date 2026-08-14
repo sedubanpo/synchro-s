@@ -5,7 +5,7 @@ import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { HomeFullTimetableDialog } from "@/components/schedule/HomeFullTimetableDialog";
 import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { getSubjectColorClass } from "@/lib/subjectColors";
-import type { ScheduleEvent } from "@/types/schedule";
+import type { ScheduleEvent, Weekday } from "@/types/schedule";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export type HomeDashboardPersonSummary = {
@@ -24,6 +24,12 @@ type DateOption = {
   weekdayLabel: string;
 };
 
+export type HomeDashboardWeekDateOption = {
+  dateISO: string;
+  weekday: Weekday;
+  weekdayLabel: string;
+};
+
 type Props = {
   relativeLabel: string;
   weekdayLabel: string;
@@ -33,6 +39,8 @@ type Props = {
   dateOptions: DateOption[];
   events: ScheduleEvent[];
   instructorSummaries: HomeDashboardPersonSummary[];
+  weekInstructorSummaries: HomeDashboardPersonSummary[];
+  weekDateOptions: HomeDashboardWeekDateOption[];
   studentSummaries: HomeDashboardPersonSummary[];
   loading: boolean;
   onSelectDate: (offset: -1 | 0 | 1, date: string) => void;
@@ -103,6 +111,8 @@ export function HomeInstructorFolderDashboard({
   dateOptions,
   events,
   instructorSummaries,
+  weekInstructorSummaries,
+  weekDateOptions,
   studentSummaries,
   loading,
   onSelectDate,
@@ -458,7 +468,8 @@ export function HomeInstructorFolderDashboard({
         dateISO={dateISO}
         weekdayLabel={weekdayLabel}
         selectedTagLabel={selectedTagLabel}
-        instructorSummaries={instructorSummaries}
+        instructorSummaries={weekInstructorSummaries}
+        weekDateOptions={weekDateOptions}
         onClose={() => {
           setFullTimetableOpen(false);
           window.requestAnimationFrame(() => fullTimetableButtonRef.current?.focus());

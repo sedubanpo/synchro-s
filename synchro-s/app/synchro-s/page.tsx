@@ -1987,6 +1987,25 @@ export default function SynchroSPage() {
       .map((item) => ({ ...item, events: mergeHomeInstructorEvents(item.events) }))
       .sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
   }, [homeTodayEvents, instructors]);
+  const homeWeekInstructorSummaries = useMemo<HomePersonSummary[]>(() => {
+    const byInstructor = new Map<string, HomePersonSummary>();
+    for (const event of overviewUniverseEvents) {
+      const option = instructors.find((item) => eventMatchesInstructorOption(event, item));
+      const id = option?.id ?? event.instructorId ?? event.instructorName;
+      const existing = byInstructor.get(id);
+      if (existing) {
+        existing.events.push(event);
+        continue;
+      }
+      byInstructor.set(id, {
+        id,
+        name: option?.name ?? event.instructorName,
+        secondary: option?.secondary ?? event.subjectName,
+        events: [event]
+      });
+    }
+    return [...byInstructor.values()].sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  }, [instructors, overviewUniverseEvents]);
   const homeTodayStudentSummaries = useMemo<HomePersonSummary[]>(() => {
     const byStudent = new Map<string, HomePersonSummary>();
     for (const event of homeTodayEvents) {
@@ -9836,6 +9855,12 @@ export default function SynchroSPage() {
             ]}
             events={homeTodayEvents}
             instructorSummaries={homeTodayInstructorSummaries}
+            weekInstructorSummaries={homeWeekInstructorSummaries}
+            weekDateOptions={DAYS.map((day) => ({
+              dateISO: shiftDate(mondayOfDate(homeDashboardDateISO), day.key - 1),
+              weekday: day.key,
+              weekdayLabel: day.label
+            }))}
             studentSummaries={homeTodayStudentSummaries}
             loading={isHomeDashboardLoading}
             onSelectDate={(offset, date) => {

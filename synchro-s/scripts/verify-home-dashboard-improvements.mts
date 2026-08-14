@@ -112,10 +112,16 @@ assert.match(fullTimetable, /role="dialog"/, "전체 시간표는 대화상자 �
 assert.match(fullTimetable, /aria-modal="true"/, "전체 시간표는 모달 상태를 보조기기에 알려야 합니다.");
 assert.match(fullTimetable, /event\.key === "Escape"/, "전체 시간표는 Escape 키로 닫혀야 합니다.");
 assert.match(fullTimetable, /강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다/, "강의실 변경 결과를 명확히 안내해야 합니다.");
-assert.match(fullTimetable, /max-w-\[1480px\]/, "전체 시간표 팝업은 검토 맥락을 유지하면서 화면을 과도하게 덮지 않아야 합니다.");
+assert.match(fullTimetable, /h-\[100dvh\][\s\S]*?w-screen[\s\S]*?max-w-none/, "전체 시간표 팝업은 화면 전체를 검토 공간으로 사용해야 합니다.");
+assert.match(fullTimetable, /전체 시간표 요일 선택/, "전체 시간표에서 월요일부터 일요일까지 날짜를 전환할 수 있어야 합니다.");
+assert.match(fullTimetable, /고정 강의실 설정/, "강사별 고정 강의실 설정창을 열 수 있어야 합니다.");
+assert.match(fullTimetable, /localStorage\.setItem\(CLASSROOM_STORAGE_KEY/, "고정 강의실은 브라우저에 저장되어 요일 전환 후에도 유지되어야 합니다.");
+assert.match(fullTimetable, /border-2 border-amber-400/, "1:1 수업 카드는 금색 테두리로 구분해야 합니다.");
+assert.match(fullTimetable, /\{typeLabel\}[\s\S]*?\{event\.studentNames\.length\}명/, "수업 유형은 학생 명수 왼쪽에 배치해야 합니다.");
 assert.match(fullTimetable, /highlightedStudent/, "전체 시간표에서 선택한 학생을 모든 강의실에 걸쳐 강조할 수 있어야 합니다.");
 assert.match(fullTimetable, /aria-pressed=\{selected\}/, "학생 강조 선택 상태를 보조기기에 전달해야 합니다.");
-assert.match(fullTimetable, /if \(open\) setHighlightedStudent\(null\);[\s\S]*?\}, \[open\]\);/, "학생 강조는 팝업을 새로 열 때만 초기화되어야 합니다.");
+assert.match(fullTimetable, /if \(!open\) return;[\s\S]*?setHighlightedStudent\(null\);[\s\S]*?setSelectedDateISO/, "팝업을 새로 열면 학생 강조와 기준 요일을 함께 초기화해야 합니다.");
+assert.match(fullTimetable, /setSelectedDateISO\(item\.dateISO\);[\s\S]*?setHighlightedStudent\(null\);/, "요일을 바꾸면 이전 요일의 학생 강조를 초기화해야 합니다.");
 assert.match(page, /border-2 border-blue-300[\s\S]*?Global Search/, "전역 검색창은 명확한 파란색 테두리로 검색 위치를 강조해야 합니다.");
 assert.match(page, /이 날짜가 지나면 현재 시간표는 자동으로 적용 대상에서 제외되고/, "만료일 이후 동작을 저장 그룹에서 설명해야 합니다.");
 
