@@ -4,7 +4,11 @@ import { InstructorAvailabilityWorkspace } from "@/components/schedule/Instructo
 import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
 import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
-import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
+import {
+  findInteriorScheduleGapEvents,
+  mergeHomeInstructorEvents,
+  mergeScheduleStudentRosters
+} from "@/lib/homeDashboardGrouping";
 import { StudentAvailabilityWorkspace } from "@/components/schedule/StudentAvailabilityWorkspace";
 import { ScheduleModal } from "@/components/schedule/ScheduleModal";
 import { ScheduleTagManager, SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
@@ -924,32 +928,7 @@ function scopeScheduleEventToStudent(event: ScheduleEvent, studentId: string): S
 }
 
 function mergeStudentRosters(a: ScheduleEvent, b: ScheduleEvent): Pick<ScheduleEvent, "studentIds" | "studentNames"> {
-  const studentIds: string[] = [];
-  const studentNames: string[] = [];
-  const seenIds = new Set<string>();
-  const seenNames = new Set<string>();
-
-  const append = (ids: string[], names: string[]) => {
-    const maxLength = Math.max(ids.length, names.length);
-    for (let index = 0; index < maxLength; index += 1) {
-      const id = (ids[index] ?? "").trim();
-      const name = (names[index] ?? "").trim();
-      const nameKey = normalizePersonName(name);
-      if (id && seenIds.has(id)) continue;
-      if (nameKey && seenNames.has(nameKey)) continue;
-      if (!id && !nameKey) continue;
-
-      studentIds.push(id);
-      studentNames.push(name || id);
-      if (id) seenIds.add(id);
-      if (nameKey) seenNames.add(nameKey);
-    }
-  };
-
-  append(a.studentIds ?? [], a.studentNames ?? []);
-  append(b.studentIds ?? [], b.studentNames ?? []);
-
-  return { studentIds, studentNames };
+  return mergeScheduleStudentRosters(a, b);
 }
 
 function mergeScheduleEvents(events: ScheduleEvent[]): ScheduleEvent[] {
@@ -1777,16 +1756,29 @@ export default function SynchroSPage() {
 
     for (const group of relevantGroups) {
       const snapshot = group.snapshotEvents ?? [];
-      if (snapshot.length > 0) {
-        collected.push(...snapshot);
-      }
-
       if (group.classIds.length > 0) {
-        const snapshotKeys = new Set(snapshot.map((event) => `${event.id}:${event.classDate}`));
         const linkedLiveEvents = overviewEvents.filter(
-          (event) => group.classIds.includes(event.id) && !snapshotKeys.has(`${event.id}:${event.classDate}`)
+          (event) => group.classIds.includes(event.id)
         );
-        collected.push(...linkedLiveEvents);
+        const targetStudentName = overviewStudents.find((student) => student.id === group.targetId)?.name ?? "";
+        const sameTagHistoricalEvents = timetableGroups
+          .filter(
+            (candidate) =>
+              candidate.roleView === "student" &&
+              candidate.targetId === group.targetId &&
+              (candidate.tagId ?? null) === (group.tagId ?? null) &&
+              candidate.weekStart <= weekStart
+          )
+          .flatMap((candidate) => candidate.snapshotEvents ?? []);
+        const interiorGapEvents = findInteriorScheduleGapEvents(
+          snapshot,
+          [...overviewEvents, ...sameTagHistoricalEvents],
+          group.targetId,
+          targetStudentName
+        );
+        collected.push(...mergeScheduleReviewEvents(snapshot, [...linkedLiveEvents, ...interiorGapEvents]));
+      } else if (snapshot.length > 0) {
+        collected.push(...snapshot);
       }
     }
 
@@ -1801,7 +1793,10 @@ export default function SynchroSPage() {
     activeStudentIdSet,
     activeStudentNameSet,
     effectiveStudentGroupByTargetId,
-    overviewEvents
+    overviewEvents,
+    overviewStudents,
+    timetableGroups,
+    weekStart
   ]);
   const overviewVisibleInstructors = useMemo(
     () => instructors.filter((item) => item.isActive !== false && !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
@@ -2303,13 +2298,12 @@ export default function SynchroSPage() {
         const scopedEvent = scopeScheduleEventToStudent(event, group.targetId);
         return scopedEvent && isForActiveStudent(scopedEvent) ? [scopedEvent] : [];
       });
-      const snapshotKeys = new Set(snapshot.map((event) => `${event.id}:${event.classDate}`));
       const liveLinked = liveInstructorEvents.flatMap((event) => {
-        if (!group.classIds.includes(event.id) || snapshotKeys.has(`${event.id}:${event.classDate}`)) return [];
+        if (!group.classIds.includes(event.id)) return [];
         const scopedEvent = scopeScheduleEventToStudent(event, group.targetId);
         return scopedEvent ? [scopedEvent] : [];
       });
-      return [...snapshot, ...liveLinked];
+      return mergeScheduleReviewEvents(snapshot, liveLinked);
     });
     const mergedWithLiveFallback = selectedScheduleTagId ? merged : [...merged, ...liveInstructorEvents];
 

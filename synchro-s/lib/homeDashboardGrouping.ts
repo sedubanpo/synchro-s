@@ -13,7 +13,107 @@ function normalizePersonName(value: string): string {
   return value.replace(/\s+/g, "").trim().toLowerCase();
 }
 
-function mergeRosters(a: ScheduleEvent, b: ScheduleEvent): Pick<ScheduleEvent, "studentIds" | "studentNames"> {
+function toMinutes(value: string): number {
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function getGapSignature(event: ScheduleEvent): string {
+  return [
+    event.classDate,
+    event.weekday,
+    normalizePersonName(event.instructorName) || event.instructorId,
+    normalizeToken(event.subjectName) || normalizeToken(event.subjectCode),
+    normalizeToken(event.classTypeLabel) || normalizeToken(event.classTypeCode),
+    event.scheduleMode
+  ].join("::");
+}
+
+function getRosterSignature(event: ScheduleEvent): string {
+  const names = event.studentNames.map(normalizePersonName).filter(Boolean).sort();
+  if (names.length > 0) return names.join("|");
+  return event.studentIds.map((id) => id.trim().toLowerCase()).filter(Boolean).sort().join("|");
+}
+
+/**
+ * Older saved groups can contain the first and last segment of a continuous
+ * class while omitting a middle hour. Recover only live occurrences strictly
+ * inside that saved range, with the same student and class signature. This is
+ * intentionally narrower than adding every live event for the student, which
+ * could mix another timetable tag into the selected tag.
+ */
+export function findInteriorScheduleGapEvents(
+  snapshotEvents: ScheduleEvent[],
+  liveEvents: ScheduleEvent[],
+  targetStudentId: string,
+  targetStudentName = ""
+): ScheduleEvent[] {
+  const eventsBySignature = new Map<string, ScheduleEvent[]>();
+
+  for (const event of snapshotEvents) {
+    const key = getGapSignature(event);
+    const bucket = eventsBySignature.get(key) ?? [];
+    bucket.push(event);
+    eventsBySignature.set(key, bucket);
+  }
+
+  const normalizedTargetName = normalizePersonName(targetStudentName);
+  const matchesTargetStudent = (event: ScheduleEvent) => {
+    if (event.studentIds.includes(targetStudentId)) return true;
+    return normalizedTargetName
+      ? event.studentNames.some((name) => normalizePersonName(name) === normalizedTargetName)
+      : false;
+  };
+  const recovered: ScheduleEvent[] = [];
+
+  for (const [signature, signatureEvents] of eventsBySignature) {
+    const sorted = [...signatureEvents].sort((a, b) => a.startTime.localeCompare(b.startTime));
+    if (sorted.length < 2 || !isRegularMultiEvent(sorted[0]!)) continue;
+
+    for (let index = 1; index < sorted.length; index += 1) {
+      const previous = sorted[index - 1]!;
+      const next = sorted[index]!;
+      const previousStart = toMinutes(previous.startTime);
+      const previousEnd = toMinutes(previous.endTime);
+      const nextStart = toMinutes(next.startTime);
+      const nextEnd = toMinutes(next.endTime);
+      const duration = previousEnd - previousStart;
+
+      // 앞뒤 블록의 길이가 같고 정확히 한 블록만 비는 경우만 복원한다.
+      if (
+        duration <= 0 ||
+        nextEnd - nextStart !== duration ||
+        nextStart - previousEnd !== duration ||
+        getRosterSignature(previous) !== getRosterSignature(next)
+      ) continue;
+
+      const liveMatch = liveEvents.find(
+        (event) =>
+          getGapSignature(event) === signature &&
+          toMinutes(event.startTime) === previousEnd &&
+          toMinutes(event.endTime) === nextStart &&
+          matchesTargetStudent(event)
+      );
+      if (liveMatch) {
+        recovered.push(liveMatch);
+        continue;
+      }
+
+      const roster = mergeScheduleStudentRosters(previous, next);
+      recovered.push({
+        ...previous,
+        id: `snapshot-gap:${previous.id}:${previous.classDate}:${previous.endTime}`,
+        startTime: previous.endTime,
+        endTime: next.startTime,
+        ...roster
+      });
+    }
+  }
+
+  return recovered;
+}
+
+export function mergeScheduleStudentRosters(a: ScheduleEvent, b: ScheduleEvent): Pick<ScheduleEvent, "studentIds" | "studentNames"> {
   const studentIds: string[] = [];
   const studentNames: string[] = [];
   const indexById = new Map<string, number>();
@@ -80,10 +180,10 @@ export function mergeHomeInstructorEvents(events: ScheduleEvent[]): ScheduleEven
       : `single::${event.id}::${event.classDate}::${event.startTime}`;
     const existing = grouped.get(key);
     if (!existing) {
-      grouped.set(key, { ...event, ...mergeRosters(event, event) });
+      grouped.set(key, { ...event, ...mergeScheduleStudentRosters(event, event) });
       continue;
     }
-    grouped.set(key, { ...existing, ...mergeRosters(existing, event) });
+    grouped.set(key, { ...existing, ...mergeScheduleStudentRosters(existing, event) });
   }
 
   return [...grouped.values()].sort((a, b) => {

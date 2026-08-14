@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { mergeHomeInstructorEvents } from "../lib/homeDashboardGrouping";
+import {
+  findInteriorScheduleGapEvents,
+  mergeHomeInstructorEvents,
+  mergeScheduleStudentRosters
+} from "../lib/homeDashboardGrouping";
+import { mergeScheduleReviewEvents } from "../lib/scheduleReviewSnapshot";
 import {
   createDefaultHomeClassroomAssignments,
   getHomeClassroomOccupancy,
@@ -69,12 +74,68 @@ assert.deepEqual(
   ["백송연", "장지우", "김동현b", "송정현"],
   "구형 데이터가 같은 임시 학생 ID를 재사용해도 서로 다른 이름은 모두 강사 폴더에 남아야 합니다."
 );
+assert.deepEqual(
+  mergeScheduleStudentRosters(
+    event({ studentIds: ["legacy-shared"], studentNames: ["비활성학생"] }),
+    event({ studentIds: ["legacy-shared", "legacy-shared", "legacy-shared"], studentNames: ["백송연", "변준혁", "이예진"] })
+  ).studentNames,
+  ["비활성학생", "백송연", "변준혁", "이예진"],
+  "전체 시간표 원본 병합도 구형 임시 ID가 같더라도 서로 다른 학생 이름을 제거하면 안 됩니다."
+);
 
 const strict = mergeHomeInstructorEvents([
   event({ id: "one-to-one-a", classTypeCode: "ONE_TO_ONE", classTypeLabel: "1:1", badgeText: "[1:1]" }),
   event({ id: "one-to-one-b", classTypeCode: "ONE_TO_ONE", classTypeLabel: "1:1", badgeText: "[1:1]" })
 ]);
 assert.equal(strict.length, 2, "서로 다른 1:1 수업은 자동 병합하면 안 됩니다.");
+
+const baekSongyeonThreeHours = [
+  event({ id: "anseong-math", weekday: 5, classDate: "2026-08-14", startTime: "10:00", endTime: "11:00", studentNames: ["백송연"] }),
+  event({ id: "anseong-math", weekday: 5, classDate: "2026-08-14", startTime: "11:00", endTime: "12:00", studentNames: ["백송연"] }),
+  event({ id: "anseong-math", weekday: 5, classDate: "2026-08-14", startTime: "12:00", endTime: "13:00", studentNames: ["백송연"] })
+];
+const baekSongyeonMerged = mergeScheduleReviewEvents(
+  [baekSongyeonThreeHours[0]!, baekSongyeonThreeHours[2]!],
+  baekSongyeonThreeHours
+);
+assert.deepEqual(
+  baekSongyeonMerged.map((item) => item.startTime).sort(),
+  ["10:00", "11:00", "12:00"],
+  "부분 스냅샷에 빠진 11-12시를 같은 수업 ID의 실시간 기록으로 보충해야 합니다."
+);
+assert.deepEqual(
+  findInteriorScheduleGapEvents(
+    [baekSongyeonThreeHours[0]!, baekSongyeonThreeHours[2]!],
+    baekSongyeonThreeHours.map((item, index) => ({ ...item, id: `hour-${index}`, studentIds: ["student-baek"] })),
+    "student-baek",
+    "백송연"
+  ).map((item) => item.startTime),
+  ["11:00"],
+  "저장 그룹 classIds에 중간 시간이 빠져도 같은 학생·수업의 저장 구간 내부 시간만 복구해야 합니다."
+);
+assert.deepEqual(
+  findInteriorScheduleGapEvents(
+    [baekSongyeonThreeHours[0]!, baekSongyeonThreeHours[2]!],
+    [],
+    "student-baek",
+    "백송연"
+  ).map((item) => [item.startTime, item.endTime, item.studentNames]),
+  [["11:00", "12:00", ["백송연"]]],
+  "현재 주간 레코드가 없어도 같은 개별정규의 앞뒤 블록 사이 한 시간은 안전하게 복원해야 합니다."
+);
+assert.deepEqual(
+  findInteriorScheduleGapEvents(
+    [
+      baekSongyeonThreeHours[0]!,
+      { ...baekSongyeonThreeHours[2]!, studentNames: ["백송연", "다른학생"] }
+    ],
+    [],
+    "student-baek",
+    "백송연"
+  ),
+  [],
+  "앞뒤 수업 명단이 다르면 실제 공강일 수 있으므로 중간 시간을 임의로 만들면 안 됩니다."
+);
 
 const classroomAssignments = createDefaultHomeClassroomAssignments(["teacher-1", "teacher-2", "teacher-3"]);
 assert.deepEqual(classroomAssignments, {
@@ -98,6 +159,10 @@ const dashboard = fs.readFileSync(path.join(root, "components/schedule/HomeInstr
 const fullTimetable = fs.readFileSync(path.join(root, "components/schedule/HomeFullTimetableDialog.tsx"), "utf8");
 
 assert.match(page, /!scheduleTagSelectionReady \|\| overviewLoading \|\| timetableGroupsLoading/, "초기 홈은 태그 선택이 끝난 뒤 그룹을 표시해야 합니다.");
+assert.match(page, /mergeScheduleReviewEvents\(snapshot, \[\.\.\.linkedLiveEvents, \.\.\.interiorGapEvents\]\)/, "홈 전체 시간표는 부분 스냅샷의 누락 시간대를 연결된 실시간 수업으로 보충해야 합니다.");
+assert.match(page, /findInteriorScheduleGapEvents\(/, "저장 그룹 ID에서 빠진 연속 수업의 중간 시간도 안전하게 복구해야 합니다.");
+assert.match(page, /candidate\.tagId[\s\S]*?sameTagHistoricalEvents/, "중간 시간 복구는 반드시 동일 시간표 태그의 저장 이력으로 제한해야 합니다.");
+assert.match(page, /return mergeScheduleStudentRosters\(a, b\)/, "홈 전체 시간표 원본 병합은 재사용된 구형 학생 ID보다 이름을 우선해야 합니다.");
 assert.match(page, /if \(!viewerRoleResolved \|\| !scheduleTagSelectionReady\) return;/, "태그 확정 전 대용량 그룹 중복 요청을 막아야 합니다.");
 assert.match(page, /isScheduleCreation[\s\S]*?bg-emerald-600[\s\S]*?bg-blue-600/, "최근 기록은 시간표 생성=초록, 학생 시간표=파랑이어야 합니다.");
 assert.match(page, /historyTypeLabel[\s\S]*?시간표 생성[\s\S]*?entry\.targetType.*시간표/, "최근 기록마다 저장 유형을 독립된 라벨로 표시해야 합니다.");
@@ -114,6 +179,8 @@ assert.match(fullTimetable, /event\.key === "Escape"/, "전체 시간표는 Esca
 assert.match(fullTimetable, /강의실을 바꾸면 아래 전체 시간표에 즉시 반영됩니다/, "강의실 변경 결과를 명확히 안내해야 합니다.");
 assert.match(fullTimetable, /h-\[100dvh\][\s\S]*?w-screen[\s\S]*?max-w-none/, "전체 시간표 팝업은 화면 전체를 검토 공간으로 사용해야 합니다.");
 assert.match(fullTimetable, /전체 시간표 요일 선택/, "전체 시간표에서 월요일부터 일요일까지 날짜를 전환할 수 있어야 합니다.");
+assert.match(fullTimetable, /시간표 분류 \$\{selectedTagLabel\}/, "선택한 시간표 태그를 보조기기에 명확히 설명해야 합니다.");
+assert.match(fullTimetable, /bg-amber-300[\s\S]*?text-base[\s\S]*?#\{selectedTagLabel\}/, "선택한 시간표 태그를 최상단에 크고 노란색으로 강조해야 합니다.");
 assert.match(fullTimetable, /고정 강의실 설정/, "강사별 고정 강의실 설정창을 열 수 있어야 합니다.");
 assert.match(fullTimetable, /localStorage\.setItem\(CLASSROOM_STORAGE_KEY/, "고정 강의실은 브라우저에 저장되어 요일 전환 후에도 유지되어야 합니다.");
 assert.match(fullTimetable, /border-2 border-amber-400/, "1:1 수업 카드는 금색 테두리로 구분해야 합니다.");

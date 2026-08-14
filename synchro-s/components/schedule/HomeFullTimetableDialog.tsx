@@ -190,11 +190,19 @@ export function HomeFullTimetableDialog({
         className="flex h-[100dvh] w-screen max-w-none flex-col overflow-hidden bg-slate-100 shadow-2xl"
       >
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-700 bg-slate-950 px-4 py-3 text-white sm:px-6">
-          <div className="min-w-0">
-            <h2 id="home-full-timetable-title" className="truncate text-xl font-black">전체 시간표로 보기</h2>
-            <p className="mt-1 text-xs font-semibold text-slate-300">
-              {selectedDate?.dateISO ?? dateISO} ({selectedDate?.weekdayLabel ?? weekdayLabel}요일) · #{selectedTagLabel} · 강사 {dayInstructorSummaries.length}명
-            </p>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="min-w-0">
+              <h2 id="home-full-timetable-title" className="truncate text-xl font-black">전체 시간표로 보기</h2>
+              <p className="mt-1 text-xs font-semibold text-slate-300">
+                {selectedDate?.dateISO ?? dateISO} ({selectedDate?.weekdayLabel ?? weekdayLabel}요일) · 강사 {dayInstructorSummaries.length}명
+              </p>
+            </div>
+            <span
+              aria-label={`시간표 분류 ${selectedTagLabel}`}
+              className="inline-flex min-h-10 items-center rounded-lg border border-amber-200 bg-amber-300 px-4 py-2 text-base font-black text-amber-950 shadow-[0_4px_14px_rgba(245,158,11,0.22)]"
+            >
+              #{selectedTagLabel}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -234,7 +242,7 @@ export function HomeFullTimetableDialog({
                       setHighlightedStudent(null);
                     }}
                     className={`sync-pressable sync-focus min-h-10 rounded-lg px-2 py-1.5 text-xs font-black transition-colors ${
-                      active ? "bg-blue-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                      active ? "bg-blue-600 text-white shadow-sm" : "bg-blue-50 text-blue-950 hover:bg-blue-100 hover:text-blue-700"
                     }`}
                   >
                     <span className="block">{item.weekdayLabel}</span>
