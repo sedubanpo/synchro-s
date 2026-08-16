@@ -161,12 +161,6 @@ type ImportProgress = {
   label: string;
 };
 
-type LessonSnapshotCacheEntry = {
-  groupId: string | null;
-  events: ScheduleEvent[];
-  classIds: string[];
-};
-
 type MainTab = "overview" | "review" | "new" | "issues" | RoleView;
 
 type ConflictDialogState = {
@@ -263,6 +257,18 @@ type SaveHistoryEntry = {
   tagLabel: string;
   source: "student_timetable" | "schedule_creation";
   actor: StaffActor;
+};
+
+type SaveHistoryGroup = {
+  key: string;
+  latest: SaveHistoryEntry;
+  entries: SaveHistoryEntry[];
+};
+
+type LessonSnapshotCacheEntry = {
+  groupId: string | null;
+  events: ScheduleEvent[];
+  classIds: string[];
 };
 
 type SaveHistoryResponse = {
@@ -1542,6 +1548,8 @@ export default function SynchroSPage() {
   }>();
   const [studentDayDateOverrides, setStudentDayDateOverrides] = useState<Partial<Record<Weekday, string>>>({});
   const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
+  const [stagedEventUpdates, setStagedEventUpdates] = useState<Record<string, ScheduleEvent>>({});
+  const [stagedDeletedEventIds, setStagedDeletedEventIds] = useState<string[]>([]);
   const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
   const [copiedLessonTemplate, setCopiedLessonTemplate] = useState<LessonCardTemplate | null>(null);
   const [copiedTimetableEventKey, setCopiedTimetableEventKey] = useState<string | null>(null);
@@ -1549,8 +1557,6 @@ export default function SynchroSPage() {
     state: "idle",
     message: "기존 수업을 복사하거나 빠른 수업 카드를 선택해 주세요."
   });
-  const lessonPasteQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const lessonPastePendingRef = useRef(0);
   const lessonSnapshotCacheRef = useRef<Map<string, LessonSnapshotCacheEntry>>(new Map());
   const lessonPasteScopeRef = useRef("");
   const [timeEditEvent, setTimeEditEvent] = useState<ScheduleEvent | null>(null);
@@ -1596,6 +1602,7 @@ export default function SynchroSPage() {
     label: ""
   });
   const [saveHistory, setSaveHistory] = useState<SaveHistoryEntry[]>([]);
+  const [expandedSaveHistoryKey, setExpandedSaveHistoryKey] = useState<string | null>(null);
   const [conflictLogs, setConflictLogs] = useState<ConflictLogEntry[]>([]);
   const [conflictLogsLoading, setConflictLogsLoading] = useState(false);
   const [specialNotes, setSpecialNotes] = useState<SpecialNoteItem[]>([]);
@@ -1704,6 +1711,17 @@ export default function SynchroSPage() {
     const historyOption = saveHistory.find((item) => item.targetType === "강사" && item.targetId === selectedInstructorId);
     return historyOption?.targetId ? { id: historyOption.targetId, name: historyOption.targetName } : null;
   }, [instructors, saveHistory, selectedInstructorId]);
+  const groupedSaveHistory = useMemo<SaveHistoryGroup[]>(() => {
+    const groups = new Map<string, SaveHistoryEntry[]>();
+    for (const entry of saveHistory) {
+      const identity = entry.targetId?.trim() || normalizeLookupToken(entry.targetName);
+      const key = `${entry.targetType}:${identity}`;
+      const bucket = groups.get(key) ?? [];
+      bucket.push(entry);
+      groups.set(key, bucket);
+    }
+    return [...groups.entries()].map(([key, entries]) => ({ key, latest: entries[0], entries }));
+  }, [saveHistory]);
   const selectedInstructorLabel = selectedInstructorOption?.name ?? "강사 선택";
   const selectedInstructorSecondary = selectedInstructorOption?.secondary ?? "";
   const selectedScheduleTag = useMemo(
@@ -2423,8 +2441,8 @@ export default function SynchroSPage() {
         instructorName: item.instructorName,
         studentIds: selectedStudentId ? [selectedStudentId] : [],
         studentNames: selectedStudentLabel !== "학생 선택" ? [selectedStudentLabel] : ["학생 미지정"],
-        subjectCode: item.isSelfStudy ? "SELF_STUDY" : `SYNC_DRAFT:${normalizeLookupToken(item.subjectLabel) || "unknown"}`,
-        subjectName: item.subjectLabel,
+        subjectCode: item.isSelfStudy ? "SELF_STUDY" : resolveSubjectOption(item.subjectLabel, subjects)?.code ?? item.subjectLabel,
+        subjectName: resolveSubjectOption(item.subjectLabel, subjects)?.label ?? item.subjectLabel,
         classTypeCode: item.classTypeCode,
         classTypeLabel: item.classTypeLabel,
         badgeText: item.badgeText,
@@ -2436,10 +2454,10 @@ export default function SynchroSPage() {
         progressStatus: "planned",
         createdAt: new Date().toISOString()
       })),
-    [selectedStudentId, selectedStudentLabel, syncDraftItems, weekStart]
+    [selectedStudentId, selectedStudentLabel, subjects, syncDraftItems, weekStart]
   );
   const draftEvents = studentScheduleInputTab === "sync" ? syncDraftEvents : notionDraftEvents;
-  const displayEvents = useMemo(() => {
+  const baseDisplayEvents = useMemo(() => {
     const onlyActiveRosterEvents = (items: ScheduleEvent[]) =>
       items.filter(
         (event) =>
@@ -2506,6 +2524,16 @@ export default function SynchroSPage() {
     studentScheduleInputTab,
     studentGroupTargetIdsForWeek
   ]);
+  const displayEvents = useMemo(() => {
+    const deletedIds = new Set(stagedDeletedEventIds);
+    const persisted = baseDisplayEvents
+      .filter((event) => !deletedIds.has(event.id) && !isSyncDraftEventId(event.id))
+      .map((event) => stagedEventUpdates[event.id] ?? event);
+    if (roleView !== "student" || studentScheduleInputTab !== "sync") return persisted;
+    return [...persisted, ...syncDraftEvents];
+  }, [baseDisplayEvents, roleView, stagedDeletedEventIds, stagedEventUpdates, studentScheduleInputTab, syncDraftEvents]);
+  const pendingTimetableChangeCount = syncDraftItems.length + stagedDeletedEventIds.length + Object.keys(stagedEventUpdates).length;
+  const hasPendingTimetableChanges = pendingTimetableChangeCount > 0;
   const timetableEmptyMessage = useMemo(() => {
     if (roleView !== "student" || displayEvents.length > 0) return undefined;
     if (!selectedScheduleTagId) {
@@ -4191,38 +4219,61 @@ export default function SynchroSPage() {
         return;
       }
 
-      const queuedScope = `${selectedStudentId}:${selectedScheduleTagId}:${weekStart}:${studentScheduleInputTab}`;
-      lessonPastePendingRef.current += 1;
-      setLessonAutosave({ state: "saving", message: `${lessonPastePendingRef.current}건 저장 대기 중…` });
-      const run = async () => {
-        if (lessonPasteScopeRef.current !== queuedScope) {
-          lessonPastePendingRef.current = Math.max(0, lessonPastePendingRef.current - 1);
-          return;
+      if (!selectedStudentId || selectedStudentLabel === "학생 선택") {
+        setLessonAutosave({ state: "error", message: "학생을 먼저 선택해 주세요." });
+        return;
+      }
+      if (!selectedScheduleTagId) {
+        setLessonAutosave({ state: "error", message: "상단에서 시간표 분류(태그)를 먼저 선택해 주세요." });
+        return;
+      }
+      const instructor = instructors.find((item) => item.id === template.instructorId && item.isActive !== false);
+      const subject = subjects.find((item) => item.code === template.subjectCode);
+      const classType = classTypes.find((item) => item.code === template.classTypeCode);
+      if (!instructor || !subject || !classType) {
+        setLessonAutosave({ state: "error", message: "현재 사용할 수 없는 수업입니다. 목록을 새로고침해 주세요." });
+        return;
+      }
+      if (getInstructorDaysOff(instructor.id).includes(cell.weekday)) {
+        setLessonAutosave({ state: "error", message: `${instructor.name} 강사는 ${weekdayLabel(cell.weekday)}요일 휴무입니다.` });
+        return;
+      }
+      const endTime = addMinutesToTime(cell.startTime, template.durationMinutes);
+      if (timeToMinutes(endTime) > 24 * 60) {
+        setLessonAutosave({ state: "error", message: "운영 종료 시간을 넘겨 수업을 붙여넣을 수 없습니다." });
+        return;
+      }
+      const idSeed = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const rawText = `${subject.label} ${instructor.name} ${classType.label} ${cell.startTime}-${endTime}`;
+      setSyncDraftItems((prev) => [
+        ...prev,
+        {
+          id: `${SYNC_DRAFT_EVENT_ID_PREFIX}${idSeed}`,
+          weekday: cell.weekday,
+          startTime: cell.startTime,
+          endTime,
+          subjectLabel: subject.label,
+          instructorId: instructor.id,
+          instructorName: instructor.name,
+          classTypeCode: classType.code,
+          classTypeLabel: classType.label,
+          badgeText: classType.badgeText,
+          note: template.source === "timetable" ? "시간표 셀 복사" : "빠른 수업 카드",
+          isSelfStudy: false,
+          rawText,
+          scheduleMode: cell.scheduleMode,
+          classDate: cell.classDate
         }
-        try {
-          const label = await persistLessonCardPaste(template, cell);
-          if (lessonPasteScopeRef.current === queuedScope) {
-            setNotice(`${label} 수업을 자동 저장했습니다.`);
-            setError(null);
-            setLessonAutosave({ state: "saved", message: `${label} 저장 완료` });
-          }
-        } catch (pasteError) {
-          const message = pasteError instanceof Error ? pasteError.message : "수업 카드 붙여넣기에 실패했습니다.";
-          if (lessonPasteScopeRef.current === queuedScope) {
-            setError(message);
-            setLessonAutosave({ state: "error", message });
-          }
-        } finally {
-          lessonPastePendingRef.current = Math.max(0, lessonPastePendingRef.current - 1);
-          if (lessonPastePendingRef.current > 0 && lessonPasteScopeRef.current === queuedScope) {
-            setLessonAutosave({ state: "saving", message: `${lessonPastePendingRef.current}건 저장 대기 중…` });
-          }
-        }
-      };
-      lessonPasteQueueRef.current = lessonPasteQueueRef.current.then(run, run);
+      ]);
+      const label = `${weekdayLabel(cell.weekday)} ${cell.startTime} ${subject.label} · ${instructor.name}`;
+      setNotice(`${label} 수업을 작업본에 추가했습니다. 저장하기 전까지 서버에는 반영되지 않습니다.`);
+      setError(null);
+      setLessonAutosave({ state: "saved", message: `${label} 작업본에 추가됨` });
     },
-    [copiedLessonTemplate, persistLessonCardPaste, selectedScheduleTagId, selectedStudentId, studentScheduleInputTab, weekStart]
+    [classTypes, copiedLessonTemplate, getInstructorDaysOff, instructors, selectedScheduleTagId, selectedStudentId, selectedStudentLabel, subjects]
   );
+
+  void persistLessonCardPaste;
 
   const updateTimetableGroupExpiration = useCallback(
     async (groupId: string, expiresOn: string | null) => {
@@ -4474,26 +4525,30 @@ export default function SynchroSPage() {
   );
 
   const handleResetSyncDrafts = useCallback(() => {
-    if (syncDraftItems.length === 0) {
-      setNotice("초기화할 싱크로 시간표 초안이 없습니다.");
+    if (!hasPendingTimetableChanges) {
+      setNotice("초기화할 시간표 변경 사항이 없습니다.");
       return;
     }
     setSyncDraftItems([]);
+    setStagedEventUpdates({});
+    setStagedDeletedEventIds([]);
     setError(null);
-    setNotice("싱크로 시간표 초안을 초기화했습니다.");
-  }, [syncDraftItems.length]);
+    setNotice("저장하지 않은 시간표 변경 사항을 모두 되돌렸습니다.");
+  }, [hasPendingTimetableChanges]);
 
   const handleStartNewSyncTimetable = useCallback(() => {
-    if (syncDraftItems.length > 0 && !window.confirm("작성 중인 싱크로 시간표 초안을 지우고 새 시간표를 만들까요?")) {
+    if (hasPendingTimetableChanges && !window.confirm("저장하지 않은 변경 사항을 지우고 새 시간표를 만들까요?")) {
       return;
     }
     setSyncDraftItems([]);
+    setStagedEventUpdates({});
+    setStagedDeletedEventIds([]);
     setParsedNotionItems([]);
     setSelectedGroupId(null);
     setIsCreatingNewSyncTimetable(true);
     setError(null);
     setNotice("새 싱크로 시간표를 시작했습니다. 기존 저장본은 변경되지 않습니다.");
-  }, [syncDraftItems.length]);
+  }, [hasPendingTimetableChanges]);
 
   const handleSaveSyncDraftsToServer = useCallback(async () => {
     if (savingSyncDrafts) return;
@@ -4505,8 +4560,8 @@ export default function SynchroSPage() {
       setError("학생을 선택한 뒤 싱크로 시간표를 저장해 주세요.");
       return;
     }
-    if (syncDraftItems.length === 0) {
-      setError("저장할 싱크로 시간표 초안이 없습니다. 빈 시간표 칸을 눌러 수업을 추가해 주세요.");
+    if (!hasPendingTimetableChanges) {
+      setError("저장할 시간표 변경 사항이 없습니다.");
       return;
     }
 
@@ -4594,7 +4649,7 @@ export default function SynchroSPage() {
     setSavingSyncDrafts(true);
     setImportProgress({
       active: true,
-      total: syncDraftItems.length,
+      total: pendingTimetableChangeCount,
       done: 0,
       label: "싱크로 시간표를 서버에 저장 중입니다..."
     });
@@ -4605,8 +4660,57 @@ export default function SynchroSPage() {
     const memoUpdates: Record<string, string> = {};
     const conflictDetails: string[] = [];
     const conflictLogEntries: ConflictLogCreateInput[] = [];
+    const movedClassIdMap = new Map<string, string>();
 
     try {
+      importingNotionRef.current = true;
+      for (const updatedEvent of Object.values(stagedEventUpdates)) {
+        const moveRes = await fetch(`/api/schedules/${updatedEvent.id}/move`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            weekday: updatedEvent.weekday,
+            startTime: updatedEvent.startTime,
+            endTime: updatedEvent.endTime,
+            weekStart,
+            studentId: selectedStudentId,
+            subjectCode: updatedEvent.subjectCode
+          })
+        });
+        if (moveRes.status === 401) {
+          moveToLogin();
+          return;
+        }
+        const movePayload = (await moveRes.json().catch(() => ({}))) as {
+          error?: string;
+          conflict?: ConflictResult;
+          updated?: { id?: string | null };
+        };
+        if (moveRes.status === 409) {
+          throw new Error(getConflictMessageForDisplay(movePayload.conflict ?? { hasConflict: true, conflicts: [] }, [...effectiveStudentGroupByTargetId.values()], students) || "수정한 수업이 다른 시간표와 충돌합니다.");
+        }
+        if (!moveRes.ok) throw new Error(movePayload.error ?? `${updatedEvent.subjectName} 수업 수정 저장에 실패했습니다.`);
+        if (movePayload.updated?.id && movePayload.updated.id !== updatedEvent.id) {
+          movedClassIdMap.set(updatedEvent.id, movePayload.updated.id);
+        }
+      }
+
+      if (stagedDeletedEventIds.length > 0) {
+        const deleteRes = await fetch("/api/schedules/group", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classIds: stagedDeletedEventIds, roleView: "student", targetId: selectedStudentId })
+        });
+        if (deleteRes.status === 401) {
+          moveToLogin();
+          return;
+        }
+        if (!deleteRes.ok) {
+          const deletePayload = (await deleteRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(deletePayload.error ?? "삭제한 수업을 서버에 반영하지 못했습니다.");
+        }
+      }
+
       let processedCount = selfStudyDrafts.length;
       setImportProgress((prev) => ({ ...prev, done: processedCount }));
 
@@ -4618,7 +4722,8 @@ export default function SynchroSPage() {
           body: JSON.stringify({
             items: batch.map((entry) => entry.payload),
             targetType: "학생",
-            targetName: currentTargetLabel
+            targetName: currentTargetLabel,
+            recordHistory: false
           })
         });
 
@@ -4717,7 +4822,10 @@ export default function SynchroSPage() {
 
       const existingSnapshotEvents = displayEvents
         .filter((event) => !event.id.startsWith("draft-") && !isSyncDraftEventId(event.id))
-        .map((event) => ({ ...event }));
+        .map((event) => {
+          const nextId = movedClassIdMap.get(event.id);
+          return nextId ? { ...event, id: nextId } : { ...event };
+        });
       const existingClassIds = extractSnapshotClassIds(existingSnapshotEvents);
       const selfStudyEvents: ScheduleEvent[] = selfStudyDrafts.map((draft) => ({
         id: `${SELF_STUDY_EVENT_ID_PREFIX}${selectedStudentId}:${draft.classDate ?? shiftDate(weekStart, draft.weekday - 1)}:${draft.startTime}:${draft.id.replace(SYNC_DRAFT_EVENT_ID_PREFIX, "")}`,
@@ -4741,9 +4849,14 @@ export default function SynchroSPage() {
       }));
       const nextSnapshot = [...existingSnapshotEvents, ...importedEvents, ...selfStudyEvents];
       const nextClassIds = Array.from(new Set([...existingClassIds, ...importedClassIds]));
-      const savedCount = importedEvents.length + selfStudyEvents.length;
+      const savedCount = importedEvents.length + selfStudyEvents.length + Object.keys(stagedEventUpdates).length + stagedDeletedEventIds.length;
 
-      if (savedCount > 0 && nextSnapshot.length > 0) {
+      const targetGroup = selectedGroup ?? activeGroup;
+      if (targetGroup) {
+        await saveTimetableGroupSnapshot(targetGroup.id, nextClassIds, nextSnapshot);
+        setSelectedGroupId(targetGroup.id);
+        setTimetableGroups((prev) => prev.map((group) => group.id === targetGroup.id ? { ...group, classIds: nextClassIds, snapshotEvents: nextSnapshot } : group));
+      } else {
         const created = await createTimetableGroup({
           name: `${weekStart} ${currentTargetLabel} 시간표`,
           roleView: "student",
@@ -4753,15 +4866,22 @@ export default function SynchroSPage() {
           snapshotEvents: nextSnapshot,
           isActive: true
         });
-        if (created?.id) {
-          setSelectedGroupId(created.id);
-          setIsCreatingNewSyncTimetable(false);
-        }
+        if (created?.id) setSelectedGroupId(created.id);
       }
+      setIsCreatingNewSyncTimetable(false);
+
+      const historyRes = await fetch("/api/save-history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetType: "학생", targetName: currentTargetLabel, tagId: selectedScheduleTagId })
+      });
+      const historySaved = historyRes.ok;
 
       setSyncDraftItems(conflictDetails.length > 0 ? syncDraftItems.filter((item) => conflictDetails.some((detail) => detail.includes(item.rawText))) : []);
+      setStagedEventUpdates({});
+      setStagedDeletedEventIds([]);
       await Promise.all([loadWeek({ silent: true }), loadSaveHistory(), loadOverviewEvents(), loadScheduleReviews()]);
-      setNotice(`싱크로 시간표 저장 완료: 반영 ${savedCount}건${conflictDetails.length > 0 ? ` / 충돌 ${conflictDetails.length}건` : ""}`);
+      setNotice(`싱크로 시간표 저장 완료: 반영 ${savedCount}건${conflictDetails.length > 0 ? ` / 충돌 ${conflictDetails.length}건` : ""}${historySaved ? "" : " · 최근 저장 기록은 새로고침 시 다시 확인해 주세요."}`);
 
       if (conflictDetails.length > 0) {
         setConflictDialog({
@@ -4779,10 +4899,12 @@ export default function SynchroSPage() {
         message
       });
     } finally {
+      importingNotionRef.current = false;
       setSavingSyncDrafts(false);
       setImportProgress((prev) => ({ ...prev, active: false, label: "" }));
     }
   }, [
+    activeGroup,
     classTypes,
     createTimetableGroup,
     currentTargetId,
@@ -4790,19 +4912,25 @@ export default function SynchroSPage() {
     displayEvents,
     effectiveStudentGroupByTargetId,
     getInstructorDaysOff,
+    hasPendingTimetableChanges,
     instructors,
     loadOverviewEvents,
     loadSaveHistory,
     loadScheduleReviews,
     loadWeek,
     moveToLogin,
+    pendingTimetableChangeCount,
     recordConflictLogs,
     savingSyncDrafts,
+    saveTimetableGroupSnapshot,
+    selectedGroup,
     selectedStudentId,
     selectedStudentLabel,
     selectedScheduleTagId,
     selectedScheduleTagLabel,
     students,
+    stagedDeletedEventIds,
+    stagedEventUpdates,
     subjects,
     syncDraftItems,
     weekStart
@@ -5186,6 +5314,49 @@ export default function SynchroSPage() {
       if (movingLockRef.current) return;
       movingLockRef.current = true;
       try {
+        if (roleView === "student" && studentScheduleInputTab === "sync") {
+          if (isSyncDraftEventId(ctx.classId)) {
+            setSyncDraftItems((prev) =>
+              prev.map((item) =>
+                item.id === ctx.classId
+                  ? {
+                      ...item,
+                      weekday: ctx.weekday,
+                      startTime: ctx.startTime,
+                      endTime: ctx.endTime,
+                      subjectLabel: ctx.subjectName ?? item.subjectLabel,
+                      classDate: item.scheduleMode === "one_off" ? shiftDate(weekStart, ctx.weekday - 1) : undefined,
+                      rawText: `${ctx.subjectName ?? item.subjectLabel} ${item.instructorName} ${item.classTypeLabel} ${ctx.startTime}-${ctx.endTime}`
+                    }
+                  : item
+              )
+            );
+            setNotice("추가한 수업의 위치와 시간을 작업본에서 수정했습니다.");
+            return;
+          }
+          const targetEvent = displayEvents.find((event) => event.id === ctx.classId);
+          if (!targetEvent) {
+            setError("수정 대상 수업을 찾지 못했습니다.");
+            return;
+          }
+          if (getInstructorDaysOff(targetEvent.instructorId).includes(ctx.weekday)) {
+            setConflictDialog({ open: true, title: "휴무일 안내", message: "해당 강사의 휴무일입니다" });
+            return;
+          }
+          const nextEvent: ScheduleEvent = {
+            ...targetEvent,
+            weekday: ctx.weekday,
+            classDate: shiftDate(weekStart, ctx.weekday - 1),
+            startTime: ctx.startTime,
+            endTime: ctx.endTime,
+            subjectCode: ctx.subjectCode ?? targetEvent.subjectCode,
+            subjectName: ctx.subjectName ?? targetEvent.subjectName
+          };
+          setStagedEventUpdates((prev) => ({ ...prev, [ctx.classId]: nextEvent }));
+          setNotice(`${nextEvent.subjectName} ${ctx.startTime}-${ctx.endTime} 수정 사항을 작업본에 반영했습니다.`);
+          setLessonAutosave({ state: "saved", message: `${nextEvent.subjectName} 수정 변경 대기 중` });
+          return;
+        }
         const selectedEditingGroup = selectedGroup ?? activeGroup;
         const isActiveEditing = selectedEditingGroup?.isActive ?? true;
         const classIdBackedSnapshot = selectedEditingGroup
@@ -5556,6 +5727,7 @@ export default function SynchroSPage() {
       selectedInstructorLabel,
       selectedStudentId,
       selectedStudentLabel,
+      studentScheduleInputTab,
       students,
       recordConflictLogs,
       roleView,
@@ -6656,6 +6828,18 @@ export default function SynchroSPage() {
         return;
       }
 
+      if (roleView === "student" && studentScheduleInputTab === "sync") {
+        setStagedDeletedEventIds((prev) => (prev.includes(event.id) ? prev : [...prev, event.id]));
+        setStagedEventUpdates((prev) => {
+          const next = { ...prev };
+          delete next[event.id];
+          return next;
+        });
+        setNotice(`${event.subjectName} ${event.startTime}-${event.endTime} 수업을 작업본에서 삭제했습니다.`);
+        setLessonAutosave({ state: "saved", message: `${event.subjectName} 삭제 변경 대기 중` });
+        return;
+      }
+
       try {
         setLessonAutosave({ state: "saving", message: `${event.subjectName} 수업 삭제 저장 중…` });
         const impactedGroups = timetableGroups.filter(
@@ -6705,7 +6889,7 @@ export default function SynchroSPage() {
         void loadWeek({ silent: true });
       }
     },
-    [currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView, saveTimetableGroupSnapshot, timetableGroups]
+    [currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView, saveTimetableGroupSnapshot, studentScheduleInputTab, timetableGroups]
   );
 
   const handleCreateSpecialNote = useCallback(async () => {
@@ -7209,6 +7393,16 @@ export default function SynchroSPage() {
   }, [selectedStudentId, weekStart]);
 
   useEffect(() => {
+    if (!hasPendingTimetableChanges) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [hasPendingTimetableChanges]);
+
+  useEffect(() => {
     lessonPasteScopeRef.current = `${selectedStudentId}:${selectedScheduleTagId}:${weekStart}:${studentScheduleInputTab}`;
     lessonSnapshotCacheRef.current.clear();
     setCopiedLessonTemplate(null);
@@ -7544,17 +7738,19 @@ export default function SynchroSPage() {
               <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold leading-5 text-slate-500">
                 아직 저장 기록이 없습니다.
                 <br />
-                [DB로 저장] 성공 시 이곳에 최신순으로 표시됩니다.
+                [저장하기] 성공 시 이곳에 최신순으로 표시됩니다.
               </div>
             ) : (
               <div className="relative pl-4">
                 <span className="absolute left-[6px] top-1 bottom-1 w-px bg-slate-200" />
                 <div className="space-y-2.5">
-                  {saveHistory.map((entry) => {
+                  {groupedSaveHistory.map((group) => {
+                    const entry = group.latest;
+                    const expanded = expandedSaveHistoryKey === group.key;
                     const isScheduleCreation = entry.source === "schedule_creation";
                     const historyTypeLabel = isScheduleCreation ? "시간표 생성" : `${entry.targetType} 시간표`;
                     return (
-                    <div key={entry.id} className="relative">
+                    <div key={group.key} className="relative">
                       <span
                         className={`absolute -left-4 top-1.5 h-2.5 w-2.5 rounded-full border shadow-sm ${
                           isScheduleCreation
@@ -7564,8 +7760,12 @@ export default function SynchroSPage() {
                       />
                       <button
                         type="button"
-                        onClick={() => handleSelectSaveHistoryTarget(entry)}
-                        className={`sync-pressable sync-focus w-full rounded-lg border px-2.5 py-2 text-left text-white shadow-sm ${
+                        aria-expanded={group.entries.length > 1 ? expanded : undefined}
+                        onClick={() => {
+                          if (group.entries.length === 1) handleSelectSaveHistoryTarget(entry);
+                          else setExpandedSaveHistoryKey((current) => current === group.key ? null : group.key);
+                        }}
+                        className={`sync-pressable sync-focus relative z-10 w-full rounded-lg border px-2.5 py-2 text-left text-white shadow-sm ${
                           isScheduleCreation
                             ? "border-emerald-700 bg-emerald-600 hover:border-emerald-800 hover:bg-emerald-700"
                             : "border-blue-700 bg-blue-600 hover:border-blue-800 hover:bg-blue-700"
@@ -7574,7 +7774,7 @@ export default function SynchroSPage() {
                         <span className="flex items-center justify-between gap-2">
                           <span className="truncate text-[10px] font-black tracking-wide text-white/90">[{entry.timestampLabel}]</span>
                           <span className="shrink-0 rounded-full border border-white/25 bg-white/15 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-white">
-                            {historyTypeLabel}
+                            {group.entries.length > 1 ? `${group.entries.length}건 ${expanded ? "▴" : "▾"}` : historyTypeLabel}
                           </span>
                         </span>
                         <p className="mt-1 truncate text-[11px] font-bold leading-5 text-white">
@@ -7591,6 +7791,24 @@ export default function SynchroSPage() {
                           </span>
                         </span>
                       </button>
+                      {group.entries.length > 1 ? (
+                        <span aria-hidden="true" className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 h-full rounded-lg border border-blue-300 bg-blue-200" />
+                      ) : null}
+                      {expanded ? (
+                        <div className="relative z-20 mt-1.5 space-y-1 border-l-2 border-blue-200 pl-2">
+                          {group.entries.map((historyEntry, index) => (
+                            <button
+                              key={historyEntry.id}
+                              type="button"
+                              onClick={() => handleSelectSaveHistoryTarget(historyEntry)}
+                              className="sync-pressable sync-focus flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left text-[9px] font-bold text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+                            >
+                              <span className="truncate">{index + 1}. [{historyEntry.timestampLabel}] #{historyEntry.tagLabel}</span>
+                              <span className="shrink-0 text-blue-600">열기</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                     );
                   })}
@@ -8151,24 +8369,16 @@ export default function SynchroSPage() {
                     >
                       {isCreatingNewSyncTimetable ? "새 시간표 작성 중" : "새 시간표 만들기"}
                     </button>
-                    <span className="sync-tabular rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600">
-                      초안 {syncDraftItems.length}건
+                    <span className={`sync-tabular rounded-full px-3 py-1.5 text-xs font-black ${hasPendingTimetableChanges ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
+                      변경 {pendingTimetableChangeCount}건
                     </span>
                     <button
                       type="button"
-                      disabled={savingSyncDrafts || syncDraftItems.length === 0 || !selectedScheduleTagId}
-                      onClick={() => void handleSaveSyncDraftsToServer()}
-                      className="sync-pressable sync-focus min-h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-black text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {savingSyncDrafts ? "저장 중" : "DB로 저장"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={savingSyncDrafts || syncDraftItems.length === 0}
+                      disabled={savingSyncDrafts || !hasPendingTimetableChanges}
                       onClick={handleResetSyncDrafts}
                       className="sync-pressable sync-focus min-h-9 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      초안 초기화
+                      변경 취소
                     </button>
                   </div>
                   {selectedStudentId ? null : (
@@ -8391,6 +8601,16 @@ export default function SynchroSPage() {
                   </svg>
                   {capturingTimetable ? "복사 중" : "시간표 이미지 캡쳐"}
                 </button>
+                {roleView === "student" && studentScheduleInputTab === "sync" ? (
+                  <button
+                    type="button"
+                    disabled={savingSyncDrafts || !hasPendingTimetableChanges || !selectedScheduleTagId}
+                    onClick={() => void handleSaveSyncDraftsToServer()}
+                    className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-xs font-black text-white shadow-sm hover:border-emerald-700 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
+                  >
+                    {savingSyncDrafts ? "저장 중…" : hasPendingTimetableChanges ? `저장하기 · ${pendingTimetableChangeCount}건` : "저장하기"}
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -8607,7 +8827,7 @@ export default function SynchroSPage() {
                 }
               />
               <p className="mt-2 px-1 text-[10px] font-semibold leading-4 text-slate-500">
-                기존 수업과 빠른 수업 카드의 붙여넣기는 즉시 서버에 자동 저장됩니다. 기존 빈 칸 직접 입력은 초안 후 ‘DB로 저장’을 사용합니다.
+                빠른 카드와 기존 수업의 복사·붙여넣기, 수정, 삭제는 먼저 작업본에 반영됩니다. 위의 ‘저장하기’를 눌러 한 번에 서버에 저장하세요.
               </p>
             </div>
           ) : null}

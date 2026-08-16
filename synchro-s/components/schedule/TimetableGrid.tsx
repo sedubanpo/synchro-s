@@ -67,7 +67,6 @@ function isStrictDotClass(event: ScheduleEvent): boolean {
 
 const INSTRUCTOR_REGULAR_GROUP_ID_PREFIX = "instructor-regular-group:";
 const SELF_STUDY_EVENT_ID_PREFIX = "self-study:";
-const SYNC_DRAFT_EVENT_ID_PREFIX = "sync-draft:";
 const ACADEMY_LOGO_URL = "https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png";
 
 function normalizeClassToken(value: string): string {
@@ -87,10 +86,6 @@ function isInstructorRegularGroupEvent(event: ScheduleEvent): boolean {
 
 function isSelfStudyEvent(event: ScheduleEvent): boolean {
   return event.id.startsWith(SELF_STUDY_EVENT_ID_PREFIX);
-}
-
-function isDraftEvent(event: ScheduleEvent): boolean {
-  return event.id.startsWith("draft-") || event.id.startsWith(SYNC_DRAFT_EVENT_ID_PREFIX);
 }
 
 function summaryBadgeText(event: ScheduleEvent): string {
@@ -670,7 +665,7 @@ export function TimetableGrid({
                               const isGroupedRegular = isInstructorRegularGroupEvent(event);
                               const isSyntheticSelfStudy = isSelfStudyEvent(event);
                               const canDragEvent = canMoveEvents && !isGroupedRegular && !isSyntheticSelfStudy;
-                              const canCopyEvent = Boolean(onEventCopy) && !isGroupedRegular && !isSyntheticSelfStudy && !isDraftEvent(event);
+                              const canCopyEvent = Boolean(onEventCopy) && !isGroupedRegular && !isSyntheticSelfStudy && !event.id.startsWith("draft-");
                               const copyKey = `${event.id}-${event.classDate}-${event.startTime}`;
                               const isCopiedEvent = copiedEventKey === copyKey;
 
@@ -746,12 +741,12 @@ export function TimetableGrid({
                                       clickEvent.currentTarget.focus();
                                       return;
                                     }
-                                    if (!onEventClick || isGroupedRegular || isDraftEvent(event)) return;
+                                    if (!onEventClick || isGroupedRegular || event.id.startsWith("draft-")) return;
                                     clickEvent.stopPropagation();
                                     onEventClick(event);
                                   }}
                                   onDoubleClick={(clickEvent) => {
-                                    if (!onEventClick || isGroupedRegular || isDraftEvent(event)) return;
+                                    if (!onEventClick || isGroupedRegular || event.id.startsWith("draft-")) return;
                                     clickEvent.stopPropagation();
                                     onEventClick(event);
                                   }}

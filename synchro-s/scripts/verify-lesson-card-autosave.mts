@@ -70,13 +70,14 @@ const [pageSource, gridSource, paletteSource] = await Promise.all([
 
 assert.match(paletteSource, /강사명 또는 과목명 검색/, "카드 검색창 안내가 있어야 합니다.");
 assert.match(paletteSource, /기존 수업을 한 번 눌러 선택하고/, "기존 수업 셀 복사 안내가 있어야 합니다.");
-assert.match(pageSource, /lessonPasteQueueRef\.current = lessonPasteQueueRef\.current\.then\(run, run\)/, "연속 붙여넣기는 직렬 저장되어야 합니다.");
-assert.match(pageSource, /scheduleTagId: selectedScheduleTagId/, "붙여넣기 저장은 현재 태그를 포함해야 합니다.");
-assert.match(pageSource, /saveTimetableGroupSnapshot\(groupId, nextClassIds, nextSnapshot\)/, "수업 저장과 그룹 스냅샷 저장이 함께 이뤄져야 합니다.");
-assert.match(pageSource, /result\.status === "created" \|\| result\.status === "enrolled"/, "그룹 저장 실패 시 신규 등록을 보상 삭제해야 합니다.");
-assert.match(pageSource, /수업 등록 자동 복구도 완료하지 못했습니다/, "보상 삭제 실패를 거짓 성공으로 숨기지 않아야 합니다.");
-assert.match(pageSource, /lessonPasteScopeRef\.current !== queuedScope/, "학생·태그·입력 탭이 바뀐 뒤 대기 중인 붙여넣기는 취소해야 합니다.");
-assert.match(pageSource, /lessonPasteScopeRef\.current === scopeKey/, "이전 범위의 저장 결과를 현재 시간표 화면에 섞지 않아야 합니다.");
+assert.match(pageSource, /setSyncDraftItems\(\(prev\) => \[/, "카드 붙여넣기는 먼저 로컬 작업본에 추가되어야 합니다.");
+assert.match(pageSource, /recordHistory: false/, "수업 추가 단계에서 저장 기록을 중복 생성하지 않아야 합니다.");
+assert.match(pageSource, /method: "POST"[\s\S]*\/api\/save-history/, "저장하기 한 번에 최근 저장 기록을 한 건만 남겨야 합니다.");
+assert.match(pageSource, /window\.addEventListener\("beforeunload"/, "저장하지 않은 변경이 있으면 창 닫기 경고를 등록해야 합니다.");
+assert.match(pageSource, /stagedEventUpdates/, "기존 수업 수정은 저장 전 작업본에 유지되어야 합니다.");
+assert.match(pageSource, /stagedDeletedEventIds/, "기존 수업 삭제는 저장 전 작업본에 유지되어야 합니다.");
+assert.match(pageSource, /저장하기 · \$\{pendingTimetableChangeCount\}건/, "캡처 버튼 옆 저장하기가 변경 건수를 표시해야 합니다.");
+assert.match(pageSource, /groupedSaveHistory\.map/, "동일 대상의 최근 저장 기록은 묶음 카드로 표시해야 합니다.");
 assert.match(gridSource, /\(event\.metaKey \|\| event\.ctrlKey\).*event\.key\.toLowerCase\(\) === "v"/, "격자에 포커스가 있을 때만 붙여넣기 단축키를 처리해야 합니다.");
 assert.match(gridSource, /\(keyboardEvent\.metaKey \|\| keyboardEvent\.ctrlKey\).*keyboardEvent\.key\.toLowerCase\(\) === "c"/, "기존 수업에 포커스가 있을 때 복사 단축키를 처리해야 합니다.");
 assert.match(gridSource, /onCopy=\{\(clipboardEvent\)/, "운영체제의 네이티브 복사 이벤트도 처리해야 합니다.");
@@ -86,4 +87,4 @@ assert.match(gridSource, /onDoubleClick=\{\(clickEvent\)/, "기존 수업 편집
 assert.match(gridSource, /tabIndex=\{isEmpty && viewMode === "detailed" \? 0 : undefined\}/, "빈 격자는 키보드로 접근 가능해야 합니다.");
 assert.match(pageSource, /!selectedStudentId[\s\S]*!selectedScheduleTagId/, "학생과 태그가 없으면 카드 입력을 차단해야 합니다.");
 
-console.log("lesson card autosave verification passed");
+console.log("staged timetable editing verification passed");
