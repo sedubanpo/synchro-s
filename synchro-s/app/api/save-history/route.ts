@@ -16,7 +16,7 @@ export async function GET() {
       return jsonError("Authenticated but no app profile or role mapping in public.users", 403);
     }
 
-    const items = await fetchRecentSaveHistory(supabase, 20);
+    const items = await fetchRecentSaveHistory(supabase, 120);
     return NextResponse.json({ items });
   } catch (error) {
     return jsonError(errorMessage(error), 500);

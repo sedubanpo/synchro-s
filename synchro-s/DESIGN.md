@@ -28,6 +28,9 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Full timetable lesson cards reuse those subject-family tones while retaining the written subject label; `1:1` keeps its gold border and type badge over the subject tint.
 - Import progress gradient: emerald `#34d399`, blue `#60a5fa`, violet `#a78bfa`.
 - Schedule tag tones reuse the existing blue, emerald, amber, rose, violet, and slate UI scales.
+- Recent save-history tag labels use the saved schedule-tag tone at pastel intensity; they are secondary metadata and must not compete with the student name.
+- School emblems may appear as oversized, clipped, grayscale backdrops in student-owned surfaces. Keep opacity between `5%` and `9%`, preserve readable foreground contrast, and omit the backdrop when no emblem is registered.
+- Quick lesson cards tint the whole card by subject family. Instructor name is the dominant line; the written subject remains a compact rectangular label, never a speech-bubble treatment.
 
 ## Typography
 
@@ -40,6 +43,7 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 
 - Dense control gap: `0.375rem`.
 - Panel padding: `0.75rem` to `1rem`.
+- Save-history rail width: `15.5rem` on supported desktop layouts, with a fixed footer for grouped-result pagination.
 - Timetable cell inner padding: `0.25rem`.
 - Multi-date timetable column minimum: `9.5rem`, preserving student names before horizontal scrolling.
 - Minimum practical hit area: `2.5rem` when layout allows.

@@ -2,7 +2,7 @@
 
 import { InstructorAvailabilityWorkspace } from "@/components/schedule/InstructorAvailabilityWorkspace";
 import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
-import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
+import { SchoolEmblem, SchoolLogoBackdrop } from "@/components/schedule/SchoolEmblem";
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
 import { LessonCardPalette, type LessonAutosaveState } from "@/components/schedule/LessonCardPalette";
 import {
@@ -418,6 +418,7 @@ type HomePersonSummary = {
 
 const MIXED_CLASS_TYPE_CONFLICT_MESSAGE = "1:1/2:1/3:1 수업과 개별정규 수업은 같은 시간에 혼합하여 배정할 수 없습니다.";
 const EXCLUDED_OVERVIEW_INSTRUCTORS = new Set(["홍성우", "안종성", "김용찬", "에스에듀"]);
+const SAVE_HISTORY_PAGE_SIZE = 10;
 const REVIEW_STATUS_META: Record<ReviewStatus, { label: string; shortLabel: string; tone: string; button: string }> = {
   normal: {
     label: "정상",
@@ -1638,6 +1639,7 @@ export default function SynchroSPage() {
   });
   const [saveHistory, setSaveHistory] = useState<SaveHistoryEntry[]>([]);
   const [expandedSaveHistoryKey, setExpandedSaveHistoryKey] = useState<string | null>(null);
+  const [saveHistoryPage, setSaveHistoryPage] = useState(0);
   const [conflictLogs, setConflictLogs] = useState<ConflictLogEntry[]>([]);
   const [conflictLogsLoading, setConflictLogsLoading] = useState(false);
   const [specialNotes, setSpecialNotes] = useState<SpecialNoteItem[]>([]);
@@ -1757,6 +1759,29 @@ export default function SynchroSPage() {
     }
     return [...groups.entries()].map(([key, entries]) => ({ key, latest: entries[0], entries }));
   }, [saveHistory]);
+  const saveHistoryPageCount = Math.max(1, Math.ceil(groupedSaveHistory.length / SAVE_HISTORY_PAGE_SIZE));
+  const visibleSaveHistoryGroups = useMemo(
+    () => groupedSaveHistory.slice(saveHistoryPage * SAVE_HISTORY_PAGE_SIZE, (saveHistoryPage + 1) * SAVE_HISTORY_PAGE_SIZE),
+    [groupedSaveHistory, saveHistoryPage]
+  );
+  const saveHistoryStudentLookup = useMemo(() => {
+    const byId = new Map<string, SelectOption>();
+    const byName = new Map<string, SelectOption>();
+    for (const student of [...students, ...suspendedStudents]) {
+      byId.set(student.id, student);
+      const normalizedName = normalizeLookupToken(student.name);
+      if (normalizedName && !byName.has(normalizedName)) byName.set(normalizedName, student);
+    }
+    return { byId, byName };
+  }, [students, suspendedStudents]);
+  const saveHistoryTagLookup = useMemo(() => {
+    const byId = new Map(scheduleTags.map((tag) => [tag.id, tag]));
+    const byName = new Map(scheduleTags.map((tag) => [normalizeLookupToken(tag.name), tag]));
+    return { byId, byName };
+  }, [scheduleTags]);
+  useEffect(() => {
+    setSaveHistoryPage((current) => Math.min(current, saveHistoryPageCount - 1));
+  }, [saveHistoryPageCount]);
   const selectedInstructorLabel = selectedInstructorOption?.name ?? "강사 선택";
   const selectedInstructorSecondary = selectedInstructorOption?.secondary ?? "";
   const selectedScheduleTag = useMemo(
@@ -3478,6 +3503,7 @@ export default function SynchroSPage() {
         }
       }))
     );
+    setSaveHistoryPage(0);
     setError(null);
   }, [moveToLogin]);
 
@@ -7877,12 +7903,12 @@ export default function SynchroSPage() {
   return (
     <main
       className={`sync-tabular grid min-h-screen w-full gap-3 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 lg:px-4 2xl:px-6 xl:items-start ${
-        viewerRoleResolved && !isInstructorReadOnly ? "xl:grid-cols-[12.5rem_minmax(0,1fr)]" : "xl:grid-cols-1"
+        viewerRoleResolved && !isInstructorReadOnly ? "xl:grid-cols-[15.5rem_minmax(0,1fr)]" : "xl:grid-cols-1"
       }`}
     >
       {viewerRoleResolved && !isInstructorReadOnly ? (
       <aside className="hidden xl:block xl:sticky xl:top-4 xl:self-start">
-        <div className="sync-surface max-h-[calc(100vh-2rem)] w-[12.5rem] overflow-hidden rounded-xl bg-white">
+        <div className="sync-surface flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col overflow-hidden rounded-xl bg-white">
           <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
@@ -7902,7 +7928,7 @@ export default function SynchroSPage() {
             </div>
           </div>
 
-          <div className="max-h-[calc(100vh-11.5rem)] overflow-y-auto px-3 py-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
             {saveHistory.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold leading-5 text-slate-500">
                 아직 저장 기록이 없습니다.
@@ -7913,11 +7939,16 @@ export default function SynchroSPage() {
               <div className="relative pl-4">
                 <span className="absolute left-[6px] top-1 bottom-1 w-px bg-slate-200" />
                 <div className="space-y-2.5">
-                  {groupedSaveHistory.map((group) => {
+                  {visibleSaveHistoryGroups.map((group) => {
                     const entry = group.latest;
                     const expanded = expandedSaveHistoryKey === group.key;
                     const isScheduleCreation = entry.source === "schedule_creation";
                     const historyTypeLabel = isScheduleCreation ? "시간표 생성" : `${entry.targetType} 시간표`;
+                    const historyStudent = entry.targetType === "학생"
+                      ? (entry.targetId ? saveHistoryStudentLookup.byId.get(entry.targetId) : undefined) ?? saveHistoryStudentLookup.byName.get(normalizeLookupToken(entry.targetName))
+                      : undefined;
+                    const historyTag = (entry.tagId ? saveHistoryTagLookup.byId.get(entry.tagId) : undefined) ?? saveHistoryTagLookup.byName.get(normalizeLookupToken(entry.tagLabel));
+                    const historyTagTone = historyTag ? SCHEDULE_TAG_TONES[historyTag.colorKey] : SCHEDULE_TAG_TONES.slate;
                     return (
                     <div key={group.key} className="relative">
                       <span
@@ -7934,25 +7965,35 @@ export default function SynchroSPage() {
                           if (group.entries.length === 1) handleSelectSaveHistoryTarget(entry);
                           else setExpandedSaveHistoryKey((current) => current === group.key ? null : group.key);
                         }}
-                        className={`sync-pressable sync-focus relative z-10 w-full rounded-lg border px-2.5 py-2 text-left text-white shadow-sm ${
+                        className={`sync-pressable sync-focus relative z-10 w-full overflow-hidden rounded-lg border px-3 py-2.5 text-left shadow-[0_8px_20px_-18px_rgba(15,23,42,0.55)] transition-[background-color,border-color,box-shadow,transform] ${
                           isScheduleCreation
-                            ? "border-emerald-700 bg-emerald-600 hover:border-emerald-800 hover:bg-emerald-700"
-                            : "border-blue-700 bg-blue-600 hover:border-blue-800 hover:bg-blue-700"
+                            ? "border-emerald-200 bg-emerald-50/70 hover:border-emerald-300 hover:bg-emerald-50"
+                            : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"
                         }`}
                       >
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="truncate text-[10px] font-black tracking-wide text-white/90">[{entry.timestampLabel}]</span>
-                          <span className="shrink-0 rounded-full border border-white/25 bg-white/15 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-white">
+                        {historyStudent ? (
+                          <SchoolLogoBackdrop
+                            student={historyStudent}
+                            className="-bottom-3 -right-4 top-1 w-28 opacity-[0.08] grayscale"
+                            imageClassName="mix-blend-multiply"
+                          />
+                        ) : null}
+                        <span className="relative z-10 flex items-center justify-between gap-2">
+                          <span className="truncate text-[10px] font-black tracking-wide text-slate-500">[{entry.timestampLabel}]</span>
+                          <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] font-black tracking-wide ${
+                            isScheduleCreation ? "border-emerald-200 bg-emerald-100 text-emerald-700" : "border-blue-200 bg-blue-50 text-blue-700"
+                          }`}>
                             {group.entries.length > 1 ? `${group.entries.length}건 ${expanded ? "▴" : "▾"}` : historyTypeLabel}
                           </span>
                         </span>
-                        <p className="mt-1 truncate text-[11px] font-bold leading-5 text-white">
+                        <p className="relative z-10 mt-1 truncate text-sm font-black leading-5 text-slate-900">
                           {entry.targetName}
                         </p>
-                        <p className="mt-1 inline-flex max-w-full rounded bg-amber-300 px-1.5 py-0.5 text-[10px] font-black text-amber-950">
-                          <span className="truncate">분류: {entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</span>
+                        <p className={`relative z-10 mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[9px] font-bold ${historyTagTone}`}>
+                          <span className="opacity-70">태그</span>
+                          <span className="truncate font-black">{entry.tagId ? `#${entry.tagLabel}` : entry.tagLabel}</span>
                         </p>
-                        <span className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold text-white/90">
+                        <span className="relative z-10 mt-2 flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
                           <StaffAvatar actor={entry.actor} size="xs" />
                           <span className="min-w-0 truncate">
                             {entry.actor.name || "담당자 기록 없음"}
@@ -7961,21 +8002,28 @@ export default function SynchroSPage() {
                         </span>
                       </button>
                       {group.entries.length > 1 ? (
-                        <span aria-hidden="true" className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 h-full rounded-lg border border-blue-300 bg-blue-200" />
+                        <span aria-hidden="true" className="pointer-events-none absolute left-1.5 right-1.5 top-1.5 h-full rounded-lg border border-slate-200 bg-slate-100" />
                       ) : null}
                       {expanded ? (
                         <div className="relative z-20 mt-1.5 space-y-1 border-l-2 border-blue-200 pl-2">
-                          {group.entries.map((historyEntry, index) => (
+                          {group.entries.map((historyEntry, index) => {
+                            const entryTag = (historyEntry.tagId ? saveHistoryTagLookup.byId.get(historyEntry.tagId) : undefined) ?? saveHistoryTagLookup.byName.get(normalizeLookupToken(historyEntry.tagLabel));
+                            const entryTagTone = entryTag ? SCHEDULE_TAG_TONES[entryTag.colorKey] : SCHEDULE_TAG_TONES.slate;
+                            return (
                             <button
                               key={historyEntry.id}
                               type="button"
                               onClick={() => handleSelectSaveHistoryTarget(historyEntry)}
-                              className="sync-pressable sync-focus flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left text-[9px] font-bold text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+                              className="sync-pressable sync-focus flex min-h-10 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left text-[9px] font-bold text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-900"
                             >
-                              <span className="truncate">{index + 1}. [{historyEntry.timestampLabel}] #{historyEntry.tagLabel}</span>
+                              <span className="min-w-0">
+                                <span className="block truncate">{index + 1}. [{historyEntry.timestampLabel}]</span>
+                                <span className={`mt-0.5 inline-flex max-w-full rounded-md border px-1 py-0.5 ${entryTagTone}`}>태그 #{historyEntry.tagLabel}</span>
+                              </span>
                               <span className="shrink-0 text-blue-600">열기</span>
                             </button>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : null}
                     </div>
@@ -7984,6 +8032,38 @@ export default function SynchroSPage() {
                 </div>
               </div>
             )}
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2.5">
+            <span className="text-[10px] font-bold text-slate-500">총 {groupedSaveHistory.length}개</span>
+            <nav aria-label="최근 저장 기록 페이지" className="flex items-center gap-1.5">
+              <button
+                type="button"
+                aria-label="이전 페이지"
+                disabled={saveHistoryPage === 0}
+                onClick={() => {
+                  setExpandedSaveHistoryKey(null);
+                  setSaveHistoryPage((current) => Math.max(0, current - 1));
+                }}
+                className="sync-pressable sync-focus inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                ‹
+              </button>
+              <span className="sync-tabular min-w-12 text-center text-[11px] font-black text-slate-700" aria-live="polite">
+                {saveHistoryPage + 1} / {saveHistoryPageCount}
+              </span>
+              <button
+                type="button"
+                aria-label="다음 페이지"
+                disabled={saveHistoryPage >= saveHistoryPageCount - 1}
+                onClick={() => {
+                  setExpandedSaveHistoryKey(null);
+                  setSaveHistoryPage((current) => Math.min(saveHistoryPageCount - 1, current + 1));
+                }}
+                className="sync-pressable sync-focus inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-black text-slate-600 hover:border-blue-300 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                ›
+              </button>
+            </nav>
           </div>
         </div>
       </aside>
@@ -8841,8 +8921,15 @@ export default function SynchroSPage() {
                 className={`inline-block max-w-full rounded-lg p-0 align-top ${isDisplayedGroupInactive ? "bg-slate-200" : "bg-white"}`}
               >
                 {(roleView === "student" ? selectedStudentLabel !== "학생 선택" : selectedInstructorLabel !== "강사 선택") ? (
-                  <div className={`sync-surface mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 ${isDisplayedGroupInactive ? "bg-slate-200" : "bg-white"}`}>
-                    <div>
+                  <div className={`sync-surface relative mb-2 flex min-h-[5.25rem] flex-wrap items-center justify-between gap-3 overflow-hidden rounded-xl px-4 py-3 ${isDisplayedGroupInactive ? "bg-slate-200" : "bg-white"}`}>
+                    {roleView === "student" && selectedStudentOption ? (
+                      <SchoolLogoBackdrop
+                        student={selectedStudentOption}
+                        className="-bottom-16 -top-16 right-[12%] w-64 opacity-[0.055] grayscale"
+                        imageClassName="scale-110 mix-blend-multiply"
+                      />
+                    ) : null}
+                    <div className="relative z-10">
                       <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
                         {roleView === "instructor" ? "Instructor Timetable" : "Student Timetable"}
                       </p>
@@ -8855,7 +8942,7 @@ export default function SynchroSPage() {
                         ) : null}
                       </p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative z-10 flex flex-wrap items-center gap-2">
                       {isDisplayedGroupInactive ? (
                         <span className="inline-flex items-center rounded-full border border-slate-400 bg-slate-700 px-3 py-1.5 text-xs font-black text-white">
                           비활성 시간표

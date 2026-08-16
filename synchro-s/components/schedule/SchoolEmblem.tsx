@@ -10,6 +10,12 @@ type Props = {
   className?: string;
 };
 
+type BackdropProps = {
+  student: Pick<SelectOption, "name" | "school" | "secondary" | "schoolIconUrl">;
+  className?: string;
+  imageClassName?: string;
+};
+
 const sizeClass = {
   xs: "h-6 w-6 text-[10px]",
   sm: "h-8 w-8 text-xs",
@@ -38,6 +44,26 @@ export function SchoolEmblem({ student, size = "sm", className = "" }: Props) {
       ) : (
         student.name.trim().slice(0, 1) || "학"
       )}
+    </span>
+  );
+}
+
+export function SchoolLogoBackdrop({ student, className = "", imageClassName = "" }: BackdropProps) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setFailed(false), [student.schoolIconUrl]);
+
+  if (!student.schoolIconUrl || failed) return null;
+
+  return (
+    <span aria-hidden="true" className={`pointer-events-none absolute overflow-hidden ${className}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- School emblems are externally managed mixed-format assets. */}
+      <img
+        src={student.schoolIconUrl}
+        alt=""
+        className={`h-full w-full object-contain ${imageClassName}`}
+        onError={() => setFailed(true)}
+      />
     </span>
   );
 }

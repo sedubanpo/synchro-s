@@ -77,7 +77,7 @@ assert.match(pageSource, /window\.addEventListener\("beforeunload"/, "저장하�
 assert.match(pageSource, /stagedEventUpdates/, "기존 수업 수정은 저장 전 작업본에 유지되어야 합니다.");
 assert.match(pageSource, /stagedDeletedEventIds/, "기존 수업 삭제는 저장 전 작업본에 유지되어야 합니다.");
 assert.match(pageSource, /저장하기 · \$\{pendingTimetableChangeCount\}건/, "캡처 버튼 옆 저장하기가 변경 건수를 표시해야 합니다.");
-assert.match(pageSource, /groupedSaveHistory\.map/, "동일 대상의 최근 저장 기록은 묶음 카드로 표시해야 합니다.");
+assert.match(pageSource, /visibleSaveHistoryGroups\.map/, "동일 대상의 최근 저장 기록은 묶음 카드로 페이지별 표시해야 합니다.");
 assert.match(gridSource, /\(event\.metaKey \|\| event\.ctrlKey\).*event\.key\.toLowerCase\(\) === "v"/, "격자에 포커스가 있을 때만 붙여넣기 단축키를 처리해야 합니다.");
 assert.match(gridSource, /\(keyboardEvent\.metaKey \|\| keyboardEvent\.ctrlKey\).*keyboardEvent\.key\.toLowerCase\(\) === "c"/, "기존 수업에 포커스가 있을 때 복사 단축키를 처리해야 합니다.");
 assert.match(gridSource, /onCopy=\{\(clipboardEvent\)/, "운영체제의 네이티브 복사 이벤트도 처리해야 합니다.");

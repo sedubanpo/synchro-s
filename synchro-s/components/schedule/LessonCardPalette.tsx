@@ -17,17 +17,56 @@ type LessonCardPaletteProps = {
   disabledReason?: string;
 };
 
-const subjectTone: Record<string, string> = {
-  국어: "border-rose-200 bg-rose-50 text-rose-800",
-  수학: "border-blue-200 bg-blue-50 text-blue-800",
-  영어: "border-violet-200 bg-violet-50 text-violet-800",
-  과학: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  사회: "border-amber-200 bg-amber-50 text-amber-900"
+type SubjectTone = {
+  card: string;
+  selected: string;
+  badge: string;
+  meta: string;
 };
 
-function getTone(subjectName: string): string {
+const subjectTone: Record<string, SubjectTone> = {
+  국어: {
+    card: "border-rose-200 bg-rose-50/70 hover:border-rose-300 hover:bg-rose-50",
+    selected: "border-rose-400 bg-rose-50 ring-2 ring-rose-100",
+    badge: "border-rose-200 bg-rose-100 text-rose-800",
+    meta: "text-rose-700"
+  },
+  수학: {
+    card: "border-blue-200 bg-blue-50/70 hover:border-blue-300 hover:bg-blue-50",
+    selected: "border-blue-500 bg-blue-50 ring-2 ring-blue-100",
+    badge: "border-blue-200 bg-blue-100 text-blue-800",
+    meta: "text-blue-700"
+  },
+  영어: {
+    card: "border-violet-200 bg-violet-50/70 hover:border-violet-300 hover:bg-violet-50",
+    selected: "border-violet-400 bg-violet-50 ring-2 ring-violet-100",
+    badge: "border-violet-200 bg-violet-100 text-violet-800",
+    meta: "text-violet-700"
+  },
+  과학: {
+    card: "border-emerald-200 bg-emerald-50/70 hover:border-emerald-300 hover:bg-emerald-50",
+    selected: "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100",
+    badge: "border-emerald-200 bg-emerald-100 text-emerald-800",
+    meta: "text-emerald-700"
+  },
+  사회: {
+    card: "border-amber-200 bg-amber-50/70 hover:border-amber-300 hover:bg-amber-50",
+    selected: "border-amber-400 bg-amber-50 ring-2 ring-amber-100",
+    badge: "border-amber-200 bg-amber-100 text-amber-900",
+    meta: "text-amber-800"
+  }
+};
+
+const fallbackTone: SubjectTone = {
+  card: "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100/70",
+  selected: "border-slate-400 bg-slate-50 ring-2 ring-slate-200",
+  badge: "border-slate-200 bg-slate-100 text-slate-800",
+  meta: "text-slate-600"
+};
+
+function getTone(subjectName: string): SubjectTone {
   const entry = Object.entries(subjectTone).find(([key]) => subjectName.includes(key));
-  return entry?.[1] ?? "border-slate-200 bg-slate-50 text-slate-800";
+  return entry?.[1] ?? fallbackTone;
 }
 
 function getAutosaveTone(state: LessonAutosaveState["state"]): string {
@@ -58,11 +97,11 @@ export function LessonCardPalette({
   const visible = filtered.slice(0, query.trim() ? 80 : 24);
 
   return (
-    <section aria-labelledby="lesson-card-palette-title" className="rounded-xl border border-blue-200 bg-gradient-to-b from-blue-50/90 to-white p-3 shadow-[0_12px_30px_-24px_rgba(37,99,235,0.65)]">
+    <section aria-labelledby="lesson-card-palette-title" className="rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.45)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600">Quick lesson cards</p>
-          <h2 id="lesson-card-palette-title" className="mt-0.5 text-sm font-black text-slate-900">시간표 복사·붙여넣기</h2>
+          <h2 id="lesson-card-palette-title" className="text-sm font-black text-slate-900">시간표 복사·붙여넣기</h2>
+          <p className="mt-0.5 text-[10px] font-semibold text-slate-500">강사·과목별 빠른 수업 카드</p>
         </div>
         <span className="sync-tabular rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-blue-700">{filtered.length}개</span>
       </div>
@@ -104,6 +143,7 @@ export function LessonCardPalette({
         <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto pr-1" aria-label="수업 카드 검색 결과">
           {visible.map((template) => {
             const selected = selectedTemplate?.key === template.key;
+            const tone = getTone(template.subjectName);
             return (
               <button
                 key={template.key}
@@ -117,16 +157,16 @@ export function LessonCardPalette({
                   }
                 }}
                 className={`sync-pressable sync-focus w-full rounded-lg border p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] ${
-                  selected ? "border-blue-500 bg-white shadow-[0_8px_20px_-14px_rgba(37,99,235,0.75)] ring-2 ring-blue-100" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"
+                  selected ? `${tone.selected} shadow-[0_8px_20px_-16px_rgba(15,23,42,0.45)]` : tone.card
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-xs font-black text-slate-900">{template.instructorName}</span>
-                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-black ${getTone(template.subjectName)}`}>{template.subjectName}</span>
+                  <span className="truncate text-[15px] font-black leading-5 tracking-[-0.01em] text-slate-950">{template.instructorName}</span>
+                  <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[9px] font-black ${tone.badge}`}>{template.subjectName}</span>
                 </div>
-                <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] font-bold text-slate-500">
+                <div className={`mt-1.5 flex items-center justify-between gap-2 text-[10px] font-bold ${tone.meta}`}>
                   <span className="truncate">{template.classTypeLabel}</span>
-                  <span className="shrink-0">복사</span>
+                  <span className="shrink-0 text-slate-500">복사</span>
                 </div>
               </button>
             );

@@ -38,6 +38,7 @@
     "verify:login-resilience": "node --import tsx scripts/verify-login-resilience.mts",
     "verify:staff-attribution": "node --env-file=.env.local scripts/verify-staff-attribution-and-shared-state.mjs",
     "verify:school-emblems": "node --import tsx scripts/verify-school-emblem-integration.mts",
+    "verify:save-history-visual-refresh": "node --import tsx scripts/verify-save-history-visual-refresh.mts",
     "verify:lesson-card-autosave": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:staged-timetable-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:timetable-range-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts"
