@@ -12,7 +12,7 @@ import {
 } from "@/lib/prospectTimetableGroups";
 import { resolveSubjectOption } from "@/lib/subjectResolver";
 import type { ClassTypeOption, ScheduleEvent, SelectOption, SubjectOption, Weekday } from "@/types/schedule";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 type TargetMode = "resident" | "prospect";
 
@@ -47,6 +47,7 @@ type Props = {
   hiddenTimeSlots: string[];
   onHiddenTimeSlotsChange: (timeSlots: string[]) => void;
   onDataChanged: () => void | Promise<void>;
+  headerActions?: ReactNode;
 };
 
 function shiftDate(date: string, days: number): string {
@@ -87,7 +88,8 @@ export function ScheduleCreationWorkspace({
   onScheduleTagChange,
   hiddenTimeSlots,
   onHiddenTimeSlotsChange,
-  onDataChanged
+  onDataChanged,
+  headerActions
 }: Props) {
   const [mode, setMode] = useState<TargetMode>("resident");
   const [studentId, setStudentId] = useState("");
@@ -498,7 +500,9 @@ export function ScheduleCreationWorkspace({
               <h2 className="text-xl font-black text-slate-900">시간표 생성</h2>
               <p className="mt-1 text-sm font-semibold text-slate-500">상담 대상을 선택하고 격자의 빈칸을 눌러 시간표를 구성합니다.</p>
             </div>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {headerActions}
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
               {([['resident', '재원생'], ['prospect', '신규문의(가안)']] as const).map(([key, label]) => (
                 <button
                   key={key}
@@ -514,6 +518,7 @@ export function ScheduleCreationWorkspace({
                   {label}
                 </button>
               ))}
+              </div>
             </div>
           </div>
 

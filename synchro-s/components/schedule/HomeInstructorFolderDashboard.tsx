@@ -6,7 +6,7 @@ import { HomeFullTimetableDialog } from "@/components/schedule/HomeFullTimetable
 import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { getSubjectColorClass } from "@/lib/subjectColors";
 import type { ScheduleEvent, Weekday } from "@/types/schedule";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type HomeDashboardPersonSummary = {
   id: string;
@@ -43,6 +43,7 @@ type Props = {
   weekDateOptions: HomeDashboardWeekDateOption[];
   studentSummaries: HomeDashboardPersonSummary[];
   loading: boolean;
+  headerActions?: ReactNode;
   onSelectDate: (offset: -1 | 0 | 1, date: string) => void;
   onOpenInstructor: (id: string) => void;
   onOpenStudent: (id: string) => void;
@@ -115,6 +116,7 @@ export function HomeInstructorFolderDashboard({
   weekDateOptions,
   studentSummaries,
   loading,
+  headerActions,
   onSelectDate,
   onOpenInstructor,
   onOpenStudent
@@ -208,7 +210,9 @@ export function HomeInstructorFolderDashboard({
             </div>
           </div>
 
-          <dl className="grid grid-cols-3 gap-2 text-center">
+          <div className="flex flex-wrap items-start justify-end gap-2">
+            {headerActions}
+            <dl className="grid grid-cols-3 gap-2 text-center">
             {[
               ["수업", events.length, "border-slate-200 bg-slate-50"],
               ["강사", instructorSummaries.length, "border-blue-100 bg-blue-50"],
@@ -219,7 +223,8 @@ export function HomeInstructorFolderDashboard({
                 {loading ? <HomeLoadingBlock className="mx-auto mt-1 h-6 w-10 rounded" index={String(label).length} /> : <dd className="text-xl font-black tabular-nums text-slate-900">{value}</dd>}
               </div>
             ))}
-          </dl>
+            </dl>
+          </div>
         </div>
       </div>
 

@@ -7908,6 +7908,77 @@ export default function SynchroSPage() {
     };
   }, [isInstructorReadOnly, isWorkspaceTab, loadOverviewEvents, loadScheduleReviews, loadWeek, mainTab, showIntroPage]);
 
+  const menuDescription = isInstructorReadOnly
+    ? "로그인한 강사의 이번 주 수업과 가능 일정을 확인합니다."
+    : showIntroPage
+      ? "선택한 날짜의 강사와 학생 배치를 한 화면에 정리합니다."
+      : mainTab === "overview"
+        ? "강사와 학생의 주간 시간표를 조건별로 빠르게 조회합니다."
+        : mainTab === "review"
+          ? "학생별 주간 시간표의 검토 상태와 메모를 관리합니다."
+          : mainTab === "issues"
+            ? "저장된 충돌과 입력 오류를 기준별로 다시 확인합니다."
+            : mainTab === "new"
+              ? "학생과 상담 대상의 새 시간표를 구성하고 저장합니다."
+              : mainTab === "instructor"
+                ? "강사별 수업 시간표와 수업 가능 일정을 관리합니다."
+                : "학생별 시간표를 입력하고 저장 그룹을 관리합니다.";
+  const showStudentLessonPalette =
+    !showIntroPage &&
+    isWorkspaceTab &&
+    roleView === "student" &&
+    studentScheduleInputTab === "sync" &&
+    !isInstructorReadOnly;
+  const renderWeekNavigation = (ariaLabel: string) => (
+    <nav aria-label={ariaLabel} className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      <button type="button" onClick={() => setWeekStart((prev) => shiftDate(prev, -7))} className="sync-pressable sync-focus min-h-10 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900">이전 주</button>
+      <button type="button" onClick={() => setWeekStart(mondayOfCurrentWeek())} className="sync-pressable sync-focus min-h-10 rounded-md bg-blue-600 px-3 text-xs font-black text-white shadow-sm">이번 주</button>
+      <button type="button" onClick={() => setWeekStart((prev) => shiftDate(prev, 7))} className="sync-pressable sync-focus min-h-10 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900">다음 주</button>
+    </nav>
+  );
+  const renderLessonCardPalette = () => (
+    <>
+      <LessonCardPalette
+        templates={lessonCardTemplates}
+        selectedTemplate={copiedLessonTemplate}
+        onCopy={(template) => {
+          setCopiedLessonTemplate(template);
+          setCopiedLessonRange(null);
+          setCopiedTimetableEventKey(null);
+          setLessonAutosave({
+            state: "idle",
+            message: `${template.subjectName} · ${template.instructorName} 카드가 준비되었습니다.`
+          });
+          setError(null);
+        }}
+        autosave={lessonAutosave}
+        disabled={
+          isInstructorReadOnly ||
+          !selectedStudentId ||
+          !selectedScheduleTagId ||
+          isDisplayedGroupInactive ||
+          timetableViewMode !== "detailed"
+        }
+        disabledReason={
+          isInstructorReadOnly
+            ? "강사 계정에서는 시간표를 수정할 수 없습니다."
+            : !selectedStudentId
+              ? "수업 카드를 사용하려면 학생을 먼저 선택해 주세요."
+              : !selectedScheduleTagId
+                ? "상단에서 시간표 분류(태그)를 먼저 선택해 주세요."
+                : isDisplayedGroupInactive
+                  ? "비활성 시간표에는 붙여넣을 수 없습니다."
+                  : timetableViewMode !== "detailed"
+                    ? "상세 보기에서 수업 카드를 붙여넣을 수 있습니다."
+                    : undefined
+        }
+      />
+      <p className="mt-2 px-1 text-[10px] font-semibold leading-4 text-slate-500">
+        빠른 카드와 기존 수업의 복사·붙여넣기, 수정, 삭제는 먼저 작업본에 반영됩니다. ‘저장하기’를 눌러 한 번에 서버에 저장하세요.
+      </p>
+    </>
+  );
+
   return (
     <main
       className={`sync-tabular grid min-h-screen w-full gap-3 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 lg:px-4 2xl:px-6 xl:items-start ${
@@ -7917,7 +7988,7 @@ export default function SynchroSPage() {
       {viewerRoleResolved && !isInstructorReadOnly ? (
       <aside className="hidden xl:block xl:sticky xl:top-4 xl:self-start">
         <div className="flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col gap-3">
-        <div className="sync-surface flex min-h-0 flex-[0_1_58%] flex-col overflow-hidden rounded-xl bg-white">
+        <div className={`sync-surface flex min-h-0 flex-col overflow-hidden rounded-xl bg-white ${showStudentLessonPalette ? "flex-[0_1_38%]" : "flex-[0_1_58%]"}`}>
           <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
@@ -8102,6 +8173,11 @@ export default function SynchroSPage() {
             })}
           </div>
         </section>
+        {showStudentLessonPalette ? (
+          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface min-h-0 flex-1 overflow-y-auto rounded-xl bg-white p-2">
+            {renderLessonCardPalette()}
+          </section>
+        ) : null}
         </div>
       </aside>
       ) : null}
@@ -8257,8 +8333,10 @@ export default function SynchroSPage() {
                 로그아웃
               </button>
               </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-slate-200 pt-2">
+                <p className="sync-copy min-w-0 flex-1 text-[11px] font-semibold text-slate-400">{menuDescription}</p>
               {!isInstructorReadOnly ? (
-                <nav aria-label="시간표 분류 바로가기" className="mt-2 flex flex-wrap items-center justify-end gap-1.5 border-t border-slate-200 pt-2">
+                <nav aria-label="시간표 분류 바로가기" className="flex flex-wrap items-center justify-end gap-1.5">
                   <span className="mr-1 text-[11px] font-black text-slate-400">시간표 분류</span>
                   <button
                     type="button"
@@ -8303,162 +8381,59 @@ export default function SynchroSPage() {
                   })}
                 </nav>
               ) : null}
-            </div>
-          </div>
-
-          {showIntroPage || !isWorkspaceTab || roleView !== "student" ? (
-          <div className="grid gap-3 xl:grid-cols-[auto_1fr]">
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-              <button
-                type="button"
-                className="sync-pressable sync-focus h-8 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                onClick={() => setWeekStart((prev) => shiftDate(prev, -7))}
-              >
-                이전 주
-              </button>
-              <button
-                type="button"
-                className="sync-pressable sync-focus h-8 rounded-md bg-blue-600 px-3 text-xs font-black text-white shadow-sm"
-                onClick={() => setWeekStart(mondayOfCurrentWeek())}
-              >
-                이번 주
-              </button>
-              <button
-                type="button"
-                className="sync-pressable sync-focus h-8 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                onClick={() => setWeekStart((prev) => shiftDate(prev, 7))}
-              >
-                다음 주
-              </button>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <div className="min-w-[240px] rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-                <div className="flex items-center gap-3">
-                  {!showIntroPage && isWorkspaceTab && roleView === "student" && selectedStudentOption ? (
-                    <SchoolEmblem student={selectedStudentOption} size="lg" />
-                  ) : (
-                    <div className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-base font-black text-slate-800">
-                      {showIntroPage ? "홈" : profileInitial}
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em]">
-                      {showIntroPage ? (isInstructorReadOnly ? "My Timetable" : "Today Dashboard") : mainTab === "overview" ? "Overview Dashboard" : profileTitle}
-                    </p>
-                    <p className="truncate text-lg font-black text-slate-900">
-                      {showIntroPage
-                        ? isInstructorReadOnly
-                          ? `${selectedInstructorLabel} 시간표`
-                          : `${homeDashboardRelativeLabel} ${homeDashboardWeekdayLabel}요일 운영 대시보드`
-                        : mainTab === "overview"
-                          ? "강사 스케줄 모아보기"
-                          : profileName}
-                    </p>
-                    <p className="truncate text-xs font-semibold text-slate-500">
-                      {showIntroPage
-                        ? isInstructorReadOnly
-                          ? "로그인한 강사의 이번 주 수업을 바로 확인합니다."
-                          : "선택한 날짜의 강사와 학생 배치를 한 화면에 정리합니다."
-                        : mainTab === "overview"
-                          ? "등록된 강사를 빠르게 넘겨 보며 심플 시간표를 조회합니다."
-                          : profileSecondary || "상세 정보 없음"}
-                    </p>
-                  </div>
-                </div>
               </div>
-
-              {!showIntroPage && isWorkspaceTab ? (
-                roleView === "instructor" ? (
-                  <div className="relative z-[120]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowInstructorPicker((prev) => !prev);
-                        setShowStudentPicker(false);
-                      }}
-                      className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"
-                    >
-                      강사: {selectedInstructorLabel}
-                    </button>
-                    {showInstructorPicker ? (
-                      <div className="absolute right-0 z-[220] mt-2 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-                        <div className="max-h-72 overflow-auto">
-                          {(filteredInstructors.length > 0 ? filteredInstructors : instructors).map((instructor) => (
-                            <button
-                              key={instructor.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedInstructorId(instructor.id);
-                                setShowInstructorPicker(false);
-                              }}
-                              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold ${
-                                instructor.id === selectedInstructorId
-                                  ? "bg-indigo-100 text-indigo-800"
-                                  : "text-slate-800 hover:bg-slate-100/70"
-                              }`}
-                            >
-                              강사: {instructor.name}
-                              {instructor.secondary ? (
-                                <span className="ml-2 text-xs font-medium text-slate-500">({instructor.secondary})</span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="relative z-[120]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowStudentPicker((prev) => !prev);
-                        setShowInstructorPicker(false);
-                      }}
-                      className="h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"
-                    >
-                      학생: {selectedStudentLabel}
-                    </button>
-                    {showStudentPicker ? (
-                      <div className="absolute right-0 z-[220] mt-2 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-                        <div className="max-h-80 overflow-auto">
-                          {(filteredStudents.length > 0 ? filteredStudents : students).map((student) => (
-                            <button
-                              key={student.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedStudentId(student.id);
-                                setShowStudentPicker(false);
-                              }}
-                              className={`block w-full rounded-md px-3 py-2 text-left text-sm font-semibold ${
-                                student.id === selectedStudentId
-                                  ? "bg-teal-100 text-teal-800"
-                                  : "text-slate-800 hover:bg-slate-100/70"
-                              }`}
-                            >
-                              <SchoolEmblem student={student} size="xs" />
-                              <span className="min-w-0">
-                                <span className="block truncate">학생: {student.name}</span>
-                                {student.secondary ? <span className="block truncate text-xs font-medium text-slate-500">{student.secondary}</span> : null}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              ) : null}
             </div>
           </div>
-          ) : null}
         </div>
       </section>
 
       {!showIntroPage && isWorkspaceTab && roleView === "instructor" ? (
-        <section className="sync-surface rounded-xl bg-white p-2">
-          <div className="inline-flex w-full rounded-lg bg-slate-100 p-1 sm:w-auto">
+        <section className="sync-surface rounded-xl bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <p className="sync-heading text-sm font-black text-slate-900">강사별 시간표</p>
+              <p className="sync-copy mt-1 text-xs font-semibold text-slate-500">강사를 선택해 수업 시간표와 가능 일정을 확인합니다.</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {renderWeekNavigation("강사 시간표 주차 이동")}
+              <div className="relative z-[120]">
+                <button
+                  type="button"
+                  aria-expanded={showInstructorPicker}
+                  onClick={() => {
+                    setShowInstructorPicker((prev) => !prev);
+                    setShowStudentPicker(false);
+                  }}
+                  className="sync-pressable sync-focus min-h-10 rounded-md border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm hover:border-blue-200 hover:bg-blue-50/40"
+                >
+                  강사: {selectedInstructorLabel} {showInstructorPicker ? "▴" : "▾"}
+                </button>
+                {showInstructorPicker ? (
+                  <div className="absolute right-0 z-[220] mt-2 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                    <div className="max-h-72 overflow-auto">
+                      {(filteredInstructors.length > 0 ? filteredInstructors : instructors).map((instructor) => (
+                        <button
+                          key={`instructor-header-picker-${instructor.id}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedInstructorId(instructor.id);
+                            setShowInstructorPicker(false);
+                          }}
+                          className={`sync-focus flex min-h-10 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold ${
+                            instructor.id === selectedInstructorId ? "bg-indigo-100 text-indigo-800" : "text-slate-800 hover:bg-slate-100/70"
+                          }`}
+                        >
+                          <span className="min-w-0 truncate font-black">{instructor.name}</span>
+                          {instructor.secondary ? <span className="min-w-0 truncate text-xs font-medium text-slate-500">{instructor.secondary}</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 inline-flex w-full rounded-lg bg-slate-100 p-1 sm:w-auto">
             {([
               ["schedule", "수업 시간표"],
               ["availability", "수업 가능 일정"]
@@ -8572,11 +8547,7 @@ export default function SynchroSPage() {
                     직접 입력하거나 노션 표를 붙여넣어 미리보기 후 DB에 저장합니다.
                   </p>
                 </div>
-                <nav aria-label="학생 시간표 주차 이동" className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-                  <button type="button" onClick={() => setWeekStart((prev) => shiftDate(prev, -7))} className="sync-pressable sync-focus min-h-10 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900">이전 주</button>
-                  <button type="button" onClick={() => setWeekStart(mondayOfCurrentWeek())} className="sync-pressable sync-focus min-h-10 rounded-md bg-blue-600 px-3 text-xs font-black text-white shadow-sm">이번 주</button>
-                  <button type="button" onClick={() => setWeekStart((prev) => shiftDate(prev, 7))} className="sync-pressable sync-focus min-h-10 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900">다음 주</button>
-                </nav>
+                {renderWeekNavigation("학생 시간표 주차 이동")}
                 <div className="relative z-[120]">
                   <button
                     type="button"
@@ -9111,46 +9082,9 @@ export default function SynchroSPage() {
         </div>
 
         <aside className="sync-surface min-w-0 rounded-xl bg-white p-3 text-slate-900">
-          {roleView === "student" && studentScheduleInputTab === "sync" ? (
-            <div className="mb-5">
-              <LessonCardPalette
-                templates={lessonCardTemplates}
-                selectedTemplate={copiedLessonTemplate}
-                onCopy={(template) => {
-                  setCopiedLessonTemplate(template);
-                  setCopiedLessonRange(null);
-                  setCopiedTimetableEventKey(null);
-                  setLessonAutosave({
-                    state: "idle",
-                    message: `${template.subjectName} · ${template.instructorName} 카드가 준비되었습니다.`
-                  });
-                  setError(null);
-                }}
-                autosave={lessonAutosave}
-                disabled={
-                  isInstructorReadOnly ||
-                  !selectedStudentId ||
-                  !selectedScheduleTagId ||
-                  isDisplayedGroupInactive ||
-                  timetableViewMode !== "detailed"
-                }
-                disabledReason={
-                  isInstructorReadOnly
-                    ? "강사 계정에서는 시간표를 수정할 수 없습니다."
-                    : !selectedStudentId
-                      ? "수업 카드를 사용하려면 학생을 먼저 선택해 주세요."
-                      : !selectedScheduleTagId
-                        ? "상단에서 시간표 분류(태그)를 먼저 선택해 주세요."
-                        : isDisplayedGroupInactive
-                          ? "비활성 시간표에는 붙여넣을 수 없습니다."
-                          : timetableViewMode !== "detailed"
-                            ? "상세 보기에서 수업 카드를 붙여넣을 수 있습니다."
-                            : undefined
-                }
-              />
-              <p className="mt-2 px-1 text-[10px] font-semibold leading-4 text-slate-500">
-                빠른 카드와 기존 수업의 복사·붙여넣기, 수정, 삭제는 먼저 작업본에 반영됩니다. 위의 ‘저장하기’를 눌러 한 번에 서버에 저장하세요.
-              </p>
+          {showStudentLessonPalette ? (
+            <div className="mb-5 xl:hidden">
+              {renderLessonCardPalette()}
             </div>
           ) : null}
           <div className="xl:hidden">
@@ -9573,6 +9507,7 @@ export default function SynchroSPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
+                  {renderWeekNavigation("전체 요약 주차 이동")}
                   {!isInstructorReadOnly && !showSuspendedRoster ? (
                     <button
                       type="button"
@@ -9881,7 +9816,9 @@ export default function SynchroSPage() {
                     </span>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                <div className="flex flex-wrap items-start justify-end gap-2">
+                  {renderWeekNavigation("시간표 검토 주차 이동")}
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                   {[
                     { filter: "all", label: "전체", value: reviewStats.total, className: "border-slate-200 bg-white text-slate-800" },
                     { filter: "unreviewed", label: "미검토", value: reviewStats.unreviewed, className: "border-slate-200 bg-slate-50 text-slate-700" },
@@ -9903,6 +9840,7 @@ export default function SynchroSPage() {
                       <p className="text-xl font-black">{item.value}</p>
                     </button>
                   ))}
+                  </div>
                 </div>
               </div>
 
@@ -10339,7 +10277,8 @@ export default function SynchroSPage() {
                     새로 기록되는 충돌은 학생명, 요일, 시간, 사유 기준으로 누적됩니다. 과거 데이터가 이미 저장돼 있었다면 함께 표시됩니다.
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-start justify-end gap-2">
+                  {renderWeekNavigation("오류 기록 주차 이동")}
                   <div className="rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-right">
                     <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">전체</p>
                     <p className="text-xl font-black text-slate-900">{conflictLogs.length}건</p>
@@ -10451,6 +10390,7 @@ export default function SynchroSPage() {
           ) : null}
           <ScheduleCreationWorkspace
             weekStart={weekStart}
+            headerActions={renderWeekNavigation("시간표 생성 주차 이동")}
             students={students}
             instructors={instructors}
             subjects={subjects}
@@ -10664,9 +10604,12 @@ export default function SynchroSPage() {
                   <h2 className="mt-1 text-2xl font-black text-slate-900">{selectedInstructorLabel} 강사 시간표</h2>
                   <p className="mt-1 text-xs font-semibold text-slate-500">{weekStart} ~ {weekEnd} 기준 본인 수업입니다.</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">This Week</p>
-                  <p className="text-2xl font-black text-slate-900">{displayEvents.length}개</p>
+                <div className="flex flex-wrap items-start justify-end gap-2">
+                  {renderWeekNavigation("내 시간표 주차 이동")}
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">This Week</p>
+                    <p className="text-2xl font-black text-slate-900">{displayEvents.length}개</p>
+                  </div>
                 </div>
               </div>
               {loading ? (
@@ -10734,6 +10677,7 @@ export default function SynchroSPage() {
             }))}
             studentSummaries={homeTodayStudentSummaries}
             loading={isHomeDashboardLoading}
+            headerActions={renderWeekNavigation("홈 주차 이동")}
             onSelectDate={(offset, date) => {
               setHomeDashboardDayOffset(offset);
               setWeekStart(mondayOfDate(date));

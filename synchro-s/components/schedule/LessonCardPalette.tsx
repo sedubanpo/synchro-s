@@ -97,10 +97,10 @@ export function LessonCardPalette({
   const visible = filtered.slice(0, query.trim() ? 80 : 24);
 
   return (
-    <section aria-labelledby="lesson-card-palette-title" className="rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.45)]">
+    <section aria-label="시간표 복사·붙여넣기" className="rounded-xl border border-slate-200 bg-white p-3 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.45)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 id="lesson-card-palette-title" className="text-sm font-black text-slate-900">시간표 복사·붙여넣기</h2>
+          <h2 className="text-sm font-black text-slate-900">시간표 복사·붙여넣기</h2>
           <p className="mt-0.5 text-[10px] font-semibold text-slate-500">강사·과목별 빠른 수업 카드</p>
         </div>
         <span className="sync-tabular rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-blue-700">{filtered.length}개</span>
