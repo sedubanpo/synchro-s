@@ -7988,7 +7988,7 @@ export default function SynchroSPage() {
       {!viewerRoleResolved || !isInstructorReadOnly ? (
       <aside className="hidden xl:block xl:sticky xl:top-4 xl:self-start">
         <div className="flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col gap-3 overflow-y-auto pr-1">
-        <div className={`sync-surface flex min-h-[28rem] flex-col overflow-hidden rounded-xl bg-white ${showStudentLessonPalette ? "shrink-0" : "flex-1"}`} aria-busy={!viewerRoleResolved}>
+        <div className={`sync-surface flex flex-col overflow-hidden rounded-xl bg-white ${showStudentLessonPalette ? "h-[30rem] shrink-0" : "min-h-[30rem] flex-1"}`} aria-busy={!viewerRoleResolved}>
           <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
@@ -8184,7 +8184,7 @@ export default function SynchroSPage() {
           </div>
         </section>
         {showStudentLessonPalette ? (
-          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface min-h-[30rem] shrink-0 overflow-y-auto rounded-xl bg-white p-2">
+          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface h-[30rem] shrink-0 overflow-y-auto rounded-xl bg-white p-2">
             {renderLessonCardPalette()}
           </section>
         ) : null}

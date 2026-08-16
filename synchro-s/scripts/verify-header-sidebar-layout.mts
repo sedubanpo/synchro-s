@@ -44,8 +44,8 @@ for (const label of ["홈 주차 이동", "전체 요약 주차 이동", "시간
 assert.match(pageSource, /aria-label="월간 시간표 달력"/, "최근 저장 기록 아래에 월간 달력을 배치해야 합니다.");
 assert.match(pageSource, /className="xl:hidden"/, "데스크톱 미만에서도 달력에 접근할 수 있어야 합니다.");
 assert.match(pageSource, /학생 시간표 빠른 수업 카드/, "학생용 빠른 수업 카드를 좌측 레일에 배치해야 합니다.");
-assert.match(pageSource, /min-h-\[28rem\][\s\S]*?showStudentLessonPalette \? "shrink-0" : "flex-1"/, "최근 저장 기록은 작은 노트북에서도 충분한 최소 높이를 가져야 합니다.");
-assert.match(pageSource, /학생 시간표 빠른 수업 카드" className="sync-surface min-h-\[30rem\]/, "빠른 수업 카드도 독립 스크롤 영역에서 충분한 높이를 가져야 합니다.");
+assert.match(pageSource, /showStudentLessonPalette \? "h-\[30rem\] shrink-0" : "min-h-\[30rem\] flex-1"/, "최근 저장 기록은 작은 노트북에서도 충분하면서 예측 가능한 높이를 가져야 합니다.");
+assert.match(pageSource, /학생 시간표 빠른 수업 카드" className="sync-surface h-\[30rem\]/, "빠른 수업 카드도 독립 스크롤 영역에서 충분한 고정 높이를 가져야 합니다.");
 assert.match(pageSource, /h-\[calc\(100vh-2rem\)\][\s\S]*?overflow-y-auto/, "길어진 좌측 패널은 하나의 명확한 세로 스크롤 소유자를 가져야 합니다.");
 assert.match(pageSource, /!viewerRoleResolved \|\| !isInstructorReadOnly/, "권한 확인 중에도 좌측 패널 자리를 먼저 예약해야 합니다.");
 assert.match(pageSource, /최근 저장 기록 불러오는 중/, "초기 좌측 패널에는 실제 크기의 로딩 상태를 제공해야 합니다.");
