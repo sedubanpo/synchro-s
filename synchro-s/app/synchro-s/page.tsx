@@ -4,6 +4,7 @@ import { InstructorAvailabilityWorkspace } from "@/components/schedule/Instructo
 import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
 import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
+import { LessonCardPalette, type LessonAutosaveState } from "@/components/schedule/LessonCardPalette";
 import {
   findInteriorScheduleGapEvents,
   mergeHomeInstructorEvents,
@@ -20,6 +21,7 @@ import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
 import { loadSchoolIconRegistry } from "@/lib/firebase/sharedIcons";
 import { getSchoolName, resolveSchoolIconUrl } from "@/lib/sharedIcons";
 import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
+import { buildLessonCardTemplates, type LessonCardTemplate } from "@/lib/lessonCardTemplates";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
 import { getOverlappingHourSlots } from "@/lib/timetableSlots";
@@ -157,6 +159,12 @@ type ImportProgress = {
   total: number;
   done: number;
   label: string;
+};
+
+type LessonSnapshotCacheEntry = {
+  groupId: string | null;
+  events: ScheduleEvent[];
+  classIds: string[];
 };
 
 type MainTab = "overview" | "review" | "new" | "issues" | RoleView;
@@ -1535,6 +1543,15 @@ export default function SynchroSPage() {
   const [studentDayDateOverrides, setStudentDayDateOverrides] = useState<Partial<Record<Weekday, string>>>({});
   const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
   const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
+  const [copiedLessonTemplate, setCopiedLessonTemplate] = useState<LessonCardTemplate | null>(null);
+  const [lessonAutosave, setLessonAutosave] = useState<LessonAutosaveState>({
+    state: "idle",
+    message: "수업 카드를 선택하면 자동 저장이 준비됩니다."
+  });
+  const lessonPasteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lessonPastePendingRef = useRef(0);
+  const lessonSnapshotCacheRef = useRef<Map<string, LessonSnapshotCacheEntry>>(new Map());
+  const lessonPasteScopeRef = useRef("");
   const [timeEditEvent, setTimeEditEvent] = useState<ScheduleEvent | null>(null);
   const [timeEditForm, setTimeEditForm] = useState({ startTime: "10:00", endTime: "11:00", subjectCode: "" });
   const [timeEditSaving, setTimeEditSaving] = useState(false);
@@ -1700,6 +1717,10 @@ export default function SynchroSPage() {
   const selectedInstructorAvailabilityByDay = useMemo(
     () => normalizeAvailableTimeSlotsByDay(selectedInstructorOption?.availableTimeSlotsByDay),
     [selectedInstructorOption]
+  );
+  const lessonCardTemplates = useMemo(
+    () => buildLessonCardTemplates({ instructors, subjects, classTypes, events: overviewEvents }),
+    [classTypes, instructors, overviewEvents, subjects]
   );
   const activeStudentIdSet = useMemo(() => new Set(students.map((item) => item.id)), [students]);
   const activeStudentNameSet = useMemo(
@@ -3986,7 +4007,7 @@ export default function SynchroSPage() {
       });
       if (res.status === 401) {
         moveToLogin();
-        return;
+        throw new Error("로그인이 만료되었습니다. 다시 로그인해 주세요.");
       }
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
@@ -3994,6 +4015,212 @@ export default function SynchroSPage() {
       }
     },
     [moveToLogin]
+  );
+
+  const persistLessonCardPaste = useCallback(
+    async (
+      template: LessonCardTemplate,
+      cell: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }
+    ) => {
+      if (!selectedStudentId || selectedStudentLabel === "학생 선택") throw new Error("학생을 먼저 선택해 주세요.");
+      if (!selectedScheduleTagId) throw new Error("상단에서 시간표 분류(태그)를 먼저 선택해 주세요.");
+      if (isInstructorReadOnly) throw new Error("강사 계정에서는 시간표를 수정할 수 없습니다.");
+      if (isDisplayedGroupInactive) throw new Error("비활성 시간표에는 붙여넣을 수 없습니다. 활성 시간표를 선택해 주세요.");
+
+      const instructor = instructors.find((item) => item.id === template.instructorId && item.isActive !== false);
+      const subject = subjects.find((item) => item.code === template.subjectCode);
+      const classType = classTypes.find((item) => item.code === template.classTypeCode);
+      if (!instructor || !subject || !classType) throw new Error("현재 사용할 수 없는 수업 카드입니다. 목록을 새로고침해 주세요.");
+      if (getInstructorDaysOff(instructor.id).includes(cell.weekday)) {
+        throw new Error(`${instructor.name} 강사는 ${weekdayLabel(cell.weekday)}요일 휴무입니다.`);
+      }
+
+      const endTime = addMinutesToTime(cell.startTime, template.durationMinutes);
+      if (timeToMinutes(endTime) > 24 * 60) throw new Error("운영 종료 시간을 넘겨 수업을 붙여넣을 수 없습니다.");
+
+      const scheduleInput: ScheduleFormInput = {
+        instructorId: instructor.id,
+        studentIds: [selectedStudentId],
+        subjectCode: subject.code,
+        classTypeCode: classType.code,
+        note: "수업 카드 자동 저장",
+        scheduleMode: cell.scheduleMode,
+        weekday: cell.scheduleMode === "recurring" ? cell.weekday : undefined,
+        classDate: cell.scheduleMode === "one_off" ? cell.classDate : undefined,
+        activeFrom: cell.scheduleMode === "recurring" ? weekStart : undefined,
+        startTime: cell.startTime,
+        endTime,
+        scheduleTagId: selectedScheduleTagId
+      };
+
+      const createRes = await fetch("/api/schedules/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: [scheduleInput],
+          targetType: "학생",
+          targetName: selectedStudentLabel,
+          historySource: "student_timetable"
+        })
+      });
+      if (createRes.status === 401) {
+        moveToLogin();
+        throw new Error("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+      }
+      const payload = (await createRes.json().catch(() => ({}))) as {
+        error?: string;
+        results?: { status?: string; classId?: string; conflict?: ConflictResult }[];
+      };
+      if (!createRes.ok) throw new Error(payload.error ?? "수업 자동 저장 요청에 실패했습니다.");
+
+      const result = payload.results?.[0];
+      if (!result) throw new Error("서버의 수업 저장 결과를 확인하지 못했습니다.");
+      if (result.status === "conflict") {
+        throw new Error(getConflictMessageForDisplay(result.conflict ?? { hasConflict: true, conflicts: [] }, [...effectiveStudentGroupByTargetId.values()], students) || "겹치는 수업이 있어 저장하지 않았습니다.");
+      }
+      if (!result.classId) throw new Error("저장된 수업 ID를 확인하지 못했습니다.");
+
+      const classDate = cell.classDate ?? shiftDate(weekStart, cell.weekday - 1);
+      const savedEvent: ScheduleEvent = {
+        id: result.classId,
+        scheduleMode: cell.scheduleMode,
+        instructorId: instructor.id,
+        instructorName: instructor.name,
+        studentIds: [selectedStudentId],
+        studentNames: [selectedStudentLabel],
+        subjectCode: subject.code,
+        subjectName: subject.label,
+        classTypeCode: classType.code,
+        classTypeLabel: classType.label,
+        badgeText: classType.badgeText,
+        weekday: cell.weekday,
+        classDate,
+        startTime: cell.startTime,
+        endTime,
+        note: scheduleInput.note,
+        progressStatus: "planned",
+        createdAt: new Date().toISOString()
+      };
+
+      const scopeKey = `${selectedStudentId}:${selectedScheduleTagId}:${weekStart}:${studentScheduleInputTab}`;
+      const initialEvents = (activeGroup?.snapshotEvents?.length ? activeGroup.snapshotEvents : displayEvents)
+        .filter((event) => !event.id.startsWith("draft-") && !isSyncDraftEventId(event.id))
+        .map((event) => ({ ...event }));
+      const cached = lessonSnapshotCacheRef.current.get(scopeKey) ?? {
+        groupId: activeGroup?.id ?? null,
+        events: initialEvents,
+        classIds: activeGroup?.classIds.length ? [...activeGroup.classIds] : extractSnapshotClassIds(initialEvents)
+      };
+      const nextSnapshot = mergeScheduleEventsByIdentity(cached.events, [savedEvent]);
+      const nextClassIds = Array.from(new Set([...cached.classIds, result.classId]));
+      let groupId = cached.groupId;
+
+      try {
+        if (groupId) {
+          await saveTimetableGroupSnapshot(groupId, nextClassIds, nextSnapshot);
+          setTimetableGroups((prev) => prev.map((group) => group.id === groupId ? { ...group, classIds: nextClassIds, snapshotEvents: nextSnapshot } : group));
+        } else {
+          const created = await createTimetableGroup({
+            name: `${weekStart} ${selectedStudentLabel} 시간표`,
+            roleView: "student",
+            targetId: selectedStudentId,
+            weekStart,
+            tagId: selectedScheduleTagId,
+            classIds: nextClassIds,
+            snapshotEvents: nextSnapshot,
+            isActive: true
+          });
+          if (!created?.id) throw new Error("시간표 그룹을 만들지 못했습니다.");
+          groupId = created.id;
+          setSelectedGroupId(created.id);
+          setIsCreatingNewSyncTimetable(false);
+        }
+      } catch (groupError) {
+        if (result.status === "created" || result.status === "enrolled") {
+          const rollbackRes = await fetch("/api/schedules/group", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classIds: [result.classId], roleView: "student", targetId: selectedStudentId })
+          }).catch(() => null);
+          if (!rollbackRes?.ok) {
+            throw new Error(
+              `${groupError instanceof Error ? groupError.message : "시간표 그룹 저장에 실패했습니다."} 수업 등록 자동 복구도 완료하지 못했습니다. 새로고침 후 해당 시간대를 확인해 주세요.`
+            );
+          }
+        }
+        throw groupError;
+      }
+
+      lessonSnapshotCacheRef.current.set(scopeKey, { groupId, events: nextSnapshot, classIds: nextClassIds });
+      if (lessonPasteScopeRef.current === scopeKey) {
+        setEvents((prev) => mergeScheduleEventsByIdentity(prev, [savedEvent]));
+        await Promise.all([loadWeek({ silent: true }), loadSaveHistory()]);
+      }
+      return `${weekdayLabel(cell.weekday)} ${cell.startTime} ${subject.label} · ${instructor.name}`;
+    },
+    [
+      activeGroup,
+      classTypes,
+      createTimetableGroup,
+      displayEvents,
+      effectiveStudentGroupByTargetId,
+      getInstructorDaysOff,
+      instructors,
+      isDisplayedGroupInactive,
+      isInstructorReadOnly,
+      loadSaveHistory,
+      loadWeek,
+      moveToLogin,
+      saveTimetableGroupSnapshot,
+      selectedScheduleTagId,
+      selectedStudentId,
+      selectedStudentLabel,
+      students,
+      studentScheduleInputTab,
+      subjects,
+      weekStart
+    ]
+  );
+
+  const queueLessonCardPaste = useCallback(
+    (cell: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }) => {
+      const template = copiedLessonTemplate;
+      if (!template) {
+        setLessonAutosave({ state: "error", message: "먼저 우측에서 수업 카드를 선택해 주세요." });
+        return;
+      }
+
+      const queuedScope = `${selectedStudentId}:${selectedScheduleTagId}:${weekStart}:${studentScheduleInputTab}`;
+      lessonPastePendingRef.current += 1;
+      setLessonAutosave({ state: "saving", message: `${lessonPastePendingRef.current}건 저장 대기 중…` });
+      const run = async () => {
+        if (lessonPasteScopeRef.current !== queuedScope) {
+          lessonPastePendingRef.current = Math.max(0, lessonPastePendingRef.current - 1);
+          return;
+        }
+        try {
+          const label = await persistLessonCardPaste(template, cell);
+          if (lessonPasteScopeRef.current === queuedScope) {
+            setNotice(`${label} 수업을 자동 저장했습니다.`);
+            setError(null);
+            setLessonAutosave({ state: "saved", message: `${label} 저장 완료` });
+          }
+        } catch (pasteError) {
+          const message = pasteError instanceof Error ? pasteError.message : "수업 카드 붙여넣기에 실패했습니다.";
+          if (lessonPasteScopeRef.current === queuedScope) {
+            setError(message);
+            setLessonAutosave({ state: "error", message });
+          }
+        } finally {
+          lessonPastePendingRef.current = Math.max(0, lessonPastePendingRef.current - 1);
+          if (lessonPastePendingRef.current > 0 && lessonPasteScopeRef.current === queuedScope) {
+            setLessonAutosave({ state: "saving", message: `${lessonPastePendingRef.current}건 저장 대기 중…` });
+          }
+        }
+      };
+      lessonPasteQueueRef.current = lessonPasteQueueRef.current.then(run, run);
+    },
+    [copiedLessonTemplate, persistLessonCardPaste, selectedScheduleTagId, selectedStudentId, studentScheduleInputTab, weekStart]
   );
 
   const updateTimetableGroupExpiration = useCallback(
@@ -4113,13 +4340,11 @@ export default function SynchroSPage() {
 
   const removeClassFromGroups = useCallback((classId: string) => {
     setTimetableGroups((prev) =>
-      prev
-        .map((group) => ({
+      prev.map((group) => ({
           ...group,
           classIds: group.classIds.filter((id) => id !== classId),
           snapshotEvents: group.snapshotEvents?.filter((event) => event.id !== classId)
         }))
-        .filter((group) => group.classIds.length > 0 || (group.snapshotEvents?.length ?? 0) > 0)
     );
   }, []);
 
@@ -5303,6 +5528,11 @@ export default function SynchroSPage() {
             ? `${ctx.subjectName} · ${ctx.startTime}-${ctx.endTime}로 수정했습니다.`
             : `수업을 ${ctx.startTime} / ${DAYS.find((day) => day.key === ctx.weekday)?.label ?? ""}로 이동했습니다.`
         );
+        lessonSnapshotCacheRef.current.clear();
+        setLessonAutosave({
+          state: "saved",
+          message: `${ctx.subjectName ?? targetEvent.subjectName} ${ctx.startTime}-${ctx.endTime} 수정 저장 완료`
+        });
         void loadWeek({ silent: true });
       } finally {
         movingLockRef.current = false;
@@ -6426,6 +6656,13 @@ export default function SynchroSPage() {
       }
 
       try {
+        setLessonAutosave({ state: "saving", message: `${event.subjectName} 수업 삭제 저장 중…` });
+        const impactedGroups = timetableGroups.filter(
+          (group) =>
+            group.roleView === roleView &&
+            group.targetId === currentTargetId &&
+            (group.classIds.includes(event.id) || (group.snapshotEvents ?? []).some((item) => item.id === event.id))
+        );
         const res = await fetch("/api/schedules/group", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -6449,13 +6686,25 @@ export default function SynchroSPage() {
 
         removeClassFromGroups(event.id);
         setEvents((prev) => prev.filter((item) => item.id !== event.id));
+        await Promise.all(
+          impactedGroups.map((group) => {
+            const nextClassIds = group.classIds.filter((id) => id !== event.id);
+            const nextSnapshot = (group.snapshotEvents ?? []).filter((item) => item.id !== event.id);
+            return saveTimetableGroupSnapshot(group.id, nextClassIds, nextSnapshot);
+          })
+        );
+        lessonSnapshotCacheRef.current.clear();
         await Promise.all([loadWeek({ silent: true }), loadOverviewEvents()]);
         setNotice(`${event.subjectName} ${event.startTime}-${event.endTime} 수업을 삭제했습니다.`);
+        setLessonAutosave({ state: "saved", message: `${event.subjectName} ${event.startTime}-${event.endTime} 삭제 저장 완료` });
       } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : "개별 삭제에 실패했습니다.");
+        const message = deleteError instanceof Error ? deleteError.message : "개별 삭제에 실패했습니다.";
+        setError(message);
+        setLessonAutosave({ state: "error", message });
+        void loadWeek({ silent: true });
       }
     },
-    [currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView]
+    [currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView, saveTimetableGroupSnapshot, timetableGroups]
   );
 
   const handleCreateSpecialNote = useCallback(async () => {
@@ -6957,6 +7206,13 @@ export default function SynchroSPage() {
   useEffect(() => {
     setStudentDayDateOverrides({});
   }, [selectedStudentId, weekStart]);
+
+  useEffect(() => {
+    lessonPasteScopeRef.current = `${selectedStudentId}:${selectedScheduleTagId}:${weekStart}:${studentScheduleInputTab}`;
+    lessonSnapshotCacheRef.current.clear();
+    setCopiedLessonTemplate(null);
+    setLessonAutosave({ state: "idle", message: "수업 카드를 선택하면 자동 저장이 준비됩니다." });
+  }, [selectedScheduleTagId, selectedStudentId, studentScheduleInputTab, weekStart]);
 
   useEffect(() => {
     if (selectedScheduleTagId && scheduleTags.length > 0 && !scheduleTags.some((tag) => tag.id === selectedScheduleTagId)) {
@@ -8246,6 +8502,17 @@ export default function SynchroSPage() {
                   onEventClick={!isInstructorReadOnly && roleView === "student" ? handleOpenTimeEdit : undefined}
                   onEventSave={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
                   onEventDelete={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
+                  pasteArmed={
+                    roleView === "student" &&
+                    studentScheduleInputTab === "sync" &&
+                    timetableViewMode === "detailed" &&
+                    Boolean(copiedLessonTemplate) &&
+                    Boolean(selectedStudentId) &&
+                    Boolean(selectedScheduleTagId) &&
+                    !isDisplayedGroupInactive &&
+                    !isInstructorReadOnly
+                  }
+                  onCellPaste={roleView === "student" && studentScheduleInputTab === "sync" ? queueLessonCardPaste : undefined}
                   onCellClick={(ctx) => {
                     if (isInstructorReadOnly) return;
                     if (roleView === "student") {
@@ -8278,6 +8545,46 @@ export default function SynchroSPage() {
         </div>
 
         <aside className="sync-surface min-w-0 rounded-xl bg-white p-3 text-slate-900">
+          {roleView === "student" && studentScheduleInputTab === "sync" ? (
+            <div className="mb-5">
+              <LessonCardPalette
+                templates={lessonCardTemplates}
+                selectedTemplate={copiedLessonTemplate}
+                onCopy={(template) => {
+                  setCopiedLessonTemplate(template);
+                  setLessonAutosave({
+                    state: "idle",
+                    message: `${template.subjectName} · ${template.instructorName} 카드가 준비되었습니다.`
+                  });
+                  setError(null);
+                }}
+                autosave={lessonAutosave}
+                disabled={
+                  isInstructorReadOnly ||
+                  !selectedStudentId ||
+                  !selectedScheduleTagId ||
+                  isDisplayedGroupInactive ||
+                  timetableViewMode !== "detailed"
+                }
+                disabledReason={
+                  isInstructorReadOnly
+                    ? "강사 계정에서는 시간표를 수정할 수 없습니다."
+                    : !selectedStudentId
+                      ? "수업 카드를 사용하려면 학생을 먼저 선택해 주세요."
+                      : !selectedScheduleTagId
+                        ? "상단에서 시간표 분류(태그)를 먼저 선택해 주세요."
+                        : isDisplayedGroupInactive
+                          ? "비활성 시간표에는 붙여넣을 수 없습니다."
+                          : timetableViewMode !== "detailed"
+                            ? "상세 보기에서 수업 카드를 붙여넣을 수 있습니다."
+                            : undefined
+                }
+              />
+              <p className="mt-2 px-1 text-[10px] font-semibold leading-4 text-slate-500">
+                카드 붙여넣기는 즉시 서버에 자동 저장됩니다. 기존 빈 칸 직접 입력은 초안 후 ‘DB로 저장’을 사용합니다.
+              </p>
+            </div>
+          ) : null}
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold">{monthLabel}</h2>
             <div className="flex gap-1">

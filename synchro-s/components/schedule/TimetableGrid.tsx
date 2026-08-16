@@ -17,6 +17,8 @@ type TimetableGridProps = {
   hiddenTimeSlots?: string[];
   viewMode?: TimetableViewMode;
   onCellClick: (ctx: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }) => void;
+  onCellPaste?: (ctx: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }) => void;
+  pasteArmed?: boolean;
   dayDateOverrides?: Partial<Record<Weekday, string>>;
   onDayDateChange?: (weekday: Weekday, classDate: string | null) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
@@ -195,6 +197,8 @@ export function TimetableGrid({
   hiddenTimeSlots = [],
   viewMode = "detailed",
   onCellClick,
+  onCellPaste,
+  pasteArmed = false,
   onEventMove,
   onEventClick,
   onEventSave,
@@ -211,6 +215,7 @@ export function TimetableGrid({
   const [highlightedStudentName, setHighlightedStudentName] = useState<string | null>(null);
   const [editingDateDay, setEditingDateDay] = useState<Weekday | null>(null);
   const [dateSelectionError, setDateSelectionError] = useState<string | null>(null);
+  const [activeCellKey, setActiveCellKey] = useState<string | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
   const progressByEventKey = new Map<string, { index: number; total: number }>();
@@ -529,13 +534,29 @@ export function TimetableGrid({
                   const isEmpty = cellEntries.length === 0;
                   const isDropTarget = dragOverCell === cellKey;
                   const isActiveDay = activeDaySet.has(day.key);
+                  const isPasteTarget = isEmpty && pasteArmed && activeCellKey === cellKey;
+                  const classDate = dayDateOverrides[day.key];
+                  const cellContext = {
+                    weekday: day.key,
+                    startTime: slot,
+                    classDate,
+                    scheduleMode: classDate ? "one_off" as const : "recurring" as const
+                  };
 
                   return (
                     <td
                       key={cellKey}
+                      tabIndex={isEmpty && viewMode === "detailed" ? 0 : undefined}
+                      aria-label={
+                        isEmpty && viewMode === "detailed"
+                          ? `${day.label}요일 ${formatTimeSlotRange(slot)} 빈 시간, ${pasteArmed ? "복사한 수업 붙여넣기" : "수업 입력"}`
+                          : undefined
+                      }
                       className={`border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
                         isDropTarget
                           ? "border-sky-300 bg-sky-100/80"
+                          : isPasteTarget
+                            ? "border-blue-500 bg-blue-100/80 shadow-[inset_0_0_0_2px_rgba(37,99,235,0.55)]"
                           : isSelectedRow
                             ? daysOffSet.has(day.key)
                               ? "border-blue-200 bg-blue-50/80 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]"
@@ -557,14 +578,22 @@ export function TimetableGrid({
                       }
                       onClick={() => {
                         if (isEmpty && viewMode === "detailed") {
-                          const classDate = dayDateOverrides[day.key];
-                          onCellClick({
-                            weekday: day.key,
-                            startTime: slot,
-                            classDate,
-                            scheduleMode: classDate ? "one_off" : "recurring"
-                          });
+                          setActiveCellKey(cellKey);
+                          if (pasteArmed && onCellPaste) onCellPaste(cellContext);
+                          else onCellClick(cellContext);
                         }
+                      }}
+                      onFocus={() => {
+                        if (isEmpty && viewMode === "detailed") setActiveCellKey(cellKey);
+                      }}
+                      onKeyDown={(event) => {
+                        if (!isEmpty || viewMode !== "detailed") return;
+                        const wantsPaste = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v";
+                        const wantsActivate = event.key === "Enter" || event.key === " ";
+                        if (!wantsPaste && !wantsActivate) return;
+                        event.preventDefault();
+                        if (pasteArmed && onCellPaste) onCellPaste(cellContext);
+                        else if (wantsActivate) onCellClick(cellContext);
                       }}
                       onDragOver={(event) => {
                         if (!canMoveEvents) return;
@@ -598,6 +627,8 @@ export function TimetableGrid({
                             className={`min-h-[46px] rounded-md border border-dashed transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
                               isDropTarget
                                 ? "border-sky-400 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.35)]"
+                                : isPasteTarget
+                                  ? "border-blue-500 bg-white shadow-[inset_0_0_0_1px_rgba(37,99,235,0.2)]"
                                 : isSelectedRow
                                   ? "border-blue-200 bg-white/35"
                                   : daysOffSet.has(day.key)
@@ -606,7 +637,11 @@ export function TimetableGrid({
                                       ? "border-transparent bg-transparent hover:border-sky-200 hover:bg-white/55"
                                       : "border-transparent hover:border-slate-200 hover:bg-slate-50"
                             }`}
-                          />
+                          >
+                            {isPasteTarget ? (
+                              <span className="flex min-h-[46px] items-center justify-center text-[10px] font-black text-blue-700">붙여넣기</span>
+                            ) : null}
+                          </div>
                         ) : viewMode === "summary" ? (
                           <div className="flex min-h-[46px] flex-wrap items-center justify-center gap-1.5 px-1 py-2">
                             {cellEntries.map((event) => (

@@ -36,7 +36,8 @@
     "verify:schedule-review-rendering": "node --import tsx scripts/verify-schedule-review-rendering.mts",
     "verify:login-resilience": "node --import tsx scripts/verify-login-resilience.mts",
     "verify:staff-attribution": "node --env-file=.env.local scripts/verify-staff-attribution-and-shared-state.mjs",
-    "verify:school-emblems": "node --import tsx scripts/verify-school-emblem-integration.mts"
+    "verify:school-emblems": "node --import tsx scripts/verify-school-emblem-integration.mts",
+    "verify:lesson-card-autosave": "node --import tsx scripts/verify-lesson-card-autosave.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
