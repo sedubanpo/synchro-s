@@ -6,6 +6,21 @@ import type { RoleView, ScheduleEvent, TimetableViewMode, Weekday } from "@/type
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
+export type TimetableCellContext = {
+  weekday: Weekday;
+  startTime: string;
+  classDate?: string;
+  scheduleMode: "recurring" | "one_off";
+};
+
+export type TimetableRangeSelection = {
+  anchor: TimetableCellContext;
+  cells: TimetableCellContext[];
+  events: ScheduleEvent[];
+  rowCount: number;
+  columnCount: number;
+};
+
 type TimetableGridProps = {
   roleView: RoleView;
   days: { key: Weekday; label: string }[];
@@ -16,14 +31,19 @@ type TimetableGridProps = {
   hideEmptyTimes?: boolean;
   hiddenTimeSlots?: string[];
   viewMode?: TimetableViewMode;
-  onCellClick: (ctx: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }) => void;
-  onCellPaste?: (ctx: { weekday: Weekday; startTime: string; classDate?: string; scheduleMode: "recurring" | "one_off" }) => void;
+  onCellClick: (ctx: TimetableCellContext) => void;
+  onCellPaste?: (ctx: TimetableCellContext) => void;
   pasteArmed?: boolean;
   dayDateOverrides?: Partial<Record<Weekday, string>>;
   onDayDateChange?: (weekday: Weekday, classDate: string | null) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
   onEventClick?: (event: ScheduleEvent) => void;
   onEventCopy?: (event: ScheduleEvent) => void;
+  onRangeCopy?: (selection: TimetableRangeSelection, mode: "copy" | "cut") => void;
+  onRangePaste?: (anchor: TimetableCellContext) => void;
+  onRangeDelete?: (selection: TimetableRangeSelection) => void;
+  onRangeEdit?: (event: ScheduleEvent) => void;
+  rangeEditing?: boolean;
   copiedEventKey?: string | null;
   onEventSave?: (event: ScheduleEvent) => Promise<void>;
   onEventDelete?: (event: ScheduleEvent) => Promise<void>;
@@ -199,6 +219,11 @@ export function TimetableGrid({
   onEventMove,
   onEventClick,
   onEventCopy,
+  onRangeCopy,
+  onRangePaste,
+  onRangeDelete,
+  onRangeEdit,
+  rangeEditing = false,
   copiedEventKey = null,
   onEventSave,
   onEventDelete,
@@ -215,8 +240,13 @@ export function TimetableGrid({
   const [editingDateDay, setEditingDateDay] = useState<Weekday | null>(null);
   const [dateSelectionError, setDateSelectionError] = useState<string | null>(null);
   const [activeCellKey, setActiveCellKey] = useState<string | null>(null);
+  const [rangeAnchorKey, setRangeAnchorKey] = useState<string | null>(null);
+  const [rangeFocusKey, setRangeFocusKey] = useState<string | null>(null);
+  const [rangeDragging, setRangeDragging] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
+  const rangeDidDragRef = useRef(false);
   const progressByEventKey = new Map<string, { index: number; total: number }>();
   const eventMap = new Map<string, ScheduleEvent[]>();
   const activeDaySet = new Set<Weekday>();
@@ -288,6 +318,48 @@ export function TimetableGrid({
       ? visibleTimeSlots
       : manuallyVisibleTimeSlots;
 
+  const rangeSelection = (() => {
+    if (!rangeEditing || !rangeAnchorKey || !rangeFocusKey) return null;
+    const [anchorDayRaw, anchorSlot] = rangeAnchorKey.split("-");
+    const [focusDayRaw, focusSlot] = rangeFocusKey.split("-");
+    const anchorDay = Number(anchorDayRaw) as Weekday;
+    const focusDay = Number(focusDayRaw) as Weekday;
+    const anchorColumn = renderDays.findIndex((day) => day.key === anchorDay);
+    const focusColumn = renderDays.findIndex((day) => day.key === focusDay);
+    const anchorRow = renderTimeSlots.indexOf(anchorSlot);
+    const focusRow = renderTimeSlots.indexOf(focusSlot);
+    if (anchorColumn < 0 || focusColumn < 0 || anchorRow < 0 || focusRow < 0) return null;
+
+    const minColumn = Math.min(anchorColumn, focusColumn);
+    const maxColumn = Math.max(anchorColumn, focusColumn);
+    const minRow = Math.min(anchorRow, focusRow);
+    const maxRow = Math.max(anchorRow, focusRow);
+    const cells: TimetableCellContext[] = [];
+    const selectedEvents = new Map<string, ScheduleEvent>();
+
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let column = minColumn; column <= maxColumn; column += 1) {
+        const day = renderDays[column];
+        const startTime = renderTimeSlots[row];
+        const classDate = dayDateOverrides[day.key];
+        cells.push({ weekday: day.key, startTime, classDate, scheduleMode: classDate ? "one_off" : "recurring" });
+        for (const event of eventMap.get(`${day.key}-${startTime}`) ?? []) {
+          selectedEvents.set(`${event.id}-${event.classDate}-${event.startTime}`, event);
+        }
+      }
+    }
+
+    const topLeft = cells[0];
+    return {
+      anchor: topLeft,
+      cells,
+      events: [...selectedEvents.values()],
+      rowCount: maxRow - minRow + 1,
+      columnCount: maxColumn - minColumn + 1
+    } satisfies TimetableRangeSelection;
+  })();
+  const selectedCellKeys = new Set(rangeSelection?.cells.map((cell) => `${cell.weekday}-${cell.startTime}`) ?? []);
+
   const moveByPayload = async (payload: { classId: string; durationMinutes: number }, weekday: Weekday, startTime: string) => {
     if (!canMoveEvents || !onEventMove) return;
     if (!payload.classId || Number.isNaN(payload.durationMinutes)) return;
@@ -306,6 +378,7 @@ export function TimetableGrid({
       dragPayloadRef.current = null;
       setDragOverCell(null);
       setDraggingKey(null);
+      setRangeDragging(false);
     };
 
     window.addEventListener("dragend", clearDragState);
@@ -317,6 +390,31 @@ export function TimetableGrid({
       window.removeEventListener("mouseup", clearDragState);
     };
   }, []);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeMenu = () => setContextMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("pointerdown", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (rangeEditing) return;
+    setRangeAnchorKey(null);
+    setRangeFocusKey(null);
+    setContextMenu(null);
+  }, [rangeEditing]);
 
   useEffect(() => {
     if (roleView !== "instructor" || !highlightedStudentName) return;
@@ -359,8 +457,93 @@ export function TimetableGrid({
   return (
     <div
       data-timetable-grid="true"
+      tabIndex={rangeEditing ? 0 : undefined}
+      aria-label={rangeEditing ? "시간표 격자 편집" : undefined}
+      onKeyDownCapture={(event) => {
+        if (!rangeEditing || !rangeSelection) return;
+        const key = event.key.toLowerCase();
+        const withCommand = event.metaKey || event.ctrlKey;
+        const arrowDelta: Partial<Record<string, [number, number]>> = {
+          arrowup: [-1, 0],
+          arrowdown: [1, 0],
+          arrowleft: [0, -1],
+          arrowright: [0, 1]
+        };
+        if (arrowDelta[key] && rangeFocusKey) {
+          const [focusDayRaw, focusSlot] = rangeFocusKey.split("-");
+          const row = renderTimeSlots.indexOf(focusSlot);
+          const column = renderDays.findIndex((day) => day.key === Number(focusDayRaw));
+          const [rowDelta, columnDelta] = arrowDelta[key] as [number, number];
+          const nextRow = Math.max(0, Math.min(renderTimeSlots.length - 1, row + rowDelta));
+          const nextColumn = Math.max(0, Math.min(renderDays.length - 1, column + columnDelta));
+          const nextKey = `${renderDays[nextColumn].key}-${renderTimeSlots[nextRow]}`;
+          event.preventDefault();
+          event.stopPropagation();
+          if (!event.shiftKey) setRangeAnchorKey(nextKey);
+          setRangeFocusKey(nextKey);
+          setActiveCellKey(nextKey);
+        } else if (withCommand && key === "c" && onRangeCopy) {
+          event.preventDefault();
+          event.stopPropagation();
+          onRangeCopy(rangeSelection, "copy");
+        } else if (withCommand && key === "x" && onRangeCopy) {
+          event.preventDefault();
+          event.stopPropagation();
+          onRangeCopy(rangeSelection, "cut");
+        } else if (withCommand && key === "v" && onRangePaste) {
+          event.preventDefault();
+          event.stopPropagation();
+          onRangePaste(rangeSelection.anchor);
+        } else if ((event.key === "Delete" || event.key === "Backspace") && onRangeDelete && rangeSelection.events.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          onRangeDelete(rangeSelection);
+        } else if (event.key === "Escape") {
+          setRangeAnchorKey(null);
+          setRangeFocusKey(null);
+          setContextMenu(null);
+        }
+      }}
       className={`sync-surface grid-scrollbar relative w-fit max-w-full overflow-auto rounded-xl ${inactive ? "bg-slate-200" : "bg-white"}`}
     >
+      {rangeSelection ? (
+        <div className="pointer-events-none sticky left-20 top-[49px] z-30 flex h-0 justify-start overflow-visible pl-2 pt-2" aria-live="polite">
+          <span className="rounded-full border border-blue-200 bg-white/95 px-2.5 py-1 text-[10px] font-black text-blue-700 shadow-md backdrop-blur-sm">
+            {rangeSelection.rowCount}행 × {rangeSelection.columnCount}열 · 수업 {rangeSelection.events.length}개
+          </span>
+        </div>
+      ) : null}
+      {contextMenu && rangeSelection ? (
+        <div
+          role="menu"
+          aria-label="시간표 선택 메뉴"
+          onPointerDown={(event) => event.stopPropagation()}
+          className="fixed z-[100] min-w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_18px_50px_-18px_rgba(15,23,42,0.55)]"
+          style={{ left: Math.min(contextMenu.x, window.innerWidth - 190), top: Math.min(contextMenu.y, window.innerHeight - 250) }}
+        >
+          <p className="px-2.5 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+            {rangeSelection.rowCount}행 × {rangeSelection.columnCount}열 선택
+          </p>
+          <button type="button" role="menuitem" disabled={rangeSelection.events.length === 0} onClick={() => { onRangeCopy?.(rangeSelection, "copy"); setContextMenu(null); }} className="sync-focus flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
+            <span>복사</span><kbd className="text-[10px] text-slate-400">⌘C</kbd>
+          </button>
+          <button type="button" role="menuitem" disabled={rangeSelection.events.length === 0} onClick={() => { onRangeCopy?.(rangeSelection, "cut"); setContextMenu(null); }} className="sync-focus flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-amber-50 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-40">
+            <span>오려두기</span><kbd className="text-[10px] text-slate-400">⌘X</kbd>
+          </button>
+          <button type="button" role="menuitem" disabled={!pasteArmed} onClick={() => { onRangePaste?.(rangeSelection.anchor); setContextMenu(null); }} className="sync-focus flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+            <span>붙여넣기</span><kbd className="text-[10px] text-slate-400">⌘V</kbd>
+          </button>
+          {rangeSelection.events.length === 1 ? (
+            <button type="button" role="menuitem" onClick={() => { onRangeEdit?.(rangeSelection.events[0]); setContextMenu(null); }} className="sync-focus flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-100">
+              수업 편집
+            </button>
+          ) : null}
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" role="menuitem" disabled={rangeSelection.events.length === 0} onClick={() => { onRangeDelete?.(rangeSelection); setContextMenu(null); }} className="sync-focus flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
+            <span>선택 수업 삭제</span><kbd className="text-[10px] text-rose-300">Delete</kbd>
+          </button>
+        </div>
+      ) : null}
       <img
         aria-hidden="true"
         src={ACADEMY_LOGO_URL}
@@ -534,6 +717,7 @@ export function TimetableGrid({
                   const isDropTarget = dragOverCell === cellKey;
                   const isActiveDay = activeDaySet.has(day.key);
                   const isPasteTarget = isEmpty && pasteArmed && activeCellKey === cellKey;
+                  const isRangeSelected = selectedCellKeys.has(cellKey);
                   const classDate = dayDateOverrides[day.key];
                   const cellContext = {
                     weekday: day.key,
@@ -551,8 +735,10 @@ export function TimetableGrid({
                           ? `${day.label}요일 ${formatTimeSlotRange(slot)} 빈 시간, ${pasteArmed ? "복사한 수업 붙여넣기" : "수업 입력"}`
                           : undefined
                       }
-                      className={`border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
-                        isDropTarget
+                      className={`border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${rangeEditing ? "select-none" : ""} ${
+                        isRangeSelected
+                          ? "relative z-[12] border-blue-400 bg-blue-100/75 shadow-[inset_0_0_0_2px_rgba(37,99,235,0.72)]"
+                        : isDropTarget
                           ? "border-sky-300 bg-sky-100/80"
                           : isPasteTarget
                             ? "border-blue-500 bg-blue-100/80 shadow-[inset_0_0_0_2px_rgba(37,99,235,0.55)]"
@@ -576,14 +762,57 @@ export function TimetableGrid({
                           : undefined
                       }
                       onClick={() => {
+                        if (rangeDidDragRef.current) {
+                          rangeDidDragRef.current = false;
+                          return;
+                        }
                         if (isEmpty && viewMode === "detailed") {
                           setActiveCellKey(cellKey);
                           if (pasteArmed && onCellPaste) onCellPaste(cellContext);
-                          else onCellClick(cellContext);
+                          else if (!rangeEditing) onCellClick(cellContext);
                         }
                       }}
+                      onDoubleClick={() => {
+                        if (isEmpty && viewMode === "detailed" && rangeEditing && !pasteArmed) {
+                          onCellClick(cellContext);
+                        }
+                      }}
+                      onPointerDown={(event) => {
+                        if (!rangeEditing || event.button !== 0) return;
+                        const target = event.target as HTMLElement;
+                        if (target.closest("button,[data-timetable-event='true']")) return;
+                        setRangeAnchorKey(event.shiftKey && rangeAnchorKey ? rangeAnchorKey : cellKey);
+                        setRangeFocusKey(cellKey);
+                        setRangeDragging(true);
+                        rangeDidDragRef.current = false;
+                        setActiveCellKey(cellKey);
+                        setContextMenu(null);
+                      }}
+                      onPointerEnter={() => {
+                        if (rangeEditing && rangeDragging) {
+                          if (rangeFocusKey !== cellKey) rangeDidDragRef.current = true;
+                          setRangeFocusKey(cellKey);
+                        }
+                      }}
+                      onContextMenu={(event) => {
+                        if (!rangeEditing) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (!selectedCellKeys.has(cellKey)) {
+                          setRangeAnchorKey(cellKey);
+                          setRangeFocusKey(cellKey);
+                        }
+                        setActiveCellKey(cellKey);
+                        setContextMenu({ x: event.clientX, y: event.clientY });
+                      }}
                       onFocus={() => {
-                        if (isEmpty && viewMode === "detailed") setActiveCellKey(cellKey);
+                        if (isEmpty && viewMode === "detailed") {
+                          setActiveCellKey(cellKey);
+                          if (rangeEditing && !rangeAnchorKey) {
+                            setRangeAnchorKey(cellKey);
+                            setRangeFocusKey(cellKey);
+                          }
+                        }
                       }}
                       onKeyDown={(event) => {
                         if (!isEmpty || viewMode !== "detailed") return;
@@ -673,6 +902,7 @@ export function TimetableGrid({
                                 <div
                                   key={`${event.id}-${event.classDate}-${event.startTime}`}
                                   draggable={canDragEvent}
+                                  data-timetable-event="true"
                                   tabIndex={canCopyEvent ? 0 : undefined}
                                   aria-keyshortcuts={canCopyEvent ? "Meta+C Control+C" : undefined}
                                   aria-label={
@@ -738,6 +968,12 @@ export function TimetableGrid({
                                   onClick={(clickEvent) => {
                                     if (canCopyEvent) {
                                       clickEvent.stopPropagation();
+                                      if (rangeEditing) {
+                                        setRangeAnchorKey(cellKey);
+                                        setRangeFocusKey(cellKey);
+                                        setActiveCellKey(cellKey);
+                                        setContextMenu(null);
+                                      }
                                       clickEvent.currentTarget.focus();
                                       return;
                                     }

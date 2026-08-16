@@ -86,5 +86,14 @@ assert.match(gridSource, /tabIndex=\{canCopyEvent \? 0 : undefined\}/, "기존 �
 assert.match(gridSource, /onDoubleClick=\{\(clickEvent\)/, "기존 수업 편집은 스프레드시트처럼 더블클릭으로 유지해야 합니다.");
 assert.match(gridSource, /tabIndex=\{isEmpty && viewMode === "detailed" \? 0 : undefined\}/, "빈 격자는 키보드로 접근 가능해야 합니다.");
 assert.match(pageSource, /!selectedStudentId[\s\S]*!selectedScheduleTagId/, "학생과 태그가 없으면 카드 입력을 차단해야 합니다.");
+assert.match(gridSource, /setRangeAnchorKey/, "시간표 셀 범위 선택의 시작점을 보존해야 합니다.");
+assert.match(gridSource, /setRangeFocusKey/, "포인터 드래그로 시간표 선택 범위를 확장해야 합니다.");
+assert.match(gridSource, /role="menu"[\s\S]*시간표 선택 메뉴/, "우클릭 시 접근 가능한 시간표 선택 메뉴를 제공해야 합니다.");
+assert.match(gridSource, /오려두기[\s\S]*붙여넣기[\s\S]*선택 수업 삭제/, "컨텍스트 메뉴에 복사·오려두기·붙여넣기·삭제가 있어야 합니다.");
+assert.match(gridSource, /key === "x"[\s\S]*key === "v"/, "범위 오려두기와 붙여넣기 단축키를 처리해야 합니다.");
+assert.match(pageSource, /type LessonRangeClipboard/, "시간표 범위의 상대 좌표를 보존하는 클립보드 모델이 있어야 합니다.");
+assert.match(pageSource, /columnOffset[\s\S]*rowOffset/, "범위 붙여넣기는 요일과 시간 간격을 보존해야 합니다.");
+assert.match(pageSource, /targetOccupied[\s\S]*빈 범위를 선택해 주세요/, "범위 붙여넣기는 기존 수업을 조용히 덮어쓰지 않아야 합니다.");
+assert.match(pageSource, /cutPersistedIds[\s\S]*setStagedDeletedEventIds/, "오려두기는 붙여넣기 성공 후 원본 삭제를 작업본에 기록해야 합니다.");
 
 console.log("staged timetable editing verification passed");
