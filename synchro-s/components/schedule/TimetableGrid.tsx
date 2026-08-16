@@ -599,6 +599,11 @@ export function TimetableGrid({
                         if (pasteArmed && onCellPaste) onCellPaste(cellContext);
                         else if (wantsActivate) onCellClick(cellContext);
                       }}
+                      onPaste={(event) => {
+                        if (!isEmpty || viewMode !== "detailed" || !pasteArmed || !onCellPaste) return;
+                        event.preventDefault();
+                        onCellPaste(cellContext);
+                      }}
                       onDragOver={(event) => {
                         if (!canMoveEvents) return;
                         event.preventDefault();
@@ -723,6 +728,16 @@ export function TimetableGrid({
                                     if (keyboardEvent.target !== keyboardEvent.currentTarget || !wantsCopy || !canCopyEvent || !onEventCopy) return;
                                     keyboardEvent.preventDefault();
                                     keyboardEvent.stopPropagation();
+                                    onEventCopy(event);
+                                  }}
+                                  onCopy={(clipboardEvent) => {
+                                    if (!canCopyEvent || !onEventCopy) return;
+                                    clipboardEvent.preventDefault();
+                                    clipboardEvent.stopPropagation();
+                                    clipboardEvent.clipboardData.setData(
+                                      "text/plain",
+                                      `${event.subjectName}\t${event.instructorName}\t${event.classTypeLabel}\t${event.startTime}-${event.endTime}`
+                                    );
                                     onEventCopy(event);
                                   }}
                                   onClick={(clickEvent) => {

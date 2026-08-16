@@ -79,6 +79,8 @@ assert.match(pageSource, /lessonPasteScopeRef\.current !== queuedScope/, "학생
 assert.match(pageSource, /lessonPasteScopeRef\.current === scopeKey/, "이전 범위의 저장 결과를 현재 시간표 화면에 섞지 않아야 합니다.");
 assert.match(gridSource, /\(event\.metaKey \|\| event\.ctrlKey\).*event\.key\.toLowerCase\(\) === "v"/, "격자에 포커스가 있을 때만 붙여넣기 단축키를 처리해야 합니다.");
 assert.match(gridSource, /\(keyboardEvent\.metaKey \|\| keyboardEvent\.ctrlKey\).*keyboardEvent\.key\.toLowerCase\(\) === "c"/, "기존 수업에 포커스가 있을 때 복사 단축키를 처리해야 합니다.");
+assert.match(gridSource, /onCopy=\{\(clipboardEvent\)/, "운영체제의 네이티브 복사 이벤트도 처리해야 합니다.");
+assert.match(gridSource, /onPaste=\{\(event\)/, "운영체제의 네이티브 붙여넣기 이벤트도 처리해야 합니다.");
 assert.match(gridSource, /tabIndex=\{canCopyEvent \? 0 : undefined\}/, "기존 수업은 키보드로 선택 가능해야 합니다.");
 assert.match(gridSource, /onDoubleClick=\{\(clickEvent\)/, "기존 수업 편집은 스프레드시트처럼 더블클릭으로 유지해야 합니다.");
 assert.match(gridSource, /tabIndex=\{isEmpty && viewMode === "detailed" \? 0 : undefined\}/, "빈 격자는 키보드로 접근 가능해야 합니다.");
