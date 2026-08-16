@@ -23,6 +23,8 @@ type TimetableGridProps = {
   onDayDateChange?: (weekday: Weekday, classDate: string | null) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
   onEventClick?: (event: ScheduleEvent) => void;
+  onEventCopy?: (event: ScheduleEvent) => void;
+  copiedEventKey?: string | null;
   onEventSave?: (event: ScheduleEvent) => Promise<void>;
   onEventDelete?: (event: ScheduleEvent) => Promise<void>;
   studentSecondaryLookup?: Readonly<Record<string, string>>;
@@ -201,6 +203,8 @@ export function TimetableGrid({
   pasteArmed = false,
   onEventMove,
   onEventClick,
+  onEventCopy,
+  copiedEventKey = null,
   onEventSave,
   onEventDelete,
   studentSecondaryLookup = {},
@@ -661,11 +665,21 @@ export function TimetableGrid({
                               const isGroupedRegular = isInstructorRegularGroupEvent(event);
                               const isSyntheticSelfStudy = isSelfStudyEvent(event);
                               const canDragEvent = canMoveEvents && !isGroupedRegular && !isSyntheticSelfStudy;
+                              const canCopyEvent = Boolean(onEventCopy) && !isGroupedRegular && !isSyntheticSelfStudy && !isDraftEvent(event);
+                              const copyKey = `${event.id}-${event.classDate}-${event.startTime}`;
+                              const isCopiedEvent = copiedEventKey === copyKey;
 
                               return (
                                 <div
                                   key={`${event.id}-${event.classDate}-${event.startTime}`}
                                   draggable={canDragEvent}
+                                  tabIndex={canCopyEvent ? 0 : undefined}
+                                  aria-keyshortcuts={canCopyEvent ? "Meta+C Control+C" : undefined}
+                                  aria-label={
+                                    canCopyEvent
+                                      ? `${event.subjectName} ${event.instructorName} ${event.classTypeLabel} ${event.startTime}-${event.endTime}, Command 또는 Control C로 복사`
+                                      : undefined
+                                  }
                                   onDragStart={(dragEvent) => {
                                     if (!canDragEvent || !onEventMove) return;
                                     setDraggingKey(eventKey);
@@ -697,8 +711,31 @@ export function TimetableGrid({
                                     setDragOverCell(null);
                                     setDraggingKey(null);
                                   }}
-                                  className={draggingKey === eventKey ? "opacity-60" : ""}
+                                  className={`rounded-lg outline-none transition-[box-shadow,opacity] ${
+                                    draggingKey === eventKey ? "opacity-60" : ""
+                                  } ${
+                                    isCopiedEvent
+                                      ? "shadow-[0_0_0_3px_rgba(37,99,235,0.75),0_0_0_6px_rgba(219,234,254,0.95)]"
+                                      : canCopyEvent ? "focus:shadow-[0_0_0_3px_rgba(37,99,235,0.45)]" : ""
+                                  }`}
+                                  onKeyDown={(keyboardEvent) => {
+                                    const wantsCopy = (keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key.toLowerCase() === "c";
+                                    if (keyboardEvent.target !== keyboardEvent.currentTarget || !wantsCopy || !canCopyEvent || !onEventCopy) return;
+                                    keyboardEvent.preventDefault();
+                                    keyboardEvent.stopPropagation();
+                                    onEventCopy(event);
+                                  }}
                                   onClick={(clickEvent) => {
+                                    if (canCopyEvent) {
+                                      clickEvent.stopPropagation();
+                                      clickEvent.currentTarget.focus();
+                                      return;
+                                    }
+                                    if (!onEventClick || isGroupedRegular || isDraftEvent(event)) return;
+                                    clickEvent.stopPropagation();
+                                    onEventClick(event);
+                                  }}
+                                  onDoubleClick={(clickEvent) => {
                                     if (!onEventClick || isGroupedRegular || isDraftEvent(event)) return;
                                     clickEvent.stopPropagation();
                                     onEventClick(event);

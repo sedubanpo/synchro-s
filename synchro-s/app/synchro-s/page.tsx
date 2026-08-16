@@ -21,7 +21,7 @@ import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
 import { loadSchoolIconRegistry } from "@/lib/firebase/sharedIcons";
 import { getSchoolName, resolveSchoolIconUrl } from "@/lib/sharedIcons";
 import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
-import { buildLessonCardTemplates, type LessonCardTemplate } from "@/lib/lessonCardTemplates";
+import { buildLessonCardTemplates, createLessonCardTemplateFromEvent, type LessonCardTemplate } from "@/lib/lessonCardTemplates";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
 import { getOverlappingHourSlots } from "@/lib/timetableSlots";
@@ -1544,9 +1544,10 @@ export default function SynchroSPage() {
   const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
   const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
   const [copiedLessonTemplate, setCopiedLessonTemplate] = useState<LessonCardTemplate | null>(null);
+  const [copiedTimetableEventKey, setCopiedTimetableEventKey] = useState<string | null>(null);
   const [lessonAutosave, setLessonAutosave] = useState<LessonAutosaveState>({
     state: "idle",
-    message: "수업 카드를 선택하면 자동 저장이 준비됩니다."
+    message: "기존 수업을 복사하거나 빠른 수업 카드를 선택해 주세요."
   });
   const lessonPasteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lessonPastePendingRef = useRef(0);
@@ -4043,7 +4044,7 @@ export default function SynchroSPage() {
         studentIds: [selectedStudentId],
         subjectCode: subject.code,
         classTypeCode: classType.code,
-        note: "수업 카드 자동 저장",
+        note: template.source === "timetable" ? "시간표 셀 복사 자동 저장" : "수업 카드 자동 저장",
         scheduleMode: cell.scheduleMode,
         weekday: cell.scheduleMode === "recurring" ? cell.weekday : undefined,
         classDate: cell.scheduleMode === "one_off" ? cell.classDate : undefined,
@@ -7211,7 +7212,8 @@ export default function SynchroSPage() {
     lessonPasteScopeRef.current = `${selectedStudentId}:${selectedScheduleTagId}:${weekStart}:${studentScheduleInputTab}`;
     lessonSnapshotCacheRef.current.clear();
     setCopiedLessonTemplate(null);
-    setLessonAutosave({ state: "idle", message: "수업 카드를 선택하면 자동 저장이 준비됩니다." });
+    setCopiedTimetableEventKey(null);
+    setLessonAutosave({ state: "idle", message: "기존 수업을 복사하거나 빠른 수업 카드를 선택해 주세요." });
   }, [selectedScheduleTagId, selectedStudentId, studentScheduleInputTab, weekStart]);
 
   useEffect(() => {
@@ -8500,6 +8502,29 @@ export default function SynchroSPage() {
                   } : undefined}
                   onEventMove={!isInstructorReadOnly && roleView === "student" ? handleMoveSchedule : undefined}
                   onEventClick={!isInstructorReadOnly && roleView === "student" ? handleOpenTimeEdit : undefined}
+                  onEventCopy={
+                    !isInstructorReadOnly &&
+                    roleView === "student" &&
+                    studentScheduleInputTab === "sync" &&
+                    timetableViewMode === "detailed" &&
+                    !isDisplayedGroupInactive
+                      ? (event) => {
+                          const template = createLessonCardTemplateFromEvent(event);
+                          if (!template) {
+                            setLessonAutosave({ state: "error", message: "이 수업은 복사할 수 없습니다." });
+                            return;
+                          }
+                          setCopiedLessonTemplate(template);
+                          setCopiedTimetableEventKey(`${event.id}-${event.classDate}-${event.startTime}`);
+                          setLessonAutosave({
+                            state: "idle",
+                            message: `${template.subjectName} · ${template.instructorName} 수업을 시간표에서 복사했습니다.`
+                          });
+                          setError(null);
+                        }
+                      : undefined
+                  }
+                  copiedEventKey={copiedTimetableEventKey}
                   onEventSave={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleSaveSingleSchedule : undefined}
                   onEventDelete={!isInstructorReadOnly && timetableViewMode === "detailed" ? handleDeleteSingleSchedule : undefined}
                   pasteArmed={
@@ -8552,6 +8577,7 @@ export default function SynchroSPage() {
                 selectedTemplate={copiedLessonTemplate}
                 onCopy={(template) => {
                   setCopiedLessonTemplate(template);
+                  setCopiedTimetableEventKey(null);
                   setLessonAutosave({
                     state: "idle",
                     message: `${template.subjectName} · ${template.instructorName} 카드가 준비되었습니다.`
@@ -8581,7 +8607,7 @@ export default function SynchroSPage() {
                 }
               />
               <p className="mt-2 px-1 text-[10px] font-semibold leading-4 text-slate-500">
-                카드 붙여넣기는 즉시 서버에 자동 저장됩니다. 기존 빈 칸 직접 입력은 초안 후 ‘DB로 저장’을 사용합니다.
+                기존 수업과 빠른 수업 카드의 붙여넣기는 즉시 서버에 자동 저장됩니다. 기존 빈 칸 직접 입력은 초안 후 ‘DB로 저장’을 사용합니다.
               </p>
             </div>
           ) : null}

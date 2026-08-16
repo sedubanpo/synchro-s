@@ -37,6 +37,14 @@ function getAutosaveTone(state: LessonAutosaveState["state"]): string {
   return "border-slate-200 bg-slate-50 text-slate-500";
 }
 
+function formatDuration(durationMinutes: number): string {
+  const hours = Math.floor(durationMinutes / 60);
+  const minutes = durationMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}시간 ${minutes}분`;
+  if (hours > 0) return `${hours}시간`;
+  return `${minutes}분`;
+}
+
 export function LessonCardPalette({
   templates,
   selectedTemplate,
@@ -54,7 +62,7 @@ export function LessonCardPalette({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-600">Quick lesson cards</p>
-          <h2 id="lesson-card-palette-title" className="mt-0.5 text-sm font-black text-slate-900">수업 카드 붙여넣기</h2>
+          <h2 id="lesson-card-palette-title" className="mt-0.5 text-sm font-black text-slate-900">시간표 복사·붙여넣기</h2>
         </div>
         <span className="sync-tabular rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-blue-700">{filtered.length}개</span>
       </div>
@@ -77,14 +85,16 @@ export function LessonCardPalette({
       </label>
 
       <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-600">
-        카드를 선택한 뒤 빈 칸을 누르거나 <kbd className="rounded border border-slate-300 bg-white px-1 py-0.5 font-mono text-[10px]">⌘/Ctrl+V</kbd>를 누르면 즉시 저장됩니다.
+        기존 수업을 한 번 눌러 선택하고 <kbd className="rounded border border-slate-300 bg-white px-1 py-0.5 font-mono text-[10px]">⌘/Ctrl+C</kbd> 후, 빈 칸에서 <kbd className="rounded border border-slate-300 bg-white px-1 py-0.5 font-mono text-[10px]">⌘/Ctrl+V</kbd>를 누르세요. 수업 편집은 두 번 누릅니다.
       </p>
 
       {selectedTemplate ? (
         <div className="mt-3 rounded-lg border-2 border-blue-500 bg-blue-600 px-3 py-2 text-white shadow-sm" aria-live="polite">
-          <p className="text-[9px] font-black uppercase tracking-[0.14em] text-blue-100">복사한 카드</p>
+          <p className="text-[9px] font-black uppercase tracking-[0.14em] text-blue-100">
+            {selectedTemplate.source === "timetable" ? "시간표에서 복사한 수업" : "복사한 카드"}
+          </p>
           <p className="mt-0.5 truncate text-xs font-black">{selectedTemplate.subjectName} · {selectedTemplate.instructorName}</p>
-          <p className="mt-0.5 text-[10px] font-bold text-blue-100">{selectedTemplate.classTypeLabel} · 1시간</p>
+          <p className="mt-0.5 text-[10px] font-bold text-blue-100">{selectedTemplate.classTypeLabel} · {formatDuration(selectedTemplate.durationMinutes)}</p>
         </div>
       ) : null}
 

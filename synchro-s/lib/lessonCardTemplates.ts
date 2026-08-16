@@ -1,4 +1,5 @@
 import { instructorMatchesSubject } from "@/lib/instructorSubjectMatching";
+import { timeToMinutes } from "@/lib/time";
 import type { ClassTypeOption, ScheduleEvent, SelectOption, SubjectOption } from "@/types/schedule";
 
 export type LessonCardTemplate = {
@@ -12,6 +13,7 @@ export type LessonCardTemplate = {
   badgeText: string;
   durationMinutes: number;
   usageCount: number;
+  source: "preset" | "timetable";
 };
 
 function normalize(value: string): string {
@@ -62,7 +64,8 @@ export function buildLessonCardTemplates(input: {
           classTypeLabel: classType.label,
           badgeText: classType.badgeText,
           durationMinutes: 60,
-          usageCount: usageByKey.get(key) ?? 0
+          usageCount: usageByKey.get(key) ?? 0,
+          source: "preset"
         });
       }
     }
@@ -76,6 +79,25 @@ export function buildLessonCardTemplates(input: {
     if (instructorDiff !== 0) return instructorDiff;
     return a.classTypeLabel.localeCompare(b.classTypeLabel, "ko");
   });
+}
+
+export function createLessonCardTemplateFromEvent(event: ScheduleEvent): LessonCardTemplate | null {
+  const durationMinutes = timeToMinutes(event.endTime) - timeToMinutes(event.startTime);
+  if (!event.instructorId || !event.subjectCode || !event.classTypeCode || durationMinutes <= 0) return null;
+
+  return {
+    key: `timetable::${event.id}::${event.classDate}::${event.startTime}`,
+    instructorId: event.instructorId,
+    instructorName: event.instructorName,
+    subjectCode: event.subjectCode,
+    subjectName: event.subjectName,
+    classTypeCode: event.classTypeCode,
+    classTypeLabel: event.classTypeLabel,
+    badgeText: event.badgeText,
+    durationMinutes,
+    usageCount: 0,
+    source: "timetable"
+  };
 }
 
 export function filterLessonCardTemplates(templates: LessonCardTemplate[], query: string): LessonCardTemplate[] {
