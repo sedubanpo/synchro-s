@@ -3236,25 +3236,10 @@ export default function SynchroSPage() {
 
     const data = (await res.json()) as OptionsResponse;
 
-    let decoratedStudents = data.students;
-    let decoratedSuspendedStudents = data.suspendedStudents ?? [];
-    try {
-      const schoolIcons = await loadSchoolIconRegistry(Boolean(opts?.refreshSheets));
-      const decorate = (student: SelectOption): SelectOption => ({
-        ...student,
-        school: getSchoolName(student) || undefined,
-        schoolIconUrl: resolveSchoolIconUrl(schoolIcons, student)
-      });
-      decoratedStudents = data.students.map(decorate);
-      decoratedSuspendedStudents = (data.suspendedStudents ?? []).map(decorate);
-    } catch (iconError) {
-      console.warn("학교 엠블럼을 불러오지 못해 이니셜로 표시합니다.", iconError);
-    }
-
     setInstructors(data.instructors);
     setSuspendedInstructors(data.suspendedInstructors ?? []);
-    setStudents(decoratedStudents);
-    setSuspendedStudents(decoratedSuspendedStudents);
+    setStudents(data.students);
+    setSuspendedStudents(data.suspendedStudents ?? []);
     setSubjects(data.subjects);
     setClassTypes(data.classTypes);
     if (data.viewerRole) {
@@ -3287,6 +3272,21 @@ export default function SynchroSPage() {
     });
 
     setError(null);
+
+    // 학교 엠블럼은 장식 데이터이므로 홈의 권한·명단·시간표 로딩을 막지 않습니다.
+    // 핵심 옵션을 먼저 노출한 뒤 레지스트리가 도착하면 학생 정보만 점진적으로 보강합니다.
+    try {
+      const schoolIcons = await loadSchoolIconRegistry(Boolean(opts?.refreshSheets));
+      const decorate = (student: SelectOption): SelectOption => ({
+        ...student,
+        school: getSchoolName(student) || undefined,
+        schoolIconUrl: resolveSchoolIconUrl(schoolIcons, student)
+      });
+      setStudents(data.students.map(decorate));
+      setSuspendedStudents((data.suspendedStudents ?? []).map(decorate));
+    } catch (iconError) {
+      console.warn("학교 엠블럼을 불러오지 못해 이니셜로 표시합니다.", iconError);
+    }
   }, [moveToLogin]);
 
   const loadSubjectSettings = useCallback(async () => {
@@ -7982,13 +7982,13 @@ export default function SynchroSPage() {
   return (
     <main
       className={`sync-tabular grid min-h-screen w-full gap-3 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 lg:px-4 2xl:px-6 xl:items-start ${
-        viewerRoleResolved && !isInstructorReadOnly ? "xl:grid-cols-[15.5rem_minmax(0,1fr)]" : "xl:grid-cols-1"
+        !viewerRoleResolved || !isInstructorReadOnly ? "xl:grid-cols-[15.5rem_minmax(0,1fr)]" : "xl:grid-cols-1"
       }`}
     >
-      {viewerRoleResolved && !isInstructorReadOnly ? (
+      {!viewerRoleResolved || !isInstructorReadOnly ? (
       <aside className="hidden xl:block xl:sticky xl:top-4 xl:self-start">
-        <div className="flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col gap-3">
-        <div className={`sync-surface flex min-h-0 flex-col overflow-hidden rounded-xl bg-white ${showStudentLessonPalette ? "flex-[0_1_38%]" : "flex-[0_1_58%]"}`}>
+        <div className="flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col gap-3 overflow-y-auto pr-1">
+        <div className={`sync-surface flex min-h-[28rem] flex-col overflow-hidden rounded-xl bg-white ${showStudentLessonPalette ? "shrink-0" : "flex-1"}`} aria-busy={!viewerRoleResolved}>
           <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
@@ -8009,7 +8009,17 @@ export default function SynchroSPage() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-            {saveHistory.length === 0 ? (
+            {!viewerRoleResolved ? (
+              <div className="space-y-3" aria-label="최근 저장 기록 불러오는 중">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={`history-loading-${index}`} className="animate-pulse rounded-lg border border-slate-200 bg-white px-3 py-3">
+                    <div className="h-2.5 w-20 rounded bg-slate-200" />
+                    <div className="mt-3 h-4 w-24 rounded bg-slate-200" />
+                    <div className="mt-2 h-5 w-16 rounded-md bg-emerald-100" />
+                  </div>
+                ))}
+              </div>
+            ) : saveHistory.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold leading-5 text-slate-500">
                 아직 저장 기록이 없습니다.
                 <br />
@@ -8174,7 +8184,7 @@ export default function SynchroSPage() {
           </div>
         </section>
         {showStudentLessonPalette ? (
-          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface min-h-0 flex-1 overflow-y-auto rounded-xl bg-white p-2">
+          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface min-h-[30rem] shrink-0 overflow-y-auto rounded-xl bg-white p-2">
             {renderLessonCardPalette()}
           </section>
         ) : null}
@@ -8590,58 +8600,11 @@ export default function SynchroSPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="inline-flex rounded-t-xl bg-slate-100 p-1 xl:col-span-3 xl:justify-self-end">
-                  {([
-                    ["sync", "싱크로 시간표"],
-                    ["notion", "노션 시간표"],
-                    ["availability", "가능 일정"]
-                  ] as const).map(([tab, label]) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => setStudentScheduleInputTab(tab)}
-                      className={`sync-pressable sync-focus min-h-10 rounded-lg px-4 text-xs font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
-                        studentScheduleInputTab === tab
-                          ? "bg-white text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_18px_rgba(37,99,235,0.08)]"
-                          : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {studentScheduleInputTab === "sync" ? (
-                <div className="grid gap-3 pt-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-                  <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-                    시간표의 빈칸을 누르면 과목, 강사, 수업 유형, 수업 시간을 입력할 수 있습니다. 초안은 아래 시간표에 바로 표시되고, DB 저장 전에는 실제 데이터가 바뀌지 않습니다.
-                  </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      disabled={savingSyncDrafts || !selectedStudentId}
-                      onClick={handleStartNewSyncTimetable}
-                      className={`sync-pressable sync-focus min-h-9 rounded-lg border px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 ${
-                        isCreatingNewSyncTimetable
-                          ? "border-blue-600 bg-blue-600 text-white"
-                          : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                      }`}
-                    >
-                      {isCreatingNewSyncTimetable ? "새 시간표 작성 중" : "새 시간표 만들기"}
-                    </button>
-                    <span className={`sync-tabular rounded-full px-3 py-1.5 text-xs font-black ${hasPendingTimetableChanges ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
-                      변경 {pendingTimetableChangeCount}건
-                    </span>
-                    <button
-                      type="button"
-                      disabled={savingSyncDrafts || !hasPendingTimetableChanges}
-                      onClick={handleResetSyncDrafts}
-                      className="sync-pressable sync-focus min-h-9 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      변경 취소
-                    </button>
-                  </div>
+                !selectedStudentId || !selectedScheduleTagId || syncDraftItems.length > 0 ? (
+                <div className="grid gap-3 pt-3 lg:grid-cols-2">
                   {selectedStudentId ? null : (
                     <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 lg:col-span-2">
                       먼저 학생을 선택해야 싱크로 시간표를 입력할 수 있습니다.
@@ -8670,6 +8633,7 @@ export default function SynchroSPage() {
                     </div>
                   ) : null}
                 </div>
+                ) : null
               ) : studentScheduleInputTab === "notion" ? (
                 <div className="pt-3">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -8827,6 +8791,34 @@ export default function SynchroSPage() {
               <p className="sync-heading text-sm font-black text-slate-800">시간표 보기 모드</p>
               <p className="sync-copy text-[11px] font-semibold text-slate-500">상세 블록과 중앙 배지형 심플 표시를 전환하고 빈 요일이나 시간대를 접을 수 있습니다.</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
+                {roleView === "student" && studentScheduleInputTab === "sync" ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={savingSyncDrafts || !selectedStudentId}
+                      onClick={handleStartNewSyncTimetable}
+                      className={`sync-pressable sync-focus min-h-8 rounded-full border px-3 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 ${
+                        isCreatingNewSyncTimetable
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                      }`}
+                    >
+                      {isCreatingNewSyncTimetable ? "새 시간표 작성 중" : "새 시간표 만들기"}
+                    </button>
+                    <span className={`sync-tabular rounded-full px-3 py-1.5 text-xs font-black ${hasPendingTimetableChanges ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
+                      변경 {pendingTimetableChangeCount}건
+                    </span>
+                    <button
+                      type="button"
+                      disabled={savingSyncDrafts || !hasPendingTimetableChanges}
+                      onClick={handleResetSyncDrafts}
+                      className="sync-pressable sync-focus min-h-8 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      변경 취소
+                    </button>
+                    <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-slate-200" />
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setHideEmptyDays((prev) => !prev)}
@@ -9082,6 +9074,28 @@ export default function SynchroSPage() {
         </div>
 
         <aside className="sync-surface min-w-0 rounded-xl bg-white p-3 text-slate-900">
+          {roleView === "student" && !isInstructorReadOnly ? (
+            <div className="mb-4 inline-flex w-full rounded-t-xl bg-slate-100 p-1">
+              {([
+                ["sync", "싱크로 시간표"],
+                ["notion", "노션 시간표"],
+                ["availability", "가능 일정"]
+              ] as const).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setStudentScheduleInputTab(tab)}
+                  className={`sync-pressable sync-focus min-h-10 flex-1 rounded-lg px-3 text-xs font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
+                    studentScheduleInputTab === tab
+                      ? "bg-white text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_18px_rgba(37,99,235,0.08)]"
+                      : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {showStudentLessonPalette ? (
             <div className="mb-5 xl:hidden">
               {renderLessonCardPalette()}

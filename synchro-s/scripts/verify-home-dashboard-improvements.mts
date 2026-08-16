@@ -166,7 +166,8 @@ assert.match(page, /return mergeScheduleStudentRosters\(a, b\)/, "홈 전체 시
 assert.match(page, /if \(!viewerRoleResolved \|\| !scheduleTagSelectionReady\) return;/, "태그 확정 전 대용량 그룹 중복 요청을 막아야 합니다.");
 assert.match(page, /isScheduleCreation[\s\S]*?bg-emerald-600[\s\S]*?bg-blue-600/, "최근 기록은 시간표 생성=초록, 학생 시간표=파랑이어야 합니다.");
 assert.match(page, /historyTypeLabel[\s\S]*?시간표 생성[\s\S]*?entry\.targetType.*시간표/, "최근 기록마다 저장 유형을 독립된 라벨로 표시해야 합니다.");
-assert.match(page, /bg-amber-300[\s\S]*?분류:/, "최근 기록의 분류는 노란색 배지여야 합니다.");
+assert.match(page, /const historyTagTone = historyTag \? SCHEDULE_TAG_TONES/, "최근 기록은 저장된 태그 색상을 사용해야 합니다.");
+assert.match(page, /<span className="opacity-70">태그<\/span>/, "최근 기록은 분류 대신 태그 용어를 사용해야 합니다.");
 assert.match(workspace, /recordHistory: false/, "시간표 생성의 수업 저장 단계에서는 이력을 조기에 남기면 안 됩니다.");
 assert.match(workspace, /historySource: "schedule_creation"/, "그룹 저장 성공 시 시간표 생성 출처를 기록해야 합니다.");
 assert.match(prospectRoute, /"schedule_creation"/, "신규문의 시간표 생성도 최근 기록에 남아야 합니다.");
