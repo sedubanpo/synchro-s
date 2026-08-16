@@ -34,7 +34,8 @@ assert.match(paletteSource, /text-\[15px\][^\n]*\{template\.instructorName\}/, "
 assert.match(paletteSource, /rounded-md border px-2 py-0\.5[^\n]*tone\.badge/, "과목명은 기존 UI에 맞는 작은 사각 라벨로 표시해야 합니다.");
 assert.doesNotMatch(paletteSource, /rounded-full border px-2 py-0\.5[^\n]*template\.subjectName/, "과목명에 둥근 말풍선형 라벨을 사용하지 않아야 합니다.");
 
-assert.match(designSource, /School emblems may appear as oversized, clipped, grayscale backdrops/, "학교 로고 배경 규칙을 디자인 기준에 기록해야 합니다.");
+assert.match(designSource, /School emblems may appear as oversized, clipped, color-retaining backdrops/, "학교 로고 배경은 저채도 컬러를 유지하도록 디자인 기준에 기록해야 합니다.");
+assert.doesNotMatch(historyRegion, /grayscale/, "최근 저장 기록의 학교 로고는 흑백 필터를 사용하지 않아야 합니다.");
 assert.match(designSource, /Save-history rail width: `15\.5rem`/, "최근 저장 기록 레일의 확장 폭을 디자인 기준에 기록해야 합니다.");
 
 console.log("최근 저장 기록·학교 로고 배경·빠른 수업 카드 디자인 검증 완료");

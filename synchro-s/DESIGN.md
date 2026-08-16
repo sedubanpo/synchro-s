@@ -29,7 +29,7 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Import progress gradient: emerald `#34d399`, blue `#60a5fa`, violet `#a78bfa`.
 - Schedule tag tones reuse the existing blue, emerald, amber, rose, violet, and slate UI scales.
 - Recent save-history tag labels use the saved schedule-tag tone at pastel intensity; they are secondary metadata and must not compete with the student name.
-- School emblems may appear as oversized, clipped, grayscale backdrops in student-owned surfaces. Keep opacity between `5%` and `9%`, preserve readable foreground contrast, and omit the backdrop when no emblem is registered.
+- School emblems may appear as oversized, clipped, color-retaining backdrops in student-owned surfaces. Keep opacity between `5%` and `9%`, soften saturation without removing school colors, preserve readable foreground contrast, and omit the backdrop when no emblem is registered.
 - Quick lesson cards tint the whole card by subject family. Instructor name is the dominant line; the written subject remains a compact rectangular label, never a speech-bubble treatment.
 
 ## Typography

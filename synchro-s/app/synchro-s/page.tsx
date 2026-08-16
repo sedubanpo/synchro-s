@@ -7158,7 +7158,7 @@ export default function SynchroSPage() {
     [moveToLogin]
   );
 
-  const handleSyncSheets = useCallback(async () => {
+  const handleSyncSheets = useCallback(async (): Promise<boolean> => {
     setSyncingSheets(true);
     setNotice(null);
     setError(null);
@@ -7175,7 +7175,7 @@ export default function SynchroSPage() {
 
       if (res.status === 401) {
         moveToLogin();
-        return;
+        return false;
       }
 
       const payload = (await res.json().catch(() => ({}))) as {
@@ -7200,6 +7200,7 @@ export default function SynchroSPage() {
         }명 추가, ${payload.studentsUpdated ?? 0}명 갱신${warningSuffix}`
       );
       await loadOptions({ refreshSheets: true });
+      return true;
     } catch (syncError) {
       const message =
         syncError instanceof DOMException && syncError.name === "AbortError"
@@ -7208,11 +7209,18 @@ export default function SynchroSPage() {
             ? syncError.message
             : "명단 동기화에 실패했습니다.";
       setError(message);
+      return false;
     } finally {
       window.clearTimeout(timeoutId);
       setSyncingSheets(false);
     }
   }, [loadOptions, moveToLogin]);
+
+  const handleRefreshAndSync = useCallback(async () => {
+    if (refreshingData || syncingSheets) return;
+    const synced = await handleSyncSheets();
+    if (synced) await handleHardRefreshData();
+  }, [handleHardRefreshData, handleSyncSheets, refreshingData, syncingSheets]);
 
   const handleActivateGroup = useCallback(
     async (groupId: string) => {
@@ -7908,7 +7916,8 @@ export default function SynchroSPage() {
     >
       {viewerRoleResolved && !isInstructorReadOnly ? (
       <aside className="hidden xl:block xl:sticky xl:top-4 xl:self-start">
-        <div className="sync-surface flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col overflow-hidden rounded-xl bg-white">
+        <div className="flex h-[calc(100vh-2rem)] w-[15.5rem] flex-col gap-3">
+        <div className="sync-surface flex min-h-0 flex-[0_1_58%] flex-col overflow-hidden rounded-xl bg-white">
           <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
@@ -7974,7 +7983,7 @@ export default function SynchroSPage() {
                         {historyStudent ? (
                           <SchoolLogoBackdrop
                             student={historyStudent}
-                            className="-bottom-3 -right-4 top-1 w-28 opacity-[0.08] grayscale"
+                            className="-bottom-3 -right-4 top-1 w-28 opacity-[0.08] saturate-[0.85]"
                             imageClassName="mix-blend-multiply"
                           />
                         ) : null}
@@ -8066,28 +8075,56 @@ export default function SynchroSPage() {
             </nav>
           </div>
         </div>
+        <section aria-label="월간 시간표 달력" className="sync-surface shrink-0 rounded-xl bg-white p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400">Calendar</p>
+              <h2 className="text-sm font-black text-slate-900">{monthLabel}</h2>
+            </div>
+            <div className="flex gap-1">
+              <button type="button" aria-label="이전 달" onClick={() => setCalendarMonth((prev) => shiftMonth(prev, -1))} className="sync-pressable sync-focus flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-black text-slate-700 hover:bg-slate-100">‹</button>
+              <button type="button" aria-label="다음 달" onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))} className="sync-pressable sync-focus flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-black text-slate-700 hover:bg-slate-100">›</button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 gap-0.5 text-center text-[9px] font-bold text-slate-400">
+            {["월", "화", "수", "목", "금", "토", "일"].map((label) => <div key={`left-weekday-${label}`} className="py-0.5">{label}</div>)}
+          </div>
+          <div className="mt-1 grid grid-cols-7 gap-0.5">
+            {monthCells.map((cell, idx) => {
+              if (!cell.inMonth) return <div key={`left-empty-${idx}`} className="h-6" />;
+              const hasClass = eventDateSet.has(cell.date);
+              return (
+                <div key={`left-${cell.date}`} className="relative flex h-6 items-center justify-center rounded-full text-[10px] font-bold">
+                  <span className={hasClass ? "flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-600 px-1 text-white shadow-sm" : "text-blue-950"}>{cell.day}</span>
+                  {hasClass ? <span className="absolute bottom-0 h-1 w-1 rounded-full bg-amber-400" /> : null}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+        </div>
       </aside>
       ) : null}
 
       <div className="flex min-w-0 flex-col gap-4">
       <section className="sync-surface sticky top-0 z-[80] overflow-visible rounded-xl bg-white p-4">
         <div className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-[1.2fr_minmax(320px,0.9fr)_auto]">
-            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_0_0_1px_rgba(15,23,42,0.02)]">
-              <div className="flex items-center gap-4">
+          <div className="grid gap-3 xl:grid-cols-[minmax(280px,0.72fr)_minmax(300px,0.8fr)_auto]">
+            <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_0_0_1px_rgba(15,23,42,0.02)]">
+              <div className="flex items-center gap-3">
                 <img
                   src="https://raw.githubusercontent.com/whdtjd5294/whdtjd5294.github.io/main/sedu_logo.png"
                   alt="SEDU 로고"
-                  className="h-14 w-14 shrink-0 object-contain"
+                  className="h-11 w-11 shrink-0 object-contain"
                 />
                 <div>
-                  <div className="flex flex-wrap items-end gap-3">
-                    <h1 className="sync-heading text-2xl font-black text-slate-900">Synchro-S</h1>
-                    <span className="mb-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <h1 className="sync-heading text-xl font-black text-slate-900">Synchro-S</h1>
+                    <span className="mb-0.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-500">
                       Timetable DB
                     </span>
                   </div>
-                  <p className="sync-copy text-sm font-semibold text-slate-500">{weekStart} ~ {weekEnd} | 입력 일시/진행현황 자동 기록</p>
+                  <p className="sync-copy mt-0.5 text-xs font-semibold text-slate-500">{weekStart} ~ {weekEnd}</p>
                 </div>
               </div>
             </div>
@@ -8183,6 +8220,20 @@ export default function SynchroSPage() {
               {!isInstructorReadOnly ? (
                 <button
                   type="button"
+                  disabled={refreshingData || syncingSheets}
+                  onClick={() => void handleRefreshAndSync()}
+                  className="sync-pressable sync-focus inline-flex h-9 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <svg viewBox="0 0 24 24" className={`h-4 w-4 ${refreshingData || syncingSheets ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.9">
+                    <path d="M20 12a8 8 0 1 1-2.34-5.66" strokeLinecap="round" />
+                    <path d="M20 4v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  {syncingSheets ? "명단 동기화 중..." : refreshingData ? "새로고침 중..." : "새로고침 · 명단 동기화"}
+                </button>
+              ) : null}
+              {!isInstructorReadOnly ? (
+                <button
+                  type="button"
                   onClick={() => setScheduleTagManagerOpen(true)}
                   className="sync-pressable sync-focus inline-flex h-9 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
                 >
@@ -8190,7 +8241,7 @@ export default function SynchroSPage() {
                     <path d="M4 7h10l6 6-7 7-9-9V7Z" strokeLinejoin="round" />
                     <circle cx="9" cy="11" r="1.5" />
                   </svg>
-                  태그 관리자
+                  설정창
                 </button>
               ) : null}
               <button
@@ -8255,7 +8306,8 @@ export default function SynchroSPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[auto_1fr_auto]">
+          {showIntroPage || !isWorkspaceTab || roleView !== "student" ? (
+          <div className="grid gap-3 xl:grid-cols-[auto_1fr]">
             <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
               <button
                 type="button"
@@ -8278,65 +8330,6 @@ export default function SynchroSPage() {
               >
                 다음 주
               </button>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={refreshingData}
-                onClick={() => void handleHardRefreshData()}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className={`h-4 w-4 ${refreshingData ? "animate-spin" : ""}`}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.9"
-                >
-                  <path d="M20 12a8 8 0 1 1-2.34-5.66" strokeLinecap="round" />
-                  <path d="M20 4v6h-6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                {refreshingData ? "새로고침 중..." : "새로고침"}
-              </button>
-              <div className="group relative">
-                <div className="inline-flex h-10 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-[11px] font-bold text-amber-800">
-                  <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  <span>정규수업 매주 자동 반복</span>
-                </div>
-                <div className="pointer-events-none absolute left-0 top-full z-[180] mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 text-xs font-semibold leading-5 text-slate-700 opacity-0 shadow-lg transition duration-150 group-hover:opacity-100">
-                  정규수업은 매주 같은 시간에 반복 표시됩니다. 특정 날짜에 배정된 보강/단기 수업(one-off)만 해당 주차에 표시됩니다.
-                </div>
-              </div>
-              {!isInstructorReadOnly ? (
-                <>
-                  <button
-                    type="button"
-                    className="inline-flex h-10 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"
-                    onClick={() => void handleCopyForNotion()}
-                  >
-                    <span className="h-2 w-2 rounded-full bg-blue-400" />
-                    노션 붙여넣기 복사
-                  </button>
-                  <button
-                    type="button"
-                    disabled={syncingSheets}
-                    className="inline-flex h-10 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-                    onClick={() => void handleSyncSheets()}
-                  >
-                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                    {syncingSheets ? "명단 동기화 중..." : "명단 동기화"}
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-10 items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 text-xs font-bold text-violet-700 hover:bg-violet-100"
-                    onClick={openSubjectSettingsModal}
-                  >
-                    <span className="h-2 w-2 rounded-full bg-violet-400" />
-                    과목 코드 설정
-                  </button>
-                </>
-              ) : null}
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -8459,6 +8452,7 @@ export default function SynchroSPage() {
               ) : null}
             </div>
           </div>
+          ) : null}
         </div>
       </section>
 
@@ -8571,14 +8565,61 @@ export default function SynchroSPage() {
         <>
           {!isInstructorReadOnly ? (
             <div className="sync-surface rounded-xl bg-white p-3">
-              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="grid items-center gap-3 border-b border-slate-100 pb-3 xl:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <div>
                   <p className="sync-heading text-sm font-black text-slate-900">학생별 시간표 입력</p>
                   <p className="sync-copy mt-1 text-xs font-semibold text-slate-500">
                     직접 입력하거나 노션 표를 붙여넣어 미리보기 후 DB에 저장합니다.
                   </p>
                 </div>
-                <div className="inline-flex rounded-t-xl bg-slate-100 p-1">
+                <nav aria-label="학생 시간표 주차 이동" className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                  <button type="button" onClick={() => setWeekStart((prev) => shiftDate(prev, -7))} className="sync-pressable sync-focus min-h-10 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900">이전 주</button>
+                  <button type="button" onClick={() => setWeekStart(mondayOfCurrentWeek())} className="sync-pressable sync-focus min-h-10 rounded-md bg-blue-600 px-3 text-xs font-black text-white shadow-sm">이번 주</button>
+                  <button type="button" onClick={() => setWeekStart((prev) => shiftDate(prev, 7))} className="sync-pressable sync-focus min-h-10 rounded-md px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900">다음 주</button>
+                </nav>
+                <div className="relative z-[120]">
+                  <button
+                    type="button"
+                    aria-expanded={showStudentPicker}
+                    onClick={() => {
+                      setShowStudentPicker((prev) => !prev);
+                      setShowInstructorPicker(false);
+                    }}
+                    className="sync-pressable sync-focus flex min-h-14 min-w-[230px] items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm hover:border-blue-200 hover:bg-blue-50/40"
+                  >
+                    {selectedStudentOption ? <SchoolEmblem student={selectedStudentOption} size="lg" /> : <span className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 font-black text-slate-700">학</span>}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[9px] font-black uppercase tracking-[0.16em] text-slate-400">Student Profile</span>
+                      <span className="block truncate text-sm font-black text-slate-900">{selectedStudentLabel}</span>
+                      <span className="block truncate text-[11px] font-semibold text-slate-500">{selectedStudentSecondary || "상세 정보 없음"}</span>
+                    </span>
+                    <span className="text-xs font-black text-slate-400">{showStudentPicker ? "▴" : "▾"}</span>
+                  </button>
+                  {showStudentPicker ? (
+                    <div className="absolute right-0 z-[220] mt-2 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                      <div className="max-h-80 overflow-auto">
+                        {(filteredStudents.length > 0 ? filteredStudents : students).map((student) => (
+                          <button
+                            key={`student-input-picker-${student.id}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedStudentId(student.id);
+                              setShowStudentPicker(false);
+                            }}
+                            className={`sync-focus flex min-h-12 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold ${student.id === selectedStudentId ? "bg-teal-100 text-teal-800" : "text-slate-800 hover:bg-slate-100/70"}`}
+                          >
+                            <SchoolEmblem student={student} size="xs" />
+                            <span className="min-w-0">
+                              <span className="block truncate font-black">{student.name}</span>
+                              {student.secondary ? <span className="block truncate text-xs font-medium text-slate-500">{student.secondary}</span> : null}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="inline-flex rounded-t-xl bg-slate-100 p-1 xl:col-span-3 xl:justify-self-end">
                   {([
                     ["sync", "싱크로 시간표"],
                     ["notion", "노션 시간표"],
@@ -8925,7 +8966,7 @@ export default function SynchroSPage() {
                     {roleView === "student" && selectedStudentOption ? (
                       <SchoolLogoBackdrop
                         student={selectedStudentOption}
-                        className="-bottom-16 -top-16 right-[12%] w-64 opacity-[0.055] grayscale"
+                        className="-bottom-16 -top-16 right-[12%] w-64 opacity-[0.065] saturate-[0.8]"
                         imageClassName="scale-110 mix-blend-multiply"
                       />
                     ) : null}
@@ -9112,6 +9153,7 @@ export default function SynchroSPage() {
               </p>
             </div>
           ) : null}
+          <div className="xl:hidden">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold">{monthLabel}</h2>
             <div className="flex gap-1">
@@ -9154,6 +9196,7 @@ export default function SynchroSPage() {
                 </div>
               );
             })}
+          </div>
           </div>
 
           <TimeSlotVisibilityControl
@@ -11105,6 +11148,7 @@ export default function SynchroSPage() {
         tags={scheduleTags}
         busy={scheduleTagsBusy}
         onClose={() => setScheduleTagManagerOpen(false)}
+        onOpenSubjectSettings={openSubjectSettingsModal}
         onCreate={async (input) => {
           try {
             await createScheduleTag(input);

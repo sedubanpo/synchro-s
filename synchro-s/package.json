@@ -41,7 +41,8 @@
     "verify:save-history-visual-refresh": "node --import tsx scripts/verify-save-history-visual-refresh.mts",
     "verify:lesson-card-autosave": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:staged-timetable-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
-    "verify:timetable-range-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts"
+    "verify:timetable-range-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
+    "verify:header-sidebar-layout": "node --import tsx scripts/verify-header-sidebar-layout.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

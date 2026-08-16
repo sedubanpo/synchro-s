@@ -35,25 +35,40 @@ type Props = {
   tags: ScheduleTag[];
   busy?: boolean;
   onClose: () => void;
+  onOpenSubjectSettings: () => void;
   onCreate: (input: { name: string; colorKey: ScheduleTag["colorKey"] }) => Promise<void>;
   onUpdate: (id: string, input: { name?: string; colorKey?: ScheduleTag["colorKey"]; isActive?: boolean; isCurrent?: boolean }) => Promise<void>;
 };
 
-export function ScheduleTagManager({ open, tags, busy = false, onClose, onCreate, onUpdate }: Props) {
+export function ScheduleTagManager({ open, tags, busy = false, onClose, onOpenSubjectSettings, onCreate, onUpdate }: Props) {
   const [name, setName] = useState("");
   const [colorKey, setColorKey] = useState<ScheduleTag["colorKey"]>("blue");
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[260] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="시간표 태그 관리자">
+    <div className="fixed inset-0 z-[260] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="설정창">
       <div className="sync-surface w-full max-w-2xl rounded-xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <p className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-600">Schedule Scope</p>
-            <h2 className="mt-1 text-xl font-black text-slate-950">태그 관리자</h2>
+            <h2 className="mt-1 text-xl font-black text-slate-950">설정창</h2>
             <p className="sync-copy mt-1 text-xs font-semibold text-slate-500">상황별 시간표를 분리해 서로 다른 안이 충돌 계산에 섞이지 않도록 관리합니다.</p>
           </div>
           <button type="button" onClick={onClose} className="sync-pressable sync-focus h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100">닫기</button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-blue-50/60 px-4 py-3">
+          <div>
+            <p className="text-xs font-black text-slate-900">태그 관리</p>
+            <p className="mt-0.5 text-[11px] font-semibold text-slate-500">시간표 태그와 과목 코드를 한곳에서 관리합니다.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenSubjectSettings}
+            className="sync-pressable sync-focus min-h-10 rounded-md border border-violet-200 bg-white px-3 text-xs font-black text-violet-700 shadow-sm hover:bg-violet-50"
+          >
+            과목 코드 설정
+          </button>
         </div>
 
         <form
