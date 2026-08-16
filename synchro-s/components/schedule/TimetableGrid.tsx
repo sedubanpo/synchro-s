@@ -725,7 +725,7 @@ export function TimetableGrid({
                                   }`}
                                   onKeyDown={(keyboardEvent) => {
                                     const wantsCopy = (keyboardEvent.metaKey || keyboardEvent.ctrlKey) && keyboardEvent.key.toLowerCase() === "c";
-                                    if (keyboardEvent.target !== keyboardEvent.currentTarget || !wantsCopy || !canCopyEvent || !onEventCopy) return;
+                                    if (!wantsCopy || !canCopyEvent || !onEventCopy) return;
                                     keyboardEvent.preventDefault();
                                     keyboardEvent.stopPropagation();
                                     onEventCopy(event);
