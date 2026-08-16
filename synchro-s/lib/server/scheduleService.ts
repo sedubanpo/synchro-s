@@ -24,6 +24,7 @@ type WeeklyQuery = {
   view: RoleView;
   instructorId?: string | null;
   studentId?: string | null;
+  scheduleTagId?: string | null;
 };
 
 type ClassIdsWeekQuery = {
@@ -179,10 +180,12 @@ async function loadEffectiveStudentTimetableGroupClassIds(
   supabase: SupabaseLike,
   studentIds: string[],
   weekStart?: string,
-  scheduleTagId?: string
+  scheduleTagId?: string | null
 ): Promise<Map<string, Set<string>>> {
   const uniqueStudentIds = Array.from(new Set(studentIds.filter(Boolean)));
-  if (uniqueStudentIds.length === 0) {
+  // Without an explicit tag, preserve the legacy unscoped weekly response.
+  // A selected tag is the only safe authority for excluding enrollments.
+  if (uniqueStudentIds.length === 0 || scheduleTagId === undefined) {
     return new Map();
   }
 
@@ -195,9 +198,8 @@ async function loadEffectiveStudentTimetableGroupClassIds(
           : "id,target_id,week_start,tag_id,is_active,class_ids,snapshot_events,created_at"
       )
       .eq("role_view", "student")
-      .in("target_id", uniqueStudentIds)
-      .lte("week_start", weekStart ?? "9999-12-31");
-    return scheduleTagId ? query.eq("tag_id", scheduleTagId) : query;
+      .in("target_id", uniqueStudentIds);
+    return scheduleTagId ? query.eq("tag_id", scheduleTagId) : query.is("tag_id", null);
   };
 
   let { data, error } = await createQuery(true);
@@ -225,7 +227,7 @@ async function loadEffectiveStudentTimetableGroupClassIds(
     const effectiveGroup = selectEffectiveStudentTimetableGroup(
       rows.map(mapStudentTimetableGroupRow),
       weekStart ?? "9999-12-31",
-      scheduleTagId ?? null
+      scheduleTagId
     );
     const activeRow = effectiveGroup ? rows.find((row) => row.id === effectiveGroup.id) : null;
     if (!activeRow) continue;
@@ -1069,7 +1071,8 @@ export async function fetchWeeklySchedule(
   const activeGroupClassIdsByStudent = await loadEffectiveStudentTimetableGroupClassIds(
     supabase,
     enrollments.map((row) => row.student_id),
-    weekStart
+    weekStart,
+    params.scheduleTagId
   );
   const effectiveClassIds = collectEffectiveClassIds(
     enrollments.map((row) => ({
@@ -1077,7 +1080,8 @@ export async function fetchWeeklySchedule(
       student_id: row.student_id,
       students: row.students ? { id: row.students.id, is_active: row.students.is_active ?? null } : null
     })),
-    activeGroupClassIdsByStudent
+    activeGroupClassIdsByStudent,
+    params.scheduleTagId !== undefined
   );
 
   const enrollmentMap = new Map<string, EnrollmentRow[]>();

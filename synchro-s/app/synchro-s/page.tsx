@@ -659,11 +659,23 @@ function shiftDate(dateISO: string, days: number): string {
 }
 
 function isGroupEffectiveForWeek(group: TimetableGroup, targetWeekStart: string, todayISO?: string): boolean {
-  return group.weekStart <= targetWeekStart && !isTimetableGroupExpired(group, targetWeekStart, todayISO);
+  return (
+    (group.roleView === "student" && group.tagId ? true : group.weekStart <= targetWeekStart) &&
+    !isTimetableGroupExpired(group, targetWeekStart, todayISO)
+  );
 }
 
 function compareEffectiveTimetableGroup(a: TimetableGroup, b: TimetableGroup): number {
   return compareEffectiveTimetableGroups(a, b);
+}
+
+function isSameTimetableActivationScope(a: TimetableGroup, b: TimetableGroup): boolean {
+  return (
+    a.roleView === b.roleView &&
+    a.targetId === b.targetId &&
+    (a.tagId ?? null) === (b.tagId ?? null) &&
+    (a.roleView === "student" && a.tagId ? true : a.weekStart === b.weekStart)
+  );
 }
 
 function getEffectiveStudentGroupMap(
@@ -678,7 +690,11 @@ function getEffectiveStudentGroupMap(
 function getStudentGroupTargetSetForWeek(groups: TimetableGroup[], targetWeekStart: string, tagId: string | null): Set<string> {
   const targets = new Set<string>();
   for (const group of groups) {
-    if (group.roleView !== "student" || group.weekStart > targetWeekStart || (group.tagId ?? null) !== tagId) continue;
+    if (
+      group.roleView !== "student" ||
+      (tagId === null && group.weekStart > targetWeekStart) ||
+      (group.tagId ?? null) !== tagId
+    ) continue;
     targets.add(group.targetId);
   }
   return targets;
@@ -1825,8 +1841,7 @@ export default function SynchroSPage() {
             (candidate) =>
               candidate.roleView === "student" &&
               candidate.targetId === group.targetId &&
-              (candidate.tagId ?? null) === (group.tagId ?? null) &&
-              candidate.weekStart <= weekStart
+              (candidate.tagId ?? null) === (group.tagId ?? null)
           )
           .flatMap((candidate) => candidate.snapshotEvents ?? []);
         const interiorGapEvents = findInteriorScheduleGapEvents(
@@ -1854,8 +1869,7 @@ export default function SynchroSPage() {
     effectiveStudentGroupByTargetId,
     overviewEvents,
     overviewStudents,
-    timetableGroups,
-    weekStart
+    timetableGroups
   ]);
   const overviewVisibleInstructors = useMemo(
     () => instructors.filter((item) => item.isActive !== false && !EXCLUDED_OVERVIEW_INSTRUCTORS.has(item.name)),
@@ -3403,6 +3417,7 @@ export default function SynchroSPage() {
       if (roleView === "student" && selectedStudentId) {
         query.set("studentId", selectedStudentId);
       }
+      query.set("tagId", selectedScheduleTagId ?? "");
 
       const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
 
@@ -3428,7 +3443,7 @@ export default function SynchroSPage() {
         setLoading(false);
       }
     }
-  }, [moveToLogin, roleView, selectedInstructorId, selectedStudentId, weekStart]);
+  }, [moveToLogin, roleView, selectedInstructorId, selectedScheduleTagId, selectedStudentId, weekStart]);
 
   const loadSaveHistory = useCallback(async () => {
     const res = await fetch("/api/save-history", { method: "GET", cache: "no-store" });
@@ -3502,7 +3517,7 @@ export default function SynchroSPage() {
 
     try {
       const reviewQuery = new URLSearchParams({ weekStart, tagId: requestedTagId ?? "" });
-      const weekQuery = new URLSearchParams({ weekStart, view: "student" });
+      const weekQuery = new URLSearchParams({ weekStart, view: "student", tagId: requestedTagId ?? "" });
       const [weekRes, reviewRes] = await Promise.all([
         fetch(`/api/schedules/week?${weekQuery.toString()}`, { method: "GET", cache: "no-store" }),
         fetch(`/api/timetable-notes?${reviewQuery.toString()}`, { method: "GET", cache: "no-store" })
@@ -3567,7 +3582,7 @@ export default function SynchroSPage() {
 
     void Promise.all(
       candidateStudentIds.map(async (studentId) => {
-        const weekQuery = new URLSearchParams({ weekStart, view: "student", studentId });
+        const weekQuery = new URLSearchParams({ weekStart, view: "student", studentId, tagId: selectedScheduleTagId ?? "" });
         const groupQuery = new URLSearchParams({
           roleView: "student",
           targetId: studentId,
@@ -3822,7 +3837,7 @@ export default function SynchroSPage() {
 
       const activeQuery = new URLSearchParams({
         roleView: "student",
-        effectiveWeekStart: shiftDate(weekStart, 7),
+        effectiveWeekStart: weekStart,
         includeSnapshots:
           mainTab === "review" || roleView === "instructor" || isInstructorReadOnly || (showIntroPage && !isInstructorReadOnly)
             ? "1"
@@ -3894,10 +3909,7 @@ export default function SynchroSPage() {
             .filter((group) => group.id !== created.id)
             .map((group) =>
               created.isActive &&
-              group.roleView === created.roleView &&
-              group.targetId === created.targetId &&
-              group.weekStart === created.weekStart &&
-              (group.tagId ?? null) === (created.tagId ?? null)
+              isSameTimetableActivationScope(group, created)
                 ? { ...group, isActive: false }
                 : group
             );
@@ -4004,10 +4016,7 @@ export default function SynchroSPage() {
           if (group.id === groupId) return { ...group, isActive };
           if (
             isActive &&
-            group.roleView === currentTarget.roleView &&
-            group.targetId === currentTarget.targetId &&
-            group.weekStart === currentTarget.weekStart &&
-            (group.tagId ?? null) === (currentTarget.tagId ?? null)
+            isSameTimetableActivationScope(group, currentTarget)
           ) {
             return { ...group, isActive: false };
           }
@@ -4418,7 +4427,8 @@ export default function SynchroSPage() {
       const targetView = overviewEntity;
       const query = new URLSearchParams({
         weekStart,
-        view: targetView
+        view: targetView,
+        tagId: selectedScheduleTagId ?? ""
       });
 
       const res = await fetch(`/api/schedules/week?${query.toString()}`, { method: "GET", cache: "no-store" });
@@ -4438,7 +4448,7 @@ export default function SynchroSPage() {
     } finally {
       setOverviewLoading(false);
     }
-  }, [isInstructorReadOnly, mainTab, moveToLogin, overviewEntity, showIntroPage, weekStart]);
+  }, [isInstructorReadOnly, mainTab, moveToLogin, overviewEntity, selectedScheduleTagId, showIntroPage, weekStart]);
 
   const loadSpecialNotes = useCallback(async () => {
     if (!isWorkspaceTab || !currentTargetId || (showIntroPage && !isInstructorReadOnly)) {
@@ -7727,7 +7737,7 @@ export default function SynchroSPage() {
             timetableGroups,
             currentTargetId,
             selectedScheduleTagId,
-            shiftDate(weekStart, 7),
+            weekStart,
             todayISO
           )
         : getLatestActiveStudentGroupForInstructor(
@@ -7738,13 +7748,17 @@ export default function SynchroSPage() {
           );
 
     autoSelectedGroupScopeRef.current = scopeKey;
-    if (!preferredGroup || preferredGroup.weekStart <= weekStart) return;
+    if (!preferredGroup) return;
+
+    if (roleView === "student") {
+      setSelectedGroupId(preferredGroup.id);
+      return;
+    }
+
+    if (preferredGroup.weekStart <= weekStart) return;
 
     setWeekStart(preferredGroup.weekStart);
     setCalendarMonth(monthStart(preferredGroup.weekStart));
-    if (roleView === "student") {
-      setSelectedGroupId(preferredGroup.id);
-    }
   }, [
     currentTargetId,
     roleView,

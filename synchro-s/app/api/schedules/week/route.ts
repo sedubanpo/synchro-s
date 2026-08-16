@@ -55,6 +55,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const weekStart = searchParams.get("weekStart");
     const view = (searchParams.get("view") ?? "student") as RoleView;
+    const scheduleTagId = searchParams.has("tagId") ? searchParams.get("tagId")?.trim() || null : undefined;
     let instructorId = searchParams.get("instructorId");
     let studentId = searchParams.get("studentId");
 
@@ -91,7 +92,8 @@ export async function GET(req: Request) {
       weekStart,
       view,
       instructorId,
-      studentId
+      studentId,
+      scheduleTagId
     });
 
     if (profile.role === "instructor" && instructorId) {

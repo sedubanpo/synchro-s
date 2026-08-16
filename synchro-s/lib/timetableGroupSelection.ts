@@ -60,7 +60,7 @@ export function selectEffectiveStudentTimetableGroup<T extends EffectiveStudentT
   const candidates = groups.filter(
     (group) =>
       group.roleView === "student" &&
-      group.weekStart <= targetWeekStart &&
+      (tagId !== null || group.weekStart <= targetWeekStart) &&
       (group.tagId ?? null) === tagId
   );
   const available = candidates.filter(
@@ -87,7 +87,7 @@ export function getEffectiveStudentTimetableGroupMap<T extends EffectiveStudentT
   for (const group of groups) {
     if (
       group.roleView !== "student" ||
-      group.weekStart > targetWeekStart ||
+      (tagId === null && group.weekStart > targetWeekStart) ||
       (group.tagId ?? null) !== tagId
     ) {
       continue;

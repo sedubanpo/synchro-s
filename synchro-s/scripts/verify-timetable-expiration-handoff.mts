@@ -76,6 +76,16 @@ const futureActive = {
 assert.equal(
   selectEffectiveStudentTimetableGroup(
     [timetableA, timetableB, futureActive],
+    "2026-07-20",
+    "summer-a",
+    "2026-07-20"
+  )?.id,
+  "c",
+  "학생 시간표는 저장 주차가 미래여도 같은 태그의 활성 그룹을 적용해야 합니다."
+);
+assert.equal(
+  selectEffectiveStudentTimetableGroup(
+    [timetableA, timetableB, futureActive],
     "2026-07-27",
     "summer-a",
     "2026-07-27"

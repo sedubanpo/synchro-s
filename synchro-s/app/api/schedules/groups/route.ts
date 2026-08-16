@@ -259,10 +259,6 @@ export async function GET(req: Request) {
         if (tagIdParam) query.eq("tag_id", tagIdParam);
         else query.is("tag_id", null);
       }
-      if (effectiveWeekStart) {
-        query.lte("week_start", effectiveWeekStart);
-      }
-
       return query;
     };
 

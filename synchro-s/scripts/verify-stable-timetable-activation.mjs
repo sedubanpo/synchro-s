@@ -18,7 +18,9 @@ if (activeGroupsError) throw activeGroupsError;
 
 const activeScopeIds = new Map();
 for (const group of (activeGroups ?? []).filter((item) => item.is_active === true)) {
-  const scopeKey = [group.role_view, group.target_id, group.week_start, group.tag_id ?? "untagged"].join("|");
+  const scopeKey = group.role_view === "student" && group.tag_id
+    ? [group.role_view, group.target_id, group.tag_id ?? "untagged"].join("|")
+    : [group.role_view, group.target_id, group.week_start, group.tag_id ?? "untagged"].join("|");
   const ids = activeScopeIds.get(scopeKey) ?? [];
   ids.push(group.id);
   activeScopeIds.set(scopeKey, ids);
@@ -42,7 +44,6 @@ const { data: groups, error: groupsError } = await supabase
   .eq("role_view", "student")
   .eq("target_id", student.id)
   .eq("tag_id", tag.id)
-  .eq("week_start", "2026-07-20")
   .order("created_at", { ascending: false });
 if (groupsError) throw groupsError;
 
@@ -65,8 +66,7 @@ const { data: verifiedGroups, error: verifyError } = await supabase
   .select("id,is_active")
   .eq("role_view", "student")
   .eq("target_id", student.id)
-  .eq("tag_id", tag.id)
-  .eq("week_start", "2026-07-20");
+  .eq("tag_id", tag.id);
 if (verifyError) throw verifyError;
 const verifiedActive = (verifiedGroups ?? []).filter((group) => group.is_active === true);
 if (verifiedActive.length !== 1 || verifiedActive[0]?.id !== activeGroup.id) {
