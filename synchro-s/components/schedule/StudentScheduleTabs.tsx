@@ -24,7 +24,7 @@ export function StudentScheduleTabs({ activeTab, onChange, className = "" }: Pro
           type="button"
           aria-current={activeTab === tab.id ? "page" : undefined}
           onClick={() => onChange(tab.id)}
-          className={`sync-pressable sync-focus min-h-10 flex-1 rounded-lg px-3 text-xs font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
+          className={`sync-pressable sync-focus min-h-10 flex-1 whitespace-nowrap rounded-lg px-2 text-[11px] font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
             activeTab === tab.id
               ? "bg-white text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_18px_rgba(37,99,235,0.08)]"
               : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
