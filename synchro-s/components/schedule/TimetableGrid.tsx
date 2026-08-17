@@ -21,6 +21,12 @@ export type TimetableRangeSelection = {
   columnCount: number;
 };
 
+export type TimetableAvailabilityCell = {
+  status: "available" | "unavailable";
+  source: "weekly" | "temporary" | "date-unavailable";
+  note?: string;
+};
+
 type TimetableGridProps = {
   roleView: RoleView;
   days: { key: Weekday; label: string }[];
@@ -50,6 +56,7 @@ type TimetableGridProps = {
   studentSecondaryLookup?: Readonly<Record<string, string>>;
   inactive?: boolean;
   emptyMessage?: string;
+  availabilityCells?: Readonly<Record<string, TimetableAvailabilityCell>>;
 };
 
 function minutesToTime(totalMinutes: number): string {
@@ -230,6 +237,7 @@ export function TimetableGrid({
   studentSecondaryLookup = {},
   inactive = false,
   emptyMessage,
+  availabilityCells = {},
   dayDateOverrides = {},
   onDayDateChange
 }: TimetableGridProps) {
@@ -719,6 +727,7 @@ export function TimetableGrid({
                   const isPasteTarget = isEmpty && pasteArmed && activeCellKey === cellKey;
                   const isRangeSelected = selectedCellKeys.has(cellKey);
                   const classDate = dayDateOverrides[day.key];
+                  const availabilityCell = availabilityCells[cellKey];
                   const cellContext = {
                     weekday: day.key,
                     startTime: slot,
@@ -854,7 +863,30 @@ export function TimetableGrid({
                         void handleDrop(event, day.key, slot);
                       }}
                     >
-                      <div className="p-1">
+                      <div className="relative p-1">
+                        {availabilityCell ? (
+                          <>
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none absolute inset-1 z-[1] rounded-md ring-1 ring-inset ${
+                                availabilityCell.status === "available"
+                                  ? "bg-blue-50/55 ring-blue-200/90"
+                                  : "bg-rose-50/60 ring-rose-200/90"
+                              }`}
+                            />
+                            <span
+                              title={availabilityCell.note}
+                              className={`pointer-events-none absolute right-1.5 top-1.5 z-[4] rounded px-1.5 py-0.5 text-[8px] font-black shadow-sm ${
+                                availabilityCell.status === "available"
+                                  ? "bg-blue-600 text-white"
+                                  : "bg-rose-600 text-white"
+                              }`}
+                            >
+                              {availabilityCell.status === "available" ? "가능" : "불가"}
+                            </span>
+                          </>
+                        ) : null}
+                        <div className="relative z-[2]">
                         {isEmpty ? (
                           <div
                             className={`min-h-[46px] rounded-md border border-dashed transition-[background-color,border-color,box-shadow] duration-150 ease-out ${
@@ -1007,6 +1039,7 @@ export function TimetableGrid({
                             })}
                           </div>
                         )}
+                        </div>
                       </div>
                     </td>
                   );

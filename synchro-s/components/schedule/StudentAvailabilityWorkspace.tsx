@@ -10,7 +10,15 @@ import type {
   StudentAvailabilitySlot,
   Weekday
 } from "@/types/schedule";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from "react";
 
 type AvailabilityGroup = {
   id: string;
@@ -29,6 +37,7 @@ type Props = {
   studentId: string;
   studentName: string;
   studentSecondary?: string;
+  navigation?: ReactNode;
 };
 
 type CellEditor = { weekday: Weekday; slot: string };
@@ -129,7 +138,7 @@ async function apiError(response: Response, fallback: string): Promise<string> {
   return payload.error ?? fallback;
 }
 
-export function StudentAvailabilityWorkspace({ studentId, studentName, studentSecondary }: Props) {
+export function StudentAvailabilityWorkspace({ studentId, studentName, studentSecondary, navigation }: Props) {
   const [monthStart, setMonthStart] = useState(currentMonthStart);
   const [groups, setGroups] = useState<AvailabilityGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -633,6 +642,11 @@ export function StudentAvailabilityWorkspace({ studentId, studentName, studentSe
       </div>
 
       <aside className="space-y-3">
+        {navigation ? (
+          <div className="sync-surface rounded-xl bg-white p-3">
+            {navigation}
+          </div>
+        ) : null}
         <div className="sync-surface rounded-xl bg-white p-3">
           <div className="flex items-center justify-between gap-2"><div><p className="text-sm font-black text-slate-900">날짜별 변동</p><p className="sync-copy mt-0.5 text-[10px] font-semibold text-slate-500">{compareMode ? "비교할 날짜를 여러 개 선택합니다." : "특정 날짜만 기본 일정과 다르게 지정합니다."}</p></div><span className="sync-tabular rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-600">{Object.keys(draftOverrides).length}일</span></div>
           <button type="button" aria-pressed={compareMode} onClick={toggleCompareMode} className={`sync-pressable sync-focus mt-3 min-h-10 w-full rounded-lg border px-3 text-xs font-black ${compareMode ? "border-violet-600 bg-violet-600 text-white shadow-sm" : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"}`}>{compareMode ? "여러 날짜 모아보기 종료" : "여러 날짜 모아보기"}</button>

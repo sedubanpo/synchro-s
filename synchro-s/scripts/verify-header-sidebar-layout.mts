@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [pageSource, settingsSource] = await Promise.all([
+const [pageSource, settingsSource, studentTabsSource, availabilityWorkspaceSource] = await Promise.all([
   readFile(path.join(projectRoot, "app/synchro-s/page.tsx"), "utf8"),
-  readFile(path.join(projectRoot, "components/schedule/ScheduleTagManager.tsx"), "utf8")
+  readFile(path.join(projectRoot, "components/schedule/ScheduleTagManager.tsx"), "utf8"),
+  readFile(path.join(projectRoot, "components/schedule/StudentScheduleTabs.tsx"), "utf8"),
+  readFile(path.join(projectRoot, "components/schedule/StudentAvailabilityWorkspace.tsx"), "utf8")
 ]);
 
 const headerStart = pageSource.indexOf('<section className="sync-surface sticky top-0');
@@ -54,9 +56,12 @@ assert.doesNotMatch(pageSource, /SchoolLogoBackdrop[\s\S]{0,180}grayscale/, "학
 
 assert.ok(rightPanelStart >= 0 && timeSlotControlStart > rightPanelStart, "학생 우측 패널의 시간대 숨김 앞 영역을 찾을 수 있어야 합니다.");
 for (const label of ["싱크로 시간표", "노션 시간표", "가능 일정"]) {
-  assert.match(rightPanelTopRegion, new RegExp(label), `${label} 탭을 우측 패널 최상단에 배치해야 합니다.`);
+  assert.match(studentTabsSource, new RegExp(label), `공용 학생 시간표 탭에 ${label}를 제공해야 합니다.`);
   assert.doesNotMatch(studentInputRegion, new RegExp(label), `${label} 탭을 학생 입력 제목 바에 중복 배치하지 않아야 합니다.`);
 }
+assert.match(rightPanelTopRegion, /<StudentScheduleTabs/, "학생 시간표 탭을 우측 패널 최상단에 배치해야 합니다.");
+assert.match(availabilityWorkspaceSource, /navigation\?: ReactNode/, "가능 일정 화면이 공용 탭 내비게이션을 받을 수 있어야 합니다.");
+assert.match(availabilityWorkspaceSource, /\{navigation\}/, "가능 일정 화면에서 공용 탭 내비게이션을 렌더링해야 합니다.");
 assert.ok(timetableViewStart >= 0 && timetableViewEnd > timetableViewStart, "시간표 보기 모드 영역을 찾을 수 있어야 합니다.");
 for (const label of ["새 시간표 만들기", "변경 취소"]) {
   assert.match(timetableViewRegion, new RegExp(label), `${label}를 시간표 보기 모드 도구와 나란히 배치해야 합니다.`);

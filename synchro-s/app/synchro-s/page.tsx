@@ -11,12 +11,14 @@ import {
   mergeScheduleStudentRosters
 } from "@/lib/homeDashboardGrouping";
 import { StudentAvailabilityWorkspace } from "@/components/schedule/StudentAvailabilityWorkspace";
+import { StudentScheduleTabs, type StudentScheduleInputTab } from "@/components/schedule/StudentScheduleTabs";
 import { ScheduleModal } from "@/components/schedule/ScheduleModal";
 import { ScheduleTagManager, SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import {
   TimetableGrid,
+  type TimetableAvailabilityCell,
   type TimetableCellContext,
   type TimetableRangeSelection
 } from "@/components/schedule/TimetableGrid";
@@ -37,6 +39,7 @@ import {
 } from "@/lib/timetableGroupSelection";
 import { normalizeInstructorAlias, parseNotionClassCell } from "@/lib/notionScheduleParser";
 import { mergeScheduleEventsByIdentity } from "@/lib/scheduleEventMerge";
+import { studentAvailabilityComparisonCell } from "@/lib/studentAvailabilityComparison";
 import {
   createScheduleReviewSnapshot,
   getScheduleReviewFingerprint,
@@ -52,6 +55,8 @@ import type {
   ScheduleEvent,
   ScheduleFormInput,
   SelectOption,
+  StudentAvailabilityByDay,
+  StudentAvailabilityDateOverrides,
   SubjectOption,
   TimetableViewMode,
   Weekday
@@ -96,8 +101,35 @@ type ParsedNotionItem = {
   rawText: string;
 };
 
-type StudentScheduleInputTab = "sync" | "notion" | "availability";
 type InstructorWorkspaceTab = "schedule" | "availability";
+
+type StudentAvailabilityPreviewGroup = {
+  id: string;
+  monthStart: string;
+  title: string;
+  weeklyAvailability: StudentAvailabilityByDay;
+  dateOverrides: StudentAvailabilityDateOverrides;
+  isActive: boolean;
+};
+
+function ToolbarIcon({ name, className = "h-3.5 w-3.5" }: { name: "new" | "undo" | "days" | "times" | "availability" | "save"; className?: string }) {
+  if (name === "new") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M12 5v14M5 12h14" strokeLinecap="round" /><rect x="3" y="3" width="18" height="18" rx="5" /></svg>;
+  }
+  if (name === "undo") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="m9 7-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 11h7a6 6 0 0 1 6 6" strokeLinecap="round" /></svg>;
+  }
+  if (name === "days") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><rect x="3" y="5" width="18" height="16" rx="4" /><path d="M8 3v4M16 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01" strokeLinecap="round" /></svg>;
+  }
+  if (name === "times") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
+  if (name === "availability") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M5 4h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" /><path d="M8 2v4M16 2v4M3 9h18" strokeLinecap="round" /><path d="m8 15 2.2 2.2L16 12" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
+  return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M5 3h12l2 2v16H5V3Z" strokeLinejoin="round" /><path d="M8 3v6h8V3M8 21v-7h8v7" strokeLinejoin="round" /></svg>;
+}
 
 type SyncScheduleDraftItem = {
   id: string;
@@ -1573,6 +1605,9 @@ export default function SynchroSPage() {
     scheduleMode?: "recurring" | "one_off";
   }>();
   const [studentScheduleInputTab, setStudentScheduleInputTab] = useState<StudentScheduleInputTab>("sync");
+  const [studentAvailabilityPreviewByMonth, setStudentAvailabilityPreviewByMonth] = useState<Record<string, StudentAvailabilityPreviewGroup>>({});
+  const [studentAvailabilityPreviewLoading, setStudentAvailabilityPreviewLoading] = useState(false);
+  const [showStudentAvailabilityPreview, setShowStudentAvailabilityPreview] = useState(false);
   const [instructorWorkspaceTab, setInstructorWorkspaceTab] = useState<InstructorWorkspaceTab>("schedule");
   const [syncDraftModalOpen, setSyncDraftModalOpen] = useState(false);
   const [syncDraftInitialCell, setSyncDraftInitialCell] = useState<{
@@ -1741,6 +1776,25 @@ export default function SynchroSPage() {
   }, [saveHistory, selectedStudentId, students]);
   const selectedStudentLabel = selectedStudentOption?.name ?? "학생 선택";
   const selectedStudentSecondary = selectedStudentOption?.secondary ?? "";
+  const studentAvailabilityCells = useMemo<Record<string, TimetableAvailabilityCell>>(() => {
+    const cells: Record<string, TimetableAvailabilityCell> = {};
+    for (const day of DAYS) {
+      const date = studentDayDateOverrides[day.key] ?? shiftDate(weekStart, day.key - 1);
+      const group = studentAvailabilityPreviewByMonth[`${date.slice(0, 7)}-01`];
+      if (!group) continue;
+      for (const slot of TIME_SLOTS) {
+        const cell = studentAvailabilityComparisonCell(group.weeklyAvailability, group.dateOverrides, date, slot);
+        if (cell.status === "unset" || cell.source === "unset") continue;
+        cells[`${day.key}-${slot}`] = {
+          status: cell.status,
+          source: cell.source,
+          ...(cell.note ? { note: cell.note } : {})
+        };
+      }
+    }
+    return cells;
+  }, [studentAvailabilityPreviewByMonth, studentDayDateOverrides, weekStart]);
+  const studentAvailabilityCellCount = Object.keys(studentAvailabilityCells).length;
   const selectedInstructorOption = useMemo<SelectOption | null>(() => {
     const activeOption = instructors.find((item) => item.id === selectedInstructorId);
     if (activeOption) return activeOption;
@@ -7591,6 +7645,48 @@ export default function SynchroSPage() {
   }, [selectedStudentId, weekStart]);
 
   useEffect(() => {
+    setShowStudentAvailabilityPreview(false);
+    if (!selectedStudentId || roleView !== "student") {
+      setStudentAvailabilityPreviewByMonth({});
+      setStudentAvailabilityPreviewLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const monthStarts = Array.from(
+      new Set(DAYS.map((day) => `${shiftDate(weekStart, day.key - 1).slice(0, 7)}-01`))
+    );
+    setStudentAvailabilityPreviewLoading(true);
+
+    void Promise.all(
+      monthStarts.map(async (targetMonthStart) => {
+        const query = new URLSearchParams({ monthStart: targetMonthStart });
+        const response = await fetch(`/api/students/${selectedStudentId}/availability-groups?${query.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        if (!response.ok) return null;
+        const payload = (await response.json().catch(() => ({}))) as { items?: StudentAvailabilityPreviewGroup[] };
+        const items = payload.items ?? [];
+        const group = items.find((item) => item.isActive) ?? items[0] ?? null;
+        return group ? ([targetMonthStart, group] as const) : null;
+      })
+    )
+      .then((entries) => {
+        if (controller.signal.aborted) return;
+        setStudentAvailabilityPreviewByMonth(Object.fromEntries(entries.filter((entry): entry is readonly [string, StudentAvailabilityPreviewGroup] => Boolean(entry))));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setStudentAvailabilityPreviewByMonth({});
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setStudentAvailabilityPreviewLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [roleView, selectedStudentId, studentScheduleInputTab, weekStart]);
+
+  useEffect(() => {
     if (!hasPendingTimetableChanges) return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -8717,11 +8813,22 @@ export default function SynchroSPage() {
             studentId={selectedStudentId}
             studentName={selectedStudentLabel}
             studentSecondary={selectedStudentSecondary}
+            navigation={
+              <StudentScheduleTabs
+                activeTab={studentScheduleInputTab}
+                onChange={setStudentScheduleInputTab}
+              />
+            }
           />
         ) : (
-          <div className="sync-surface rounded-xl bg-white p-6 text-center text-sm font-bold text-slate-500">
-            가능 일정을 관리할 학생을 먼저 선택해 주세요.
-          </div>
+          <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="sync-surface rounded-xl bg-white p-6 text-center text-sm font-bold text-slate-500">
+              가능 일정을 관리할 학생을 먼저 선택해 주세요.
+            </div>
+            <aside className="sync-surface rounded-xl bg-white p-3">
+              <StudentScheduleTabs activeTab={studentScheduleInputTab} onChange={setStudentScheduleInputTab} />
+            </aside>
+          </section>
         )
       ) : (
       <section className="grid flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -8797,12 +8904,13 @@ export default function SynchroSPage() {
                       type="button"
                       disabled={savingSyncDrafts || !selectedStudentId}
                       onClick={handleStartNewSyncTimetable}
-                      className={`sync-pressable sync-focus min-h-8 rounded-full border px-3 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 ${
+                      className={`sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50 ${
                         isCreatingNewSyncTimetable
                           ? "border-blue-600 bg-blue-600 text-white"
                           : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                       }`}
                     >
+                      <ToolbarIcon name="new" />
                       {isCreatingNewSyncTimetable ? "새 시간표 작성 중" : "새 시간표 만들기"}
                     </button>
                     <span className={`sync-tabular rounded-full px-3 py-1.5 text-xs font-black ${hasPendingTimetableChanges ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
@@ -8812,8 +8920,9 @@ export default function SynchroSPage() {
                       type="button"
                       disabled={savingSyncDrafts || !hasPendingTimetableChanges}
                       onClick={handleResetSyncDrafts}
-                      className="sync-pressable sync-focus min-h-8 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      <ToolbarIcon name="undo" />
                       변경 취소
                     </button>
                     <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-slate-200" />
@@ -8822,23 +8931,25 @@ export default function SynchroSPage() {
                 <button
                   type="button"
                   onClick={() => setHideEmptyDays((prev) => !prev)}
-                  className={`sync-pressable sync-focus inline-flex min-h-8 items-center rounded-full border px-3 py-1.5 text-xs font-bold ${
+                  className={`sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${
                     hideEmptyDays
                       ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100"
                       : "border-slate-200 bg-white/80 text-slate-600 hover:bg-white"
                   }`}
                 >
+                  <ToolbarIcon name="days" />
                   빈 요일 숨기기 {hideEmptyDays ? "ON" : "OFF"}
                 </button>
                 <button
                   type="button"
                   onClick={() => setHideEmptyTimes((prev) => !prev)}
-                  className={`sync-pressable sync-focus inline-flex min-h-8 items-center rounded-full border px-3 py-1.5 text-xs font-bold ${
+                  className={`sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${
                     hideEmptyTimes
                       ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100"
                       : "border-slate-200 bg-white/80 text-slate-600 hover:bg-white"
                   }`}
                 >
+                  <ToolbarIcon name="times" />
                   빈 시간 숨기기 {hideEmptyTimes ? "ON" : "OFF"}
                 </button>
                 <button
@@ -8854,6 +8965,23 @@ export default function SynchroSPage() {
                   </svg>
                   {capturingTimetable ? "복사 중" : "시간표 이미지 캡쳐"}
                 </button>
+                {roleView === "student" && studentScheduleInputTab !== "availability" && studentAvailabilityCellCount > 0 ? (
+                  <button
+                    type="button"
+                    aria-pressed={showStudentAvailabilityPreview}
+                    onClick={() => setShowStudentAvailabilityPreview((current) => !current)}
+                    disabled={studentAvailabilityPreviewLoading}
+                    title="저장된 가능·불가 일정을 현재 시간표 위에 겹쳐 봅니다"
+                    className={`sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-black transition-[background-color,border-color,box-shadow,color] duration-150 ease-out disabled:cursor-wait disabled:opacity-50 ${
+                      showStudentAvailabilityPreview
+                        ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                        : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                    }`}
+                  >
+                    <ToolbarIcon name="availability" />
+                    가능 일정 {showStudentAvailabilityPreview ? "숨기기" : "보기"}
+                  </button>
+                ) : null}
                 {roleView === "student" && studentScheduleInputTab === "sync" ? (
                   <button
                     type="button"
@@ -8861,6 +8989,7 @@ export default function SynchroSPage() {
                     onClick={() => void handleSaveSyncDraftsToServer()}
                     className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-600 bg-emerald-600 px-4 py-1.5 text-xs font-black text-white shadow-sm hover:border-emerald-700 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
                   >
+                    <ToolbarIcon name="save" />
                     {savingSyncDrafts ? "저장 중…" : hasPendingTimetableChanges ? `저장하기 · ${pendingTimetableChangeCount}건` : "저장하기"}
                   </button>
                 ) : null}
@@ -8971,6 +9100,7 @@ export default function SynchroSPage() {
                   viewMode={timetableViewMode}
                   inactive={isDisplayedGroupInactive}
                   emptyMessage={timetableEmptyMessage}
+                  availabilityCells={showStudentAvailabilityPreview ? studentAvailabilityCells : undefined}
                   dayDateOverrides={roleView === "student" ? studentDayDateOverrides : undefined}
                   onDayDateChange={roleView === "student" ? (weekday, classDate) => {
                     setStudentDayDateOverrides((current) => {
@@ -9075,26 +9205,11 @@ export default function SynchroSPage() {
 
         <aside className="sync-surface min-w-0 rounded-xl bg-white p-3 text-slate-900">
           {roleView === "student" && !isInstructorReadOnly ? (
-            <div className="mb-4 inline-flex w-full rounded-t-xl bg-slate-100 p-1">
-              {([
-                ["sync", "싱크로 시간표"],
-                ["notion", "노션 시간표"],
-                ["availability", "가능 일정"]
-              ] as const).map(([tab, label]) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setStudentScheduleInputTab(tab)}
-                  className={`sync-pressable sync-focus min-h-10 flex-1 rounded-lg px-3 text-xs font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
-                    studentScheduleInputTab === tab
-                      ? "bg-white text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18),0_8px_18px_rgba(37,99,235,0.08)]"
-                      : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <StudentScheduleTabs
+              activeTab={studentScheduleInputTab}
+              onChange={setStudentScheduleInputTab}
+              className="mb-4"
+            />
           ) : null}
           {showStudentLessonPalette ? (
             <div className="mb-5 xl:hidden">
