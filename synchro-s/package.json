@@ -41,6 +41,7 @@
     "verify:school-emblems": "node --import tsx scripts/verify-school-emblem-integration.mts",
     "verify:save-history-visual-refresh": "node --import tsx scripts/verify-save-history-visual-refresh.mts",
     "verify:lesson-card-autosave": "node --import tsx scripts/verify-lesson-card-autosave.mts",
+    "verify:class-type-settings": "node --import tsx scripts/verify-class-type-settings.mts",
     "verify:staged-timetable-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:timetable-range-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:header-sidebar-layout": "node --import tsx scripts/verify-header-sidebar-layout.mts"

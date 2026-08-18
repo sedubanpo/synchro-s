@@ -14,6 +14,8 @@ export type LessonCardTemplate = {
   durationMinutes: number;
   usageCount: number;
   source: "preset" | "timetable";
+  maxStudents?: number;
+  classTypeMemo?: string;
 };
 
 function normalize(value: string): string {
@@ -65,7 +67,9 @@ export function buildLessonCardTemplates(input: {
           badgeText: classType.badgeText,
           durationMinutes: 60,
           usageCount: usageByKey.get(key) ?? 0,
-          source: "preset"
+          source: "preset",
+          maxStudents: classType.maxStudents,
+          classTypeMemo: classType.memo
         });
       }
     }

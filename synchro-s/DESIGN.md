@@ -31,6 +31,8 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Recent save-history tag labels use the saved schedule-tag tone at pastel intensity; they are secondary metadata and must not compete with the student name.
 - School emblems may appear as oversized, clipped, color-retaining backdrops in student-owned surfaces. Keep opacity between `5%` and `9%`, soften saturation without removing school colors, preserve readable foreground contrast, and omit the backdrop when no emblem is registered.
 - Quick lesson cards tint the whole card by subject family. Instructor name is the dominant line; the written subject remains a compact rectangular label, never a speech-bubble treatment.
+- Quick lesson cards use quiet, code-native subject motifs behind content: manuscript for Korean, geometry for math, letterforms for English, scientific diagrams for science families, and a globe for social studies. Motifs stay below `10%` opacity and never replace the written subject label.
+- Class type is encoded with both text and a compact geometric signal: capacity dots for ratio lessons, a flowing track for regular multi lessons, and a starburst for special lectures. Capacity and optional operating memo remain readable metadata.
 
 ## Typography
 

@@ -145,6 +145,7 @@ export type ClassTypeOption = {
   label: string;
   badgeText: string;
   maxStudents: number;
+  memo?: string;
 };
 
 export type ScheduleWeekResponse = {

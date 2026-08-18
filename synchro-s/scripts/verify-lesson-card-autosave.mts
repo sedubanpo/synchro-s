@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { buildLessonCardTemplates, createLessonCardTemplateFromEvent, filterLessonCardTemplates } from "../lib/lessonCardTemplates";
 import type { ScheduleEvent } from "../types/schedule";
+import { getClassTypeCapacityConflictReason } from "../lib/classTypeCapacity";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -38,7 +39,7 @@ const templates = buildLessonCardTemplates({
     { code: "ENG", label: "영어" }
   ],
   classTypes: [
-    { code: "REGULAR", label: "개별정규", badgeText: "[개별]", maxStudents: 8 },
+    { code: "REGULAR", label: "개별정규", badgeText: "[개별]", maxStudents: 8, memo: "동일 진도 학생" },
     { code: "SELF_STUDY", label: "자기주도학습", badgeText: "[자습]", maxStudents: 1 }
   ],
   events: [usedMathEvent]
@@ -50,6 +51,10 @@ assert.equal(templates[0]?.durationMinutes, 60, "카드 붙여넣기 기본 단�
 assert.equal(filterLessonCardTemplates(templates, "이영재")[0]?.subjectName, "영어", "강사명 검색이 동작해야 합니다.");
 assert.equal(filterLessonCardTemplates(templates, "수학")[0]?.instructorName, "안준성", "과목명 검색이 동작해야 합니다.");
 assert.equal(filterLessonCardTemplates(templates, "개별").length, 2, "수업 유형 검색이 동작해야 합니다.");
+assert.equal(templates[0]?.maxStudents, 8, "빠른 카드에 설정된 정원이 전달되어야 합니다.");
+assert.equal(templates[0]?.classTypeMemo, "동일 진도 학생", "빠른 카드에 설정 메모가 전달되어야 합니다.");
+assert.equal(getClassTypeCapacityConflictReason({ label: "3:1", maxStudents: 3 }, 2, 1), null, "3:1은 세 번째 학생까지 허용해야 합니다.");
+assert.match(getClassTypeCapacityConflictReason({ label: "3:1", maxStudents: 3 }, 3, 1) ?? "", /정원 3명/, "3:1의 네 번째 학생은 정원 충돌이어야 합니다.");
 
 const copiedFromTimetable = createLessonCardTemplateFromEvent({
   ...usedMathEvent,
@@ -69,6 +74,8 @@ const [pageSource, gridSource, paletteSource] = await Promise.all([
 ]);
 
 assert.match(paletteSource, /강사명 또는 과목명 검색/, "카드 검색창 안내가 있어야 합니다.");
+assert.match(paletteSource, /SubjectMotif/, "과목별 반투명 배경 모티프가 있어야 합니다.");
+assert.match(paletteSource, /ClassTypeSignal/, "수업 유형별 비색상 시각 신호가 있어야 합니다.");
 assert.match(paletteSource, /기존 수업을 한 번 눌러 선택하고/, "기존 수업 셀 복사 안내가 있어야 합니다.");
 assert.match(pageSource, /setSyncDraftItems\(\(prev\) => \[/, "카드 붙여넣기는 먼저 로컬 작업본에 추가되어야 합니다.");
 assert.match(pageSource, /recordHistory: false/, "수업 추가 단계에서 저장 기록을 중복 생성하지 않아야 합니다.");

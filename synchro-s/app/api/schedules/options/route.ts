@@ -402,10 +402,14 @@ export async function GET(req: Request) {
       return jsonError("Authenticated but no app profile or role mapping in public.users", 403);
     }
 
-    const [subjectRes, classTypeRes] = await Promise.all([
+    const [subjectRes, initialClassTypeRes] = await Promise.all([
       supabase.from("subjects").select("code,display_name,tailwind_bg_class").order("display_name"),
-      supabase.from("class_types").select("code,display_name,badge_text,max_students").order("display_name")
+      supabase.from("class_types").select("code,display_name,badge_text,max_students,memo").order("display_name")
     ]);
+    let classTypeRes = initialClassTypeRes;
+    if (classTypeRes.error?.code === "42703") {
+      classTypeRes = await supabase.from("class_types").select("code,display_name,badge_text,max_students").order("display_name") as typeof initialClassTypeRes;
+    }
 
     if (subjectRes.error) throw subjectRes.error;
     if (classTypeRes.error) throw classTypeRes.error;
@@ -735,11 +739,12 @@ export async function GET(req: Request) {
         })
       ),
       classTypes: (classTypeRes.data ?? []).map(
-        (row: { code: string; display_name: string; badge_text: string; max_students: number }) => ({
+        (row: { code: string; display_name: string; badge_text: string; max_students: number; memo?: string | null }) => ({
           code: row.code,
           label: row.display_name,
           badgeText: row.badge_text,
-          maxStudents: row.max_students
+          maxStudents: row.max_students,
+          memo: row.memo ?? ""
         })
       )
     });

@@ -8,6 +8,7 @@ import type {
   ScheduleWeekResponse,
   Weekday
 } from "@/types/schedule";
+import { getClassTypeCapacityConflictReason } from "@/lib/classTypeCapacity";
 import { addDays, dateToWeekday, fromSqlTime, rangesOverlap, timeToMinutes, toSqlTime, weekRange } from "@/lib/time";
 import {
   selectEffectiveStudentTimetableGroup,
@@ -647,10 +648,35 @@ export async function checkScheduleConflict(
 
   const existingTypes = Array.from(new Set(overlaps.map((row) => row.class_type_code)));
   const compatibilityMap = await loadCompatibilityMap(supabase, payload.classTypeCode, existingTypes);
+  const candidateClassType = await getClassType(supabase, payload.classTypeCode);
+  const incomingStudentCount = new Set(payload.studentIds).size;
 
   const conflicts: ConflictResult["conflicts"] = [];
 
   for (const overlap of overlaps) {
+    const isSameClassSlot =
+      overlap.class_type_code === payload.classTypeCode &&
+      overlap.start_time === payload.startTime &&
+      overlap.end_time === payload.endTime;
+    const capacityConflictReason = isSameClassSlot
+      ? getClassTypeCapacityConflictReason(candidateClassType, overlap.student_names.length, incomingStudentCount)
+      : null;
+    if (capacityConflictReason) {
+      conflicts.push({
+        classId: overlap.id,
+        reason: capacityConflictReason,
+        existingSchedule: {
+          studentNames: overlap.student_names,
+          classTypeCode: overlap.class_type_code,
+          classTypeLabel: candidateClassType.label,
+          weekday: overlap.weekday,
+          startTime: overlap.start_time,
+          endTime: overlap.end_time,
+          source: overlap.source
+        }
+      });
+      continue;
+    }
     const check = resolveCompatibility(compatibilityMap, payload.classTypeCode, overlap.class_type_code);
     if (!check.isCompatible) {
       conflicts.push({
@@ -685,7 +711,7 @@ function addMinutes(time: string, minutesToAdd: number): string {
 async function getClassType(supabase: SupabaseLike, classTypeCode: string): Promise<ClassTypeOption> {
   const { data, error } = await supabase
     .from("class_types")
-    .select("code,display_name,badge_text,max_students")
+    .select("code,display_name,badge_text,max_students,memo")
     .eq("code", classTypeCode)
     .single();
 
@@ -697,7 +723,8 @@ async function getClassType(supabase: SupabaseLike, classTypeCode: string): Prom
     code: data.code,
     label: data.display_name,
     badgeText: data.badge_text,
-    maxStudents: data.max_students
+    maxStudents: data.max_students,
+    memo: data.memo ?? ""
   };
 }
 

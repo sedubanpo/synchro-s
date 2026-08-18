@@ -1,5 +1,6 @@
 "use client";
 
+import type { ClassTypeOption } from "@/types/schedule";
 import { useState } from "react";
 
 export type ScheduleTag = {
@@ -34,15 +35,44 @@ type Props = {
   open: boolean;
   tags: ScheduleTag[];
   busy?: boolean;
+  classTypes: ClassTypeOption[];
+  classTypeBusy?: boolean;
   onClose: () => void;
   onOpenSubjectSettings: () => void;
+  onCreateClassType: (input: { displayName: string; maxStudents: number; memo: string }) => Promise<void>;
+  onUpdateClassType: (input: ClassTypeOption) => Promise<void>;
   onCreate: (input: { name: string; colorKey: ScheduleTag["colorKey"] }) => Promise<void>;
   onUpdate: (id: string, input: { name?: string; colorKey?: ScheduleTag["colorKey"]; isActive?: boolean; isCurrent?: boolean }) => Promise<void>;
 };
 
-export function ScheduleTagManager({ open, tags, busy = false, onClose, onOpenSubjectSettings, onCreate, onUpdate }: Props) {
+function ClassTypeRow({ item, busy, onSave }: { item: ClassTypeOption; busy: boolean; onSave: (item: ClassTypeOption) => Promise<void> }) {
+  const [draft, setDraft] = useState(item);
+  return (
+    <div className="grid gap-2 border-b border-slate-100 py-3 last:border-0 md:grid-cols-[1fr_6rem_1.4fr_auto] md:items-center">
+      <label className="grid gap-1 text-[10px] font-black text-slate-500">
+        유형명
+        <input value={draft.label} onChange={(event) => setDraft((prev) => ({ ...prev, label: event.target.value }))} className="sync-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800" />
+      </label>
+      <label className="grid gap-1 text-[10px] font-black text-slate-500">
+        정원
+        <input type="number" min={1} max={100} value={draft.maxStudents} onChange={(event) => setDraft((prev) => ({ ...prev, maxStudents: Number(event.target.value) }))} className="sync-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800" />
+      </label>
+      <label className="grid gap-1 text-[10px] font-black text-slate-500">
+        운영 메모
+        <input value={draft.memo ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, memo: event.target.value }))} placeholder="예: 최대 3명, 동일 진도 학생" className="sync-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" />
+      </label>
+      <button type="button" disabled={busy || !draft.label.trim() || draft.maxStudents < 1} onClick={() => void onSave(draft).catch(() => undefined)} className="sync-pressable sync-focus mt-4 min-h-10 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-black text-blue-700 hover:bg-blue-100 disabled:opacity-50">저장</button>
+    </div>
+  );
+}
+
+export function ScheduleTagManager({ open, tags, busy = false, classTypes, classTypeBusy = false, onClose, onOpenSubjectSettings, onCreateClassType, onUpdateClassType, onCreate, onUpdate }: Props) {
   const [name, setName] = useState("");
   const [colorKey, setColorKey] = useState<ScheduleTag["colorKey"]>("blue");
+  const [section, setSection] = useState<"tags" | "classTypes">("tags");
+  const [classTypeName, setClassTypeName] = useState("");
+  const [classTypeCapacity, setClassTypeCapacity] = useState(1);
+  const [classTypeMemo, setClassTypeMemo] = useState("");
   if (!open) return null;
 
   return (
@@ -59,19 +89,17 @@ export function ScheduleTagManager({ open, tags, busy = false, onClose, onOpenSu
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-blue-50/60 px-4 py-3">
           <div>
-            <p className="text-xs font-black text-slate-900">태그 관리</p>
-            <p className="mt-0.5 text-[11px] font-semibold text-slate-500">시간표 태그와 과목 코드를 한곳에서 관리합니다.</p>
+            <p className="text-xs font-black text-slate-900">운영 설정</p>
+            <p className="mt-0.5 text-[11px] font-semibold text-slate-500">시간표 태그, 수업 유형, 과목 코드를 한곳에서 관리합니다.</p>
           </div>
-          <button
-            type="button"
-            onClick={onOpenSubjectSettings}
-            className="sync-pressable sync-focus min-h-10 rounded-md border border-violet-200 bg-white px-3 text-xs font-black text-violet-700 shadow-sm hover:bg-violet-50"
-          >
-            과목 코드 설정
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" aria-pressed={section === "tags"} onClick={() => setSection("tags")} className={`sync-pressable sync-focus min-h-10 rounded-md border px-3 text-xs font-black ${section === "tags" ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>태그</button>
+            <button type="button" aria-pressed={section === "classTypes"} onClick={() => setSection("classTypes")} className={`sync-pressable sync-focus min-h-10 rounded-md border px-3 text-xs font-black ${section === "classTypes" ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600"}`}>수업 유형</button>
+            <button type="button" onClick={onOpenSubjectSettings} className="sync-pressable sync-focus min-h-10 rounded-md border border-violet-200 bg-white px-3 text-xs font-black text-violet-700 shadow-sm hover:bg-violet-50">과목 코드 설정</button>
+          </div>
         </div>
 
-        <form
+        {section === "tags" ? <><form
           className="grid gap-2 border-b border-slate-200 bg-slate-50 p-4 sm:grid-cols-[1fr_auto_auto]"
           onSubmit={(event) => {
             event.preventDefault();
@@ -111,7 +139,32 @@ export function ScheduleTagManager({ open, tags, busy = false, onClose, onOpenSu
               <button type="button" disabled={tag.isCurrent} onClick={() => void onUpdate(tag.id, { isActive: !tag.isActive })} className={`sync-pressable sync-focus min-h-10 rounded-md border px-3 text-[11px] font-black disabled:cursor-not-allowed disabled:opacity-60 ${tag.isActive ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500"}`}>{tag.isActive ? "사용 중" : "보관됨"}</button>
             </div>
           ))}
-        </div>
+        </div></> : <div>
+          <form
+            className="grid gap-2 border-b border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_6rem_1.4fr_auto] md:items-end"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!classTypeName.trim() || classTypeCapacity < 1 || classTypeBusy) return;
+              void onCreateClassType({ displayName: classTypeName.trim(), maxStudents: classTypeCapacity, memo: classTypeMemo.trim() }).then(
+                () => {
+                  setClassTypeName("");
+                  setClassTypeCapacity(1);
+                  setClassTypeMemo("");
+                },
+                () => undefined
+              );
+            }}
+          >
+            <label className="grid gap-1 text-[10px] font-black text-slate-500">새 유형명<input value={classTypeName} onChange={(event) => setClassTypeName(event.target.value)} placeholder="예: 3:1" className="sync-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800" /></label>
+            <label className="grid gap-1 text-[10px] font-black text-slate-500">정원<input type="number" min={1} max={100} value={classTypeCapacity} onChange={(event) => setClassTypeCapacity(Number(event.target.value))} className="sync-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800" /></label>
+            <label className="grid gap-1 text-[10px] font-black text-slate-500">운영 메모<input value={classTypeMemo} onChange={(event) => setClassTypeMemo(event.target.value)} placeholder="이 유형의 배치 기준" className="sync-input h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" /></label>
+            <button type="submit" disabled={classTypeBusy || !classTypeName.trim() || classTypeCapacity < 1} className="sync-pressable sync-focus min-h-10 rounded-md bg-blue-600 px-4 text-xs font-black text-white hover:bg-blue-700 disabled:opacity-50">유형 추가</button>
+          </form>
+          <div className="max-h-[55vh] overflow-y-auto px-4">
+            <div className="flex items-center justify-between border-b border-slate-100 py-3 text-[11px] font-semibold text-slate-500"><span>정원은 같은 강사·과목·시간의 한 수업에 합류할 수 있는 최대 학생 수입니다.</span><span className="sync-tabular shrink-0">{classTypes.length}개</span></div>
+            {classTypes.map((item) => <ClassTypeRow key={item.code} item={item} busy={classTypeBusy} onSave={onUpdateClassType} />)}
+          </div>
+        </div>}
       </div>
     </div>
   );

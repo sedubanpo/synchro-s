@@ -57,6 +57,51 @@ const subjectTone: Record<string, SubjectTone> = {
   }
 };
 
+type SubjectFamily = "korean" | "math" | "english" | "science" | "physics" | "chemistry" | "biology" | "social" | "other";
+
+function getSubjectFamily(subjectName: string): SubjectFamily {
+  if (/국어|논술|문학/.test(subjectName)) return "korean";
+  if (/수학|수리/.test(subjectName)) return "math";
+  if (/영어|영문/.test(subjectName)) return "english";
+  if (/물리/.test(subjectName)) return "physics";
+  if (/화학/.test(subjectName)) return "chemistry";
+  if (/생명|생물/.test(subjectName)) return "biology";
+  if (/과학|통과|통합과학/.test(subjectName)) return "science";
+  if (/사회|사탐|역사|지리|윤리/.test(subjectName)) return "social";
+  return "other";
+}
+
+function SubjectMotif({ subjectName }: { subjectName: string }) {
+  const family = getSubjectFamily(subjectName);
+  return (
+    <svg aria-hidden="true" viewBox="0 0 120 72" className="pointer-events-none absolute -right-2 -top-1 h-[5.25rem] w-[8.75rem] opacity-[0.09]" fill="none" stroke="currentColor" strokeWidth="2">
+      {family === "math" ? <><circle cx="80" cy="35" r="23" /><path d="M50 58 75 12l30 46M57 45h42M73 22l15 31" /></> : null}
+      {family === "korean" ? <><path d="M54 12h45v48H54zM62 23h29M62 33h29M62 43h22" /><path d="M45 19h9v34h-9z" /></> : null}
+      {family === "english" ? <><path d="m55 57 17-43 17 43M62 40h20" /><path d="M94 20h13M100 20v37" /></> : null}
+      {family === "science" ? <><ellipse cx="82" cy="36" rx="34" ry="13" /><ellipse cx="82" cy="36" rx="13" ry="34" transform="rotate(32 82 36)" /><circle cx="82" cy="36" r="4" fill="currentColor" stroke="none" /></> : null}
+      {family === "physics" ? <><path d="M44 39c8-24 16 24 24 0s16 24 24 0 16 24 24 0" /><path d="M48 57h62M105 52l7 5-7 5" /></> : null}
+      {family === "chemistry" ? <><path d="M72 10v18L53 59h48L82 28V10M66 10h22M60 47h34" /><circle cx="72" cy="42" r="3" /><circle cx="84" cy="52" r="2" /></> : null}
+      {family === "biology" ? <><path d="M82 10c-22 12-28 33-16 52M82 10c21 13 27 34 15 52M64 24h36M59 38h44M60 52h38" /></> : null}
+      {family === "social" ? <><circle cx="82" cy="36" r="27" /><path d="M55 36h54M82 9c-13 14-13 40 0 54M82 9c13 14 13 40 0 54" /></> : null}
+      {family === "other" ? <><path d="M55 17h52v42H55zM65 28h32M65 38h24M65 48h28" /></> : null}
+    </svg>
+  );
+}
+
+function ClassTypeSignal({ label, capacity }: { label: string; capacity?: number }) {
+  const normalized = label.replace(/\s/g, "");
+  const isSpecial = /특강/.test(normalized);
+  const isRegular = /개별|정규/.test(normalized);
+  const dots = Math.min(3, Math.max(1, capacity ?? 1));
+  return (
+    <span aria-hidden="true" className="flex h-5 min-w-7 items-center justify-center gap-0.5 rounded-md border border-current/20 bg-white/55 px-1">
+      {isSpecial ? <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m10 2 1.6 5.1L17 6l-3.8 4 3.8 4-5.4-1.1L10 18l-1.6-5.1L3 14l3.8-4L3 6l5.4 1.1Z" /></svg> : null}
+      {isRegular ? <svg viewBox="0 0 24 12" className="h-3 w-6" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M1 8c3-6 5 2 8-3s5 5 8 0 4 1 6-3" strokeLinecap="round" /></svg> : null}
+      {!isSpecial && !isRegular ? Array.from({ length: dots }, (_, index) => <span key={index} className="h-1.5 w-1.5 rounded-full bg-current" />) : null}
+    </span>
+  );
+}
+
 const fallbackTone: SubjectTone = {
   card: "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100/70",
   selected: "border-slate-400 bg-slate-50 ring-2 ring-slate-200",
@@ -65,7 +110,9 @@ const fallbackTone: SubjectTone = {
 };
 
 function getTone(subjectName: string): SubjectTone {
-  const entry = Object.entries(subjectTone).find(([key]) => subjectName.includes(key));
+  const family = getSubjectFamily(subjectName);
+  const toneKey = family === "korean" ? "국어" : family === "math" ? "수학" : family === "english" ? "영어" : family === "social" ? "사회" : ["science", "physics", "chemistry", "biology"].includes(family) ? "과학" : "";
+  const entry = Object.entries(subjectTone).find(([key]) => key === toneKey);
   return entry?.[1] ?? fallbackTone;
 }
 
@@ -156,18 +203,21 @@ export function LessonCardPalette({
                     onCopy(template);
                   }
                 }}
-                className={`sync-pressable sync-focus w-full rounded-lg border p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] ${
+                title={template.classTypeMemo || undefined}
+                className={`sync-pressable sync-focus relative w-full overflow-hidden rounded-lg border p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] ${
                   selected ? `${tone.selected} shadow-[0_8px_20px_-16px_rgba(15,23,42,0.45)]` : tone.card
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
+                <SubjectMotif subjectName={template.subjectName} />
+                <div className="relative flex items-center justify-between gap-2">
                   <span className="truncate text-[15px] font-black leading-5 tracking-[-0.01em] text-slate-950">{template.instructorName}</span>
                   <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[9px] font-black ${tone.badge}`}>{template.subjectName}</span>
                 </div>
-                <div className={`mt-1.5 flex items-center justify-between gap-2 text-[10px] font-bold ${tone.meta}`}>
-                  <span className="truncate">{template.classTypeLabel}</span>
+                <div className={`relative mt-1.5 flex items-center justify-between gap-2 text-[10px] font-bold ${tone.meta}`}>
+                  <span className="flex min-w-0 items-center gap-1.5"><ClassTypeSignal label={template.classTypeLabel} capacity={template.maxStudents} /><span className="truncate">{template.classTypeLabel}{template.maxStudents ? ` · 정원 ${template.maxStudents}명` : ""}</span></span>
                   <span className="shrink-0 text-slate-500">복사</span>
                 </div>
+                {template.classTypeMemo ? <p className="relative mt-1 truncate text-[9px] font-semibold text-slate-500">{template.classTypeMemo}</p> : null}
               </button>
             );
           })}

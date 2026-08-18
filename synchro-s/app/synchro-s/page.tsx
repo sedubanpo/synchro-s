@@ -1656,6 +1656,7 @@ export default function SynchroSPage() {
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
   const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
+  const [classTypeSettingsSaving, setClassTypeSettingsSaving] = useState(false);
   const [subjectSettings, setSubjectSettings] = useState<SubjectSettingItem[]>([]);
   const [subjectForm, setSubjectForm] = useState<SubjectSettingItem>({
     code: "",
@@ -3495,6 +3496,58 @@ export default function SynchroSPage() {
     },
     [loadOptions, loadSubjectSettings, moveToLogin]
   );
+
+  const handleCreateClassType = useCallback(async (input: { displayName: string; maxStudents: number; memo: string }) => {
+    setClassTypeSettingsSaving(true);
+    try {
+      const res = await fetch("/api/settings/class-types", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input)
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "수업 유형 추가에 실패했습니다.");
+      }
+      await loadOptions();
+      setNotice(`수업 유형 '${input.displayName}'을 추가했습니다.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "수업 유형 추가에 실패했습니다.");
+      throw saveError;
+    } finally {
+      setClassTypeSettingsSaving(false);
+    }
+  }, [loadOptions, moveToLogin]);
+
+  const handleUpdateClassType = useCallback(async (input: ClassTypeOption) => {
+    setClassTypeSettingsSaving(true);
+    try {
+      const res = await fetch("/api/settings/class-types", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: input.code, displayName: input.label, maxStudents: input.maxStudents, memo: input.memo ?? "" })
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "수업 유형 수정에 실패했습니다.");
+      }
+      await loadOptions();
+      setNotice(`수업 유형 '${input.label}'을 저장했습니다.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "수업 유형 수정에 실패했습니다.");
+      throw saveError;
+    } finally {
+      setClassTypeSettingsSaving(false);
+    }
+  }, [loadOptions, moveToLogin]);
 
   const loadWeek = useCallback(async (opts?: { silent?: boolean }) => {
     const requestId = ++weekLoadRequestRef.current;
@@ -11312,8 +11365,12 @@ export default function SynchroSPage() {
         open={scheduleTagManagerOpen}
         tags={scheduleTags}
         busy={scheduleTagsBusy}
+        classTypes={classTypes}
+        classTypeBusy={classTypeSettingsSaving}
         onClose={() => setScheduleTagManagerOpen(false)}
         onOpenSubjectSettings={openSubjectSettingsModal}
+        onCreateClassType={handleCreateClassType}
+        onUpdateClassType={handleUpdateClassType}
         onCreate={async (input) => {
           try {
             await createScheduleTag(input);
