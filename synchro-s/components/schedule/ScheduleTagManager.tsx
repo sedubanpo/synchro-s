@@ -37,6 +37,7 @@ type Props = {
   busy?: boolean;
   classTypes: ClassTypeOption[];
   classTypeBusy?: boolean;
+  initialSection?: "tags" | "classTypes";
   onClose: () => void;
   onOpenSubjectSettings: () => void;
   onCreateClassType: (input: { displayName: string; maxStudents: number; memo: string }) => Promise<void>;
@@ -66,10 +67,10 @@ function ClassTypeRow({ item, busy, onSave }: { item: ClassTypeOption; busy: boo
   );
 }
 
-export function ScheduleTagManager({ open, tags, busy = false, classTypes, classTypeBusy = false, onClose, onOpenSubjectSettings, onCreateClassType, onUpdateClassType, onCreate, onUpdate }: Props) {
+export function ScheduleTagManager({ open, tags, busy = false, classTypes, classTypeBusy = false, initialSection = "tags", onClose, onOpenSubjectSettings, onCreateClassType, onUpdateClassType, onCreate, onUpdate }: Props) {
   const [name, setName] = useState("");
   const [colorKey, setColorKey] = useState<ScheduleTag["colorKey"]>("blue");
-  const [section, setSection] = useState<"tags" | "classTypes">("tags");
+  const [section, setSection] = useState<"tags" | "classTypes">(initialSection);
   const [classTypeName, setClassTypeName] = useState("");
   const [classTypeCapacity, setClassTypeCapacity] = useState(1);
   const [classTypeMemo, setClassTypeMemo] = useState("");
