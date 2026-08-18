@@ -2662,6 +2662,10 @@ export default function SynchroSPage() {
   }, [baseDisplayEvents, roleView, stagedDeletedEventIds, stagedEventUpdates, studentScheduleInputTab, syncDraftEvents]);
   const pendingTimetableChangeCount = syncDraftItems.length + stagedDeletedEventIds.length + Object.keys(stagedEventUpdates).length;
   const hasPendingTimetableChanges = pendingTimetableChangeCount > 0;
+  const copiedLessonPasteBlockedDays = useMemo(
+    () => copiedLessonTemplate ? getInstructorDaysOff(copiedLessonTemplate.instructorId) : [],
+    [copiedLessonTemplate, getInstructorDaysOff]
+  );
   const syncDraftScopeKey = `${roleView}:${selectedStudentId}:${selectedScheduleTagId ?? ""}:${weekStart}:${selectedGroupId ?? ""}:${studentScheduleInputTab}`;
   const captureSyncDraftUndo = useCallback(
     (label: string) => {
@@ -9272,6 +9276,16 @@ export default function SynchroSPage() {
               </div>
             </div>
           </div>
+          {roleView === "student" && studentScheduleInputTab === "sync" && lessonAutosave.state === "error" ? (
+            <div role="alert" aria-live="assertive" className="mb-3 flex items-start gap-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-rose-900 shadow-[0_8px_24px_-18px_rgba(225,29,72,0.7)]">
+              <span aria-hidden="true" className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-xs font-black text-white">!</span>
+              <div className="min-w-0">
+                <p className="text-xs font-black leading-5">붙여넣지 못했습니다</p>
+                <p className="text-[11px] font-bold leading-5 text-rose-800">{lessonAutosave.message}</p>
+                {(copiedLessonTemplate || copiedLessonRange) ? <p className="text-[10px] font-semibold leading-4 text-rose-700">복사한 수업은 유지됩니다. 조건에 맞는 다른 빈 셀을 선택해 주세요.</p> : null}
+              </div>
+            </div>
+          ) : null}
           {loading ? (
             <div className="sync-surface rounded-xl bg-white p-5 text-sm font-semibold text-slate-500">로딩 중...</div>
           ) : (
@@ -9398,6 +9412,8 @@ export default function SynchroSPage() {
                     !isDisplayedGroupInactive &&
                     !isInstructorReadOnly
                   }
+                  pasteBlockedDays={copiedLessonPasteBlockedDays}
+                  pasteBlockedReason={copiedLessonTemplate ? `${copiedLessonTemplate.instructorName} 강사 휴무` : undefined}
                   onCellPaste={roleView === "student" && studentScheduleInputTab === "sync" ? queueLessonCardPaste : undefined}
                   onCellClick={(ctx) => {
                     if (isInstructorReadOnly) return;

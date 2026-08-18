@@ -64,6 +64,8 @@ type TimetableGridProps = {
   onCellClick: (ctx: TimetableCellContext) => void;
   onCellPaste?: (ctx: TimetableCellContext) => void;
   pasteArmed?: boolean;
+  pasteBlockedDays?: Weekday[];
+  pasteBlockedReason?: string;
   dayDateOverrides?: Partial<Record<Weekday, string>>;
   onDayDateChange?: (weekday: Weekday, classDate: string | null) => void;
   onEventMove?: (ctx: { classId: string; weekday: Weekday; startTime: string; endTime: string }) => Promise<void>;
@@ -246,6 +248,8 @@ export function TimetableGrid({
   onCellClick,
   onCellPaste,
   pasteArmed = false,
+  pasteBlockedDays = [],
+  pasteBlockedReason,
   onEventMove,
   onEventClick,
   onEventCopy,
@@ -284,6 +288,7 @@ export function TimetableGrid({
   const eventMap = new Map<string, ScheduleEvent[]>();
   const activeDaySet = new Set<Weekday>();
   const daysOffSet = new Set(daysOff);
+  const pasteBlockedDaySet = new Set(pasteBlockedDays);
   const canMoveEvents = Boolean(onEventMove && viewMode === "detailed" && !rangeEditing);
 
   for (const event of events) {
@@ -715,6 +720,11 @@ export function TimetableGrid({
                       휴무
                     </span>
                   ) : null}
+                  {inputPasteArmed && pasteBlockedDaySet.has(day.key) ? (
+                    <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] font-black tracking-[-0.01em] text-rose-700 shadow-sm" title={pasteBlockedReason}>
+                      붙여넣기 불가
+                    </span>
+                  ) : null}
                 </div>
               </th>
             ))}
@@ -754,6 +764,7 @@ export function TimetableGrid({
                   const isDropTarget = dragOverCell === cellKey;
                   const isActiveDay = activeDaySet.has(day.key);
                   const isPasteTarget = isEmpty && inputPasteArmed && activeCellKey === cellKey;
+                  const isPasteBlocked = isEmpty && inputPasteArmed && pasteBlockedDaySet.has(day.key);
                   const isRangeSelected = selectedCellKeys.has(cellKey);
                   const classDate = dayDateOverrides[day.key];
                   const availabilityCell = availabilityCells[cellKey];
@@ -770,7 +781,7 @@ export function TimetableGrid({
                       tabIndex={isEmpty && viewMode === "detailed" ? 0 : undefined}
                       aria-label={
                         isEmpty && viewMode === "detailed"
-                          ? `${day.label}요일 ${formatTimeSlotRange(slot)} 빈 시간, ${rangeEditing ? "범위 선택" : inputPasteArmed ? "복사한 수업 붙여넣기" : "수업 입력"}`
+                          ? `${day.label}요일 ${formatTimeSlotRange(slot)} 빈 시간, ${rangeEditing ? "범위 선택" : isPasteBlocked ? `붙여넣기 불가${pasteBlockedReason ? `, ${pasteBlockedReason}` : ""}` : inputPasteArmed ? "복사한 수업 붙여넣기" : "수업 입력"}`
                           : undefined
                       }
                       className={`border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${rangeEditing ? "select-none" : ""} ${
@@ -778,6 +789,8 @@ export function TimetableGrid({
                           ? "relative z-[12] border-blue-400 bg-blue-100/75 shadow-[inset_0_0_0_2px_rgba(37,99,235,0.72)]"
                         : isDropTarget
                           ? "border-sky-300 bg-sky-100/80"
+                          : isPasteBlocked
+                            ? "border-rose-200 bg-rose-50/55"
                           : isPasteTarget
                             ? "border-blue-500 bg-blue-100/80 shadow-[inset_0_0_0_2px_rgba(37,99,235,0.55)]"
                           : isSelectedRow
@@ -791,7 +804,11 @@ export function TimetableGrid({
                               : "border-slate-100 bg-white"
                       }`}
                       style={
-                        daysOffSet.has(day.key)
+                        isPasteBlocked
+                          ? {
+                              backgroundImage: "repeating-linear-gradient(135deg, rgba(244,63,94,0.055) 0px, rgba(244,63,94,0.055) 9px, rgba(255,255,255,0.35) 9px, rgba(255,255,255,0.35) 18px)"
+                            }
+                          : daysOffSet.has(day.key)
                           ? {
                               backgroundImage: isSelectedRow
                                 ? "linear-gradient(rgba(239,246,255,0.82), rgba(239,246,255,0.82)), repeating-linear-gradient(135deg, rgba(148,163,184,0.12) 0px, rgba(148,163,184,0.12) 11px, rgba(255,255,255,0) 11px, rgba(255,255,255,0) 22px)"

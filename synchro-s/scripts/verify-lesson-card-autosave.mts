@@ -101,6 +101,8 @@ assert.match(gridSource, /setRangeFocusKey/, "포인터 드래그로 시간표 �
 assert.match(pageSource, /role="group" aria-label="시간표 편집 도구"/, "입력·붙여넣기와 범위 선택을 명시적인 편집 도구 그룹으로 제공해야 합니다.");
 assert.match(pageSource, /setTimetableInteractionMode\("input"\)/, "카드나 범위를 복사하면 입력·붙여넣기 모드로 전환해야 합니다.");
 assert.match(gridSource, /const inputPasteArmed = !rangeEditing && pasteArmed/, "범위 선택과 붙여넣기가 동시에 활성화되면 안 됩니다.");
+assert.match(gridSource, /pasteBlockedDaySet[\s\S]*붙여넣기 불가/, "선택한 강사의 휴무 요일은 붙여넣기 전에 격자에서 구분해야 합니다.");
+assert.match(pageSource, /role="alert" aria-live="assertive"[\s\S]*붙여넣지 못했습니다[\s\S]*복사한 수업은 유지됩니다/, "붙여넣기 실패 이유와 다음 행동을 시간표 가까이에서 안내해야 합니다.");
 assert.doesNotMatch(gridSource, /onDoubleClick=\{\(\) => \{[\s\S]*?rangeEditing[\s\S]*?onCellClick/, "범위 선택 모드의 빈 셀 더블클릭이 입력 동작으로 새면 안 됩니다.");
 assert.match(gridSource, /canMoveEvents = Boolean\(onEventMove && viewMode === "detailed" && !rangeEditing\)/, "범위 선택 모드에서는 수업 카드 드래그 이동을 비활성화해야 합니다.");
 assert.match(gridSource, /const canCopyEvent = !rangeEditing/, "범위 선택 모드에서는 카드 단일 복사 대신 범위 복사만 사용해야 합니다.");
