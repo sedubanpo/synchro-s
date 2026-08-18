@@ -1579,7 +1579,7 @@ export default function SynchroSPage() {
   const [scheduleReviewHistory, setScheduleReviewHistory] = useState<ScheduleReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewSavingId, setReviewSavingId] = useState<string | null>(null);
-  const [reviewFilter, setReviewFilter] = useState<ReviewStatus | "all" | "unreviewed" | "memo">("all");
+  const [reviewFilter, setReviewFilter] = useState<ReviewStatus | "all" | "unreviewed" | "missing" | "memo">("all");
   const [reviewSearchKeyword, setReviewSearchKeyword] = useState("");
   const [reviewSortMode, setReviewSortMode] = useState<"needs_first" | "class_desc" | "class_asc" | "name">("needs_first");
   const [selectedReviewStudentId, setSelectedReviewStudentId] = useState("");
@@ -2979,11 +2979,12 @@ export default function SynchroSPage() {
     return Array.from(new Set(hints)).slice(0, 3);
   }, []);
   const reviewRows = useMemo(() => {
-    return reviewEligibleStudents
+    return reviewStudents
       .map((student) => {
         const eventsForStudent = reviewEventsByStudentId.get(student.id) ?? [];
         const review = reviewByStudentId.get(student.id) ?? null;
         const isStale = staleReviewStudentIds.has(student.id);
+        const hasTimetable = reviewActiveGroupByStudentId.has(student.id);
         const hints = getReviewHints(eventsForStudent);
         return {
           student,
@@ -2991,14 +2992,16 @@ export default function SynchroSPage() {
           review,
           effectiveReview: isStale ? null : review,
           isStale,
+          hasTimetable,
           hints
         };
       })
       .filter((row) => {
         if (reviewFilter === "all") return true;
-        if (reviewFilter === "unreviewed") return !row.effectiveReview;
-        if (reviewFilter === "memo") return Boolean(row.review?.memo?.trim());
-        return row.effectiveReview?.status === reviewFilter;
+        if (reviewFilter === "missing") return !row.hasTimetable;
+        if (reviewFilter === "unreviewed") return row.hasTimetable && !row.effectiveReview;
+        if (reviewFilter === "memo") return row.hasTimetable && Boolean(row.review?.memo?.trim());
+        return row.hasTimetable && row.effectiveReview?.status === reviewFilter;
       })
       .filter((row) => {
         const keyword = reviewSearchKeyword.trim().toLowerCase();
@@ -3015,15 +3018,15 @@ export default function SynchroSPage() {
         if (reviewSortMode === "name") {
           return a.student.name.localeCompare(b.student.name, "ko");
         }
-        const aStatus = a.effectiveReview?.status ?? "unreviewed";
-        const bStatus = b.effectiveReview?.status ?? "unreviewed";
+        const aStatus = a.hasTimetable ? a.effectiveReview?.status ?? "unreviewed" : "missing";
+        const bStatus = b.hasTimetable ? b.effectiveReview?.status ?? "unreviewed" : "missing";
         if (aStatus !== bStatus) {
-          const order = ["unreviewed", "issue", "needs_check", "normal"];
+          const order = ["missing", "unreviewed", "issue", "needs_check", "normal"];
           return order.indexOf(aStatus) - order.indexOf(bStatus);
         }
         return b.events.length - a.events.length || a.student.name.localeCompare(b.student.name, "ko");
       });
-  }, [getReviewHints, reviewByStudentId, reviewEligibleStudents, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, staleReviewStudentIds]);
+  }, [getReviewHints, reviewActiveGroupByStudentId, reviewByStudentId, reviewEventsByStudentId, reviewFilter, reviewSearchKeyword, reviewSortMode, reviewStudents, staleReviewStudentIds]);
   const reviewStats = useMemo(() => {
     const eligibleStudentIds = new Set(reviewEligibleStudents.map((student) => student.id));
     const effectiveReviews = [...reviewByStudentId.entries()].filter(
@@ -3031,21 +3034,23 @@ export default function SynchroSPage() {
     );
     const reviewedIds = new Set(effectiveReviews.map(([studentId]) => studentId));
     return {
-      total: reviewEligibleStudents.length,
+      total: reviewStudents.length,
       normal: effectiveReviews.filter(([, item]) => item.status === "normal").length,
       needsCheck: effectiveReviews.filter(([, item]) => item.status === "needs_check").length,
       issue: effectiveReviews.filter(([, item]) => item.status === "issue").length,
       unreviewed: reviewEligibleStudents.filter((student) => !reviewedIds.has(student.id)).length,
+      missing: reviewStudents.filter((student) => !eligibleStudentIds.has(student.id)).length,
       memo: [...reviewByStudentId.entries()].filter(
         ([studentId, item]) => eligibleStudentIds.has(studentId) && item.memo.trim().length > 0
       ).length
     };
-  }, [reviewByStudentId, reviewEligibleStudents, staleReviewStudentIds]);
+  }, [reviewByStudentId, reviewEligibleStudents, reviewStudents, staleReviewStudentIds]);
   const selectedReviewStudent = useMemo(
     () => reviewRows.find((row) => row.student.id === selectedReviewStudentId)?.student ?? reviewRows[0]?.student ?? null,
     [reviewRows, selectedReviewStudentId]
   );
   const selectedReview = selectedReviewStudent ? reviewByStudentId.get(selectedReviewStudent.id) ?? null : null;
+  const selectedReviewHasTimetable = Boolean(selectedReviewStudent && reviewActiveGroupByStudentId.has(selectedReviewStudent.id));
   const selectedReviewIsStale = Boolean(selectedReviewStudent && staleReviewStudentIds.has(selectedReviewStudent.id));
   const selectedReviewEvents = useMemo(
     () => (selectedReviewStudent ? reviewEventsByStudentId.get(selectedReviewStudent.id) ?? [] : []),
@@ -3172,8 +3177,8 @@ export default function SynchroSPage() {
 
       if (next === "review") {
         setRoleView("student");
-        if (!selectedReviewStudentId && reviewEligibleStudents.length > 0) {
-          setSelectedReviewStudentId(reviewEligibleStudents[0]!.id);
+        if (!selectedReviewStudentId && reviewStudents.length > 0) {
+          setSelectedReviewStudentId(reviewStudents[0]!.id);
         }
         return;
       }
@@ -3189,7 +3194,35 @@ export default function SynchroSPage() {
 
       setRoleView(next);
     },
-    [overviewEntity, overviewVisibleInstructors, reviewEligibleStudents, selectedInstructorId, selectedReviewStudentId, selectedStudentId, students]
+    [overviewEntity, overviewVisibleInstructors, reviewStudents, selectedInstructorId, selectedReviewStudentId, selectedStudentId, students]
+  );
+
+  const handleOpenMissingStudentTimetable = useCallback(
+    (student: SelectOption) => {
+      const targetStudent =
+        students.find((item) => item.id === student.id) ??
+        students.find((item) => normalizePersonName(item.name) === normalizePersonName(student.name));
+      if (!targetStudent) {
+        setError(`학생 입력 목록에서 '${student.name}' 학생을 찾지 못했습니다.`);
+        return;
+      }
+
+      setError(null);
+      setNotice(`#${selectedScheduleTagLabel} 시간표를 입력할 ${targetStudent.name} 학생 화면을 열었습니다.`);
+      setShowIntroPage(false);
+      setMainTab("student");
+      setRoleView("student");
+      setSelectedStudentId(targetStudent.id);
+      setStudentScheduleInputTab("sync");
+      setSelectedGroupId(null);
+      setSearchKeyword("");
+      setShowStudentPicker(false);
+      setShowInstructorPicker(false);
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    },
+    [selectedScheduleTagLabel, students]
   );
 
   const handleToggleInstructorDayOff = useCallback(
@@ -7810,14 +7843,14 @@ export default function SynchroSPage() {
     if (mainTab !== "review") {
       return;
     }
-    if (!selectedReviewStudentId && reviewEligibleStudents.length > 0) {
-      setSelectedReviewStudentId(reviewEligibleStudents[0]!.id);
+    if (!selectedReviewStudentId && reviewStudents.length > 0) {
+      setSelectedReviewStudentId(reviewStudents[0]!.id);
       return;
     }
-    if (selectedReviewStudentId && !reviewEligibleStudents.some((student) => student.id === selectedReviewStudentId)) {
-      setSelectedReviewStudentId(reviewEligibleStudents[0]?.id ?? "");
+    if (selectedReviewStudentId && !reviewStudents.some((student) => student.id === selectedReviewStudentId)) {
+      setSelectedReviewStudentId(reviewStudents[0]?.id ?? "");
     }
-  }, [mainTab, reviewEligibleStudents, selectedReviewStudentId]);
+  }, [mainTab, reviewStudents, selectedReviewStudentId]);
 
   useEffect(() => {
     setReviewMemoDraft(selectedReview?.memo ?? "");
@@ -9920,6 +9953,8 @@ export default function SynchroSPage() {
           <section
             data-review-loaded-group-count={timetableGroups.length}
             data-review-eligible-student-count={reviewEligibleStudents.length}
+            data-review-roster-student-count={reviewStudents.length}
+            data-review-missing-timetable-count={reviewStats.missing}
             data-review-selected-group-id={selectedReviewStudentId ? reviewActiveGroupByStudentId.get(selectedReviewStudentId)?.id ?? "" : ""}
             data-review-selected-group-event-count={
               selectedReviewStudentId
@@ -9947,9 +9982,10 @@ export default function SynchroSPage() {
                 </div>
                 <div className="flex flex-wrap items-start justify-end gap-2">
                   {renderWeekNavigation("시간표 검토 주차 이동")}
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  <div className="grid grid-cols-4 gap-2 xl:grid-cols-7">
                   {[
                     { filter: "all", label: "전체", value: reviewStats.total, className: "border-slate-200 bg-white text-slate-800" },
+                    { filter: "missing", label: "시간표 없음", value: reviewStats.missing, className: "border-slate-300 bg-slate-100 text-slate-700" },
                     { filter: "unreviewed", label: "미검토", value: reviewStats.unreviewed, className: "border-slate-200 bg-slate-50 text-slate-700" },
                     { filter: "normal", label: "정상", value: reviewStats.normal, className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
                     { filter: "needs_check", label: "확인필요", value: reviewStats.needsCheck, className: "border-amber-200 bg-amber-50 text-amber-700" },
@@ -9998,6 +10034,7 @@ export default function SynchroSPage() {
                 </select>
                 {([
                   { key: "all", label: "전체" },
+                  { key: "missing", label: "시간표 없음" },
                   { key: "unreviewed", label: "미검토" },
                   { key: "normal", label: "정상" },
                   { key: "needs_check", label: "확인필요" },
@@ -10062,7 +10099,11 @@ export default function SynchroSPage() {
                                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">
                                     {row.events.length}개
                                   </span>
-                                  {row.isStale ? (
+                                  {!row.hasTimetable ? (
+                                    <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-700">
+                                      시간표 없음
+                                    </span>
+                                  ) : row.isStale ? (
                                     <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-black text-amber-700">
                                       재검토
                                     </span>
@@ -10078,7 +10119,14 @@ export default function SynchroSPage() {
                                 </div>
                                 <p className="mt-1 truncate text-xs font-semibold text-slate-500">{row.student.secondary || "상세 정보 없음"}</p>
                                 <div className="mt-2 flex flex-wrap gap-1">
-                                  {row.hints.length > 0 ? (
+                                  {!row.hasTimetable ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">
+                                      선택 후 시간표 입력
+                                      <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                                        <path d="M3 8h10M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </span>
+                                  ) : row.hints.length > 0 ? (
                                     row.hints.map((hint) => (
                                       <span key={`review-hint-${row.student.id}-${hint}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
                                         {hint}
@@ -10225,8 +10273,30 @@ export default function SynchroSPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-8 text-center text-sm font-bold text-slate-500">
-                      이번 주 표시할 수업이 없습니다.
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 px-5 py-8 text-center">
+                      <p className="text-sm font-black text-slate-700">
+                        {selectedReviewStudent && !selectedReviewHasTimetable
+                          ? `#${selectedScheduleTagLabel} 시간표가 없습니다.`
+                          : "이번 주 표시할 수업이 없습니다."}
+                      </p>
+                      {selectedReviewStudent && !selectedReviewHasTimetable ? (
+                        <>
+                          <p className="mt-1 text-xs font-semibold text-slate-500">
+                            학생 입력 화면에서 새 시간표를 만든 뒤 다시 검토할 수 있습니다.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenMissingStudentTimetable(selectedReviewStudent)}
+                            className="sync-pressable sync-focus mt-4 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-[0_10px_22px_rgba(37,99,235,0.2)] hover:bg-blue-700"
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+                              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                              <rect x="3" y="3" width="18" height="18" rx="5" />
+                            </svg>
+                            {selectedReviewStudent.name} 시간표 입력
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -10242,8 +10312,8 @@ export default function SynchroSPage() {
                             <p className="mt-1 truncate text-sm font-semibold text-slate-500">{selectedReviewStudent.secondary || "상세 정보 없음"}</p>
                           </div>
                         </div>
-                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${selectedReviewIsStale ? "border-amber-300 bg-amber-50 text-amber-700" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-blue-700"}`}>
-                          {selectedReviewIsStale ? "재검토 필요" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
+                        <span className={`rounded-full border px-3 py-1 text-xs font-black ${!selectedReviewHasTimetable ? "border-slate-300 bg-slate-100 text-slate-700" : selectedReviewIsStale ? "border-amber-300 bg-amber-50 text-amber-700" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].tone : "border-slate-200 bg-white text-blue-700"}`}>
+                          {!selectedReviewHasTimetable ? "시간표 없음" : selectedReviewIsStale ? "재검토 필요" : selectedReview ? REVIEW_STATUS_META[selectedReview.status].label : "미검토"}
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -10267,6 +10337,8 @@ export default function SynchroSPage() {
                         </div>
                       ) : null}
 
+                      {selectedReviewHasTimetable ? (
+                      <>
                       <div className="mt-4 grid gap-2">
                         {(["normal", "needs_check", "issue"] as ReviewStatus[]).map((status) => (
                           <button
@@ -10312,6 +10384,26 @@ export default function SynchroSPage() {
                       >
                         메모 저장
                       </button>
+                      </>
+                      ) : (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/90 p-3">
+                          <p className="text-sm font-black text-slate-800">#{selectedScheduleTagLabel} 시간표가 없습니다.</p>
+                          <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+                            검토 상태는 시간표를 저장한 뒤 기록할 수 있습니다.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenMissingStudentTimetable(selectedReviewStudent)}
+                            className="sync-pressable sync-focus mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-[0_10px_22px_rgba(37,99,235,0.2)] hover:bg-blue-700"
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+                              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                              <rect x="3" y="3" width="18" height="18" rx="5" />
+                            </svg>
+                            시간표 입력 화면 열기
+                          </button>
+                        </div>
+                      )}
 
                       <div className="mt-4 rounded-2xl border border-white/70 bg-white/65 p-3">
                         <p className="text-xs font-black text-slate-500">자동 점검</p>

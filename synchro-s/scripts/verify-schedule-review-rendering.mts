@@ -105,8 +105,28 @@ assert.match(
 );
 assert.match(
   reviewPage,
-  /reviewStudents\.filter\(\(student\) => reviewActiveGroupByStudentId\.has\(student\.id\)\)/,
-  "review roster must contain only students with an effective group in the selected tag"
+  /return reviewStudents[\s\S]*?const hasTimetable = reviewActiveGroupByStudentId\.has\(student\.id\)/,
+  "the review roster must retain current students even when the selected tag has no timetable"
+);
+assert.match(
+  reviewPage,
+  /if \(reviewFilter === "missing"\) return !row\.hasTimetable/,
+  "review must expose a dedicated missing-timetable filter"
+);
+assert.match(
+  reviewPage,
+  /missing: reviewStudents\.filter\(\(student\) => !eligibleStudentIds\.has\(student\.id\)\)\.length/,
+  "missing timetables must be counted independently from unreviewed timetables"
+);
+assert.match(
+  reviewPage,
+  /handleOpenMissingStudentTimetable[\s\S]*?setMainTab\("student"\)[\s\S]*?setSelectedStudentId\(targetStudent\.id\)[\s\S]*?setStudentScheduleInputTab\("sync"\)/,
+  "staff must be able to open the missing student's timetable input screen"
+);
+assert.match(
+  reviewPage,
+  /selectedReviewHasTimetable \? \([\s\S]*?saveScheduleReview[\s\S]*?시간표 입력 화면 열기/,
+  "missing timetables must show an input action instead of review status controls"
 );
 assert.match(
   reviewPage,
