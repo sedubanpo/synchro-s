@@ -44,6 +44,7 @@
     "verify:class-type-settings": "node --import tsx scripts/verify-class-type-settings.mts",
     "verify:staged-timetable-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:timetable-range-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
+    "verify:student-timetable-editor": "node --import tsx scripts/verify-student-timetable-editor.mts",
     "verify:header-sidebar-layout": "node --import tsx scripts/verify-header-sidebar-layout.mts"
   },
   "dependencies": {

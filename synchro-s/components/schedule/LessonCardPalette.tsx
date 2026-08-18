@@ -171,7 +171,7 @@ export function LessonCardPalette({
       </label>
 
       <p className="mt-2 text-[11px] font-semibold leading-4 text-slate-600">
-        기존 수업을 한 번 눌러 선택하고 <kbd className="rounded border border-slate-300 bg-white px-1 py-0.5 font-mono text-[10px]">⌘/Ctrl+C</kbd> 후, 빈 칸에서 <kbd className="rounded border border-slate-300 bg-white px-1 py-0.5 font-mono text-[10px]">⌘/Ctrl+V</kbd>를 누르세요. 수업 편집은 두 번 누릅니다.
+        카드 입력은 <strong className="font-black text-slate-800">입력·붙여넣기</strong>에서 빈 셀을 누르세요. 여러 수업은 <strong className="font-black text-slate-800">범위 선택</strong>에서 드래그한 뒤 <kbd className="rounded border border-slate-300 bg-white px-1 py-0.5 font-mono text-[10px]">⌘/Ctrl+C</kbd>로 복사합니다.
       </p>
 
       {selectedTemplate ? (

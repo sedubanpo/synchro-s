@@ -20,6 +20,7 @@ import {
   TimetableGrid,
   type TimetableAvailabilityCell,
   type TimetableCellContext,
+  type TimetableInteractionMode,
   type TimetableRangeSelection
 } from "@/components/schedule/TimetableGrid";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
@@ -27,10 +28,20 @@ import { getSynchroFirebaseAuth } from "@/lib/firebase/client";
 import { loadSchoolIconRegistry } from "@/lib/firebase/sharedIcons";
 import { getSchoolName, resolveSchoolIconUrl } from "@/lib/sharedIcons";
 import { getSubjectColorClass, setSubjectColor } from "@/lib/subjectColors";
+import {
+  createSyncDraftUndoSnapshot,
+  restoreSyncDraftUndoSnapshot,
+  type SyncDraftUndoSnapshot
+} from "@/lib/syncDraftUndo";
 import { buildLessonCardTemplates, createLessonCardTemplateFromEvent, type LessonCardTemplate } from "@/lib/lessonCardTemplates";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { addDays, dateToWeekday, timeToMinutes } from "@/lib/time";
 import { getOverlappingHourSlots } from "@/lib/timetableSlots";
+import {
+  createTimetableRangeClipboard,
+  translateTimetableRangeClipboard,
+  type TimetableRangeClipboard as TimetableRangeClipboardModel
+} from "@/lib/timetableRangeClipboard";
 import {
   compareEffectiveTimetableGroups,
   getEffectiveStudentTimetableGroupMap,
@@ -112,12 +123,21 @@ type StudentAvailabilityPreviewGroup = {
   isActive: boolean;
 };
 
-function ToolbarIcon({ name, className = "h-3.5 w-3.5" }: { name: "new" | "undo" | "days" | "times" | "availability" | "save"; className?: string }) {
+function ToolbarIcon({ name, className = "h-3.5 w-3.5" }: { name: "new" | "undo" | "reset" | "paste" | "range" | "days" | "times" | "availability" | "save"; className?: string }) {
   if (name === "new") {
     return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M12 5v14M5 12h14" strokeLinecap="round" /><rect x="3" y="3" width="18" height="18" rx="5" /></svg>;
   }
   if (name === "undo") {
     return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="m9 7-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 11h7a6 6 0 0 1 6 6" strokeLinecap="round" /></svg>;
+  }
+  if (name === "reset") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M5.5 8.5A7.5 7.5 0 1 1 5 15" strokeLinecap="round" /><path d="M5.5 4v4.5H10" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
+  if (name === "paste") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><path d="M8 5h8M9 3h6v4H9V3Z" strokeLinejoin="round" /><path d="M7 5H5.5A1.5 1.5 0 0 0 4 6.5v13A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 18.5 5H17" strokeLinecap="round" /><path d="M12 10v7m0 0-3-3m3 3 3-3" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
+  if (name === "range") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><rect x="4" y="4" width="16" height="16" rx="3" strokeDasharray="2.5 2.5" /><path d="M8 8h3v3H8V8Zm5 5h3v3h-3v-3Z" strokeLinejoin="round" /></svg>;
   }
   if (name === "days") {
     return <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9"><rect x="3" y="5" width="18" height="16" rx="4" /><path d="M8 3v4M16 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01" strokeLinecap="round" /></svg>;
@@ -149,19 +169,12 @@ type SyncScheduleDraftItem = {
   classDate?: string;
 };
 
-type LessonRangeClipboardItem = {
-  columnOffset: number;
-  rowOffset: number;
-  template: LessonCardTemplate;
-};
-
-type LessonRangeClipboard = {
-  items: LessonRangeClipboardItem[];
-  rowCount: number;
-  columnCount: number;
+type LessonRangeClipboard = TimetableRangeClipboardModel<LessonCardTemplate, ScheduleEvent> & {
   mode: "copy" | "cut";
   sourceEvents: ScheduleEvent[];
 };
+
+type SyncDraftUndoState = SyncDraftUndoSnapshot<SyncScheduleDraftItem, ScheduleEvent>;
 
 type TimetableGroup = {
   id: string;
@@ -1620,6 +1633,8 @@ export default function SynchroSPage() {
   const [syncDraftItems, setSyncDraftItems] = useState<SyncScheduleDraftItem[]>([]);
   const [stagedEventUpdates, setStagedEventUpdates] = useState<Record<string, ScheduleEvent>>({});
   const [stagedDeletedEventIds, setStagedDeletedEventIds] = useState<string[]>([]);
+  const [syncDraftUndoState, setSyncDraftUndoState] = useState<SyncDraftUndoState | null>(null);
+  const [timetableInteractionMode, setTimetableInteractionMode] = useState<TimetableInteractionMode>("input");
   const [savingSyncDrafts, setSavingSyncDrafts] = useState(false);
   const [copiedLessonTemplate, setCopiedLessonTemplate] = useState<LessonCardTemplate | null>(null);
   const [copiedLessonRange, setCopiedLessonRange] = useState<LessonRangeClipboard | null>(null);
@@ -2647,6 +2662,57 @@ export default function SynchroSPage() {
   }, [baseDisplayEvents, roleView, stagedDeletedEventIds, stagedEventUpdates, studentScheduleInputTab, syncDraftEvents]);
   const pendingTimetableChangeCount = syncDraftItems.length + stagedDeletedEventIds.length + Object.keys(stagedEventUpdates).length;
   const hasPendingTimetableChanges = pendingTimetableChangeCount > 0;
+  const syncDraftScopeKey = `${roleView}:${selectedStudentId}:${selectedScheduleTagId ?? ""}:${weekStart}:${selectedGroupId ?? ""}:${studentScheduleInputTab}`;
+  const captureSyncDraftUndo = useCallback(
+    (label: string) => {
+      setSyncDraftUndoState(
+        createSyncDraftUndoSnapshot(syncDraftScopeKey, label, {
+          syncDraftItems,
+          stagedEventUpdates,
+          stagedDeletedEventIds
+        })
+      );
+    },
+    [stagedDeletedEventIds, stagedEventUpdates, syncDraftItems, syncDraftScopeKey]
+  );
+  const handleUndoLastSyncDraftAction = useCallback(() => {
+    if (!syncDraftUndoState) {
+      setSyncDraftUndoState(null);
+      setNotice("되돌릴 직전 시간표 작업이 없습니다.");
+      return;
+    }
+    const restored = restoreSyncDraftUndoSnapshot(syncDraftUndoState, syncDraftScopeKey);
+    if (!restored) {
+      setSyncDraftUndoState(null);
+      setNotice("현재 학생·주차 범위에서 되돌릴 작업이 없습니다.");
+      return;
+    }
+    setSyncDraftItems(restored.syncDraftItems);
+    setStagedEventUpdates(restored.stagedEventUpdates);
+    setStagedDeletedEventIds(restored.stagedDeletedEventIds);
+    setSyncDraftUndoState(null);
+    setError(null);
+    setNotice(`직전 작업 '${syncDraftUndoState.label}'을 취소했습니다.`);
+    setLessonAutosave({ state: "saved", message: `${syncDraftUndoState.label} 이전 상태로 복원했습니다.` });
+  }, [syncDraftScopeKey, syncDraftUndoState]);
+
+  useEffect(() => {
+    setSyncDraftUndoState(null);
+    setTimetableInteractionMode("input");
+  }, [syncDraftScopeKey]);
+
+  useEffect(() => {
+    if (!syncDraftUndoState || roleView !== "student" || studentScheduleInputTab !== "sync") return;
+    const undoWithKeyboard = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      event.preventDefault();
+      handleUndoLastSyncDraftAction();
+    };
+    window.addEventListener("keydown", undoWithKeyboard);
+    return () => window.removeEventListener("keydown", undoWithKeyboard);
+  }, [handleUndoLastSyncDraftAction, roleView, studentScheduleInputTab, syncDraftUndoState]);
   const timetableEmptyMessage = useMemo(() => {
     if (roleView !== "student" || displayEvents.length > 0) return undefined;
     if (!selectedScheduleTagId) {
@@ -4483,6 +4549,7 @@ export default function SynchroSPage() {
 
       const cutDraftIds = new Set(cutSourceEvents.filter((event) => isSyncDraftEventId(event.id)).map((event) => event.id));
       const cutPersistedIds = cutSourceEvents.filter((event) => !isSyncDraftEventId(event.id) && !event.id.startsWith("draft-")).map((event) => event.id);
+      captureSyncDraftUndo(cutSourceEvents.length > 0 ? `수업 ${nextDrafts.length}개 이동` : `수업 ${nextDrafts.length}개 붙여넣기`);
       setSyncDraftItems((prev) => [...prev.filter((item) => !cutDraftIds.has(item.id)), ...nextDrafts]);
       if (cutPersistedIds.length > 0) {
         setStagedDeletedEventIds((prev) => Array.from(new Set([...prev, ...cutPersistedIds])));
@@ -4502,28 +4569,29 @@ export default function SynchroSPage() {
       });
       return true;
     },
-    [classTypes, displayEvents, getInstructorDaysOff, instructors, selectedScheduleTagId, selectedStudentId, selectedStudentLabel, subjects]
+    [captureSyncDraftUndo, classTypes, displayEvents, getInstructorDaysOff, instructors, selectedScheduleTagId, selectedStudentId, selectedStudentLabel, subjects]
   );
 
   const pasteLessonClipboardAt = useCallback(
     (anchor: TimetableCellContext) => {
       if (copiedLessonRange) {
-        const anchorColumn = DAYS.findIndex((day) => day.key === anchor.weekday);
-        const anchorRow = TIME_SLOTS.indexOf(anchor.startTime);
-        const placements: { cell: TimetableCellContext; template: LessonCardTemplate }[] = [];
-        for (const item of copiedLessonRange.items) {
-          const day = DAYS[anchorColumn + item.columnOffset];
-          const startTime = TIME_SLOTS[anchorRow + item.rowOffset];
-          if (!day || !startTime) {
-            setLessonAutosave({ state: "error", message: "붙여넣기 범위가 시간표 바깥으로 나갑니다." });
-            return;
-          }
-          const classDate = studentDayDateOverrides[day.key];
-          placements.push({
-            template: item.template,
-            cell: { weekday: day.key, startTime, classDate, scheduleMode: classDate ? "one_off" : "recurring" }
-          });
+        const translated = translateTimetableRangeClipboard(copiedLessonRange, anchor);
+        if (!translated) {
+          setLessonAutosave({ state: "error", message: "붙여넣기 범위가 시간표 바깥으로 나갑니다. 시작 셀을 다시 선택해 주세요." });
+          return;
         }
+        const placements = translated.map((item) => {
+          const classDate = studentDayDateOverrides[item.weekday];
+          return {
+            template: item.template,
+            cell: {
+              weekday: item.weekday,
+              startTime: item.startTime,
+              classDate,
+              scheduleMode: classDate ? "one_off" as const : "recurring" as const
+            }
+          };
+        });
         const moved = stageLessonPlacements(placements, copiedLessonRange.mode === "cut" ? copiedLessonRange.sourceEvents : []);
         if (moved && copiedLessonRange.mode === "cut") {
           setCopiedLessonRange({ ...copiedLessonRange, mode: "copy", sourceEvents: [] });
@@ -4767,6 +4835,7 @@ export default function SynchroSPage() {
           ? `자기주도학습 ${input.startTime}-${input.endTime}`
           : `${subjectLabel} ${instructorName} ${classTypeLabel} ${input.startTime}-${input.endTime}`;
 
+      captureSyncDraftUndo(input.kind === "self-study" ? "자기주도학습 추가" : `${subjectLabel} 수업 추가`);
       setSyncDraftItems((prev) => [
         ...prev,
         {
@@ -4790,7 +4859,7 @@ export default function SynchroSPage() {
       setError(null);
       setNotice(`${rawText} 초안을 시간표에 추가했습니다. DB 저장 전까지는 미리보기입니다.`);
     },
-    [classTypes, displayEvents, instructors, selectedScheduleTagId, selectedStudentId, subjects]
+    [captureSyncDraftUndo, classTypes, displayEvents, instructors, selectedScheduleTagId, selectedStudentId, subjects]
   );
 
   const handleResetSyncDrafts = useCallback(() => {
@@ -4801,6 +4870,8 @@ export default function SynchroSPage() {
     setSyncDraftItems([]);
     setStagedEventUpdates({});
     setStagedDeletedEventIds([]);
+    setSyncDraftUndoState(null);
+    setTimetableInteractionMode("input");
     setError(null);
     setNotice("저장하지 않은 시간표 변경 사항을 모두 되돌렸습니다.");
   }, [hasPendingTimetableChanges]);
@@ -4812,6 +4883,8 @@ export default function SynchroSPage() {
     setSyncDraftItems([]);
     setStagedEventUpdates({});
     setStagedDeletedEventIds([]);
+    setSyncDraftUndoState(null);
+    setTimetableInteractionMode("input");
     setParsedNotionItems([]);
     setSelectedGroupId(null);
     setIsCreatingNewSyncTimetable(true);
@@ -5149,6 +5222,7 @@ export default function SynchroSPage() {
       setSyncDraftItems(conflictDetails.length > 0 ? syncDraftItems.filter((item) => conflictDetails.some((detail) => detail.includes(item.rawText))) : []);
       setStagedEventUpdates({});
       setStagedDeletedEventIds([]);
+      setSyncDraftUndoState(null);
       await Promise.all([loadWeek({ silent: true }), loadSaveHistory(), loadOverviewEvents(), loadScheduleReviews()]);
       setNotice(`싱크로 시간표 저장 완료: 반영 ${savedCount}건${conflictDetails.length > 0 ? ` / 충돌 ${conflictDetails.length}건` : ""}${historySaved ? "" : " · 최근 저장 기록은 새로고침 시 다시 확인해 주세요."}`);
 
@@ -5585,6 +5659,19 @@ export default function SynchroSPage() {
       try {
         if (roleView === "student" && studentScheduleInputTab === "sync") {
           if (isSyncDraftEventId(ctx.classId)) {
+            const targetDraft = syncDraftItems.find((item) => item.id === ctx.classId);
+            if (!targetDraft) {
+              setError("수정 대상 초안을 찾지 못했습니다.");
+              return;
+            }
+            const nextSubjectName = ctx.subjectName ?? targetDraft.subjectLabel;
+            if (
+              targetDraft.weekday === ctx.weekday &&
+              targetDraft.startTime === ctx.startTime &&
+              targetDraft.endTime === ctx.endTime &&
+              targetDraft.subjectLabel === nextSubjectName
+            ) return;
+            captureSyncDraftUndo(`${targetDraft.subjectLabel} 수업 수정`);
             setSyncDraftItems((prev) =>
               prev.map((item) =>
                 item.id === ctx.classId
@@ -5612,15 +5699,25 @@ export default function SynchroSPage() {
             setConflictDialog({ open: true, title: "휴무일 안내", message: "해당 강사의 휴무일입니다" });
             return;
           }
+          const nextSubjectCode = ctx.subjectCode ?? targetEvent.subjectCode;
+          const nextSubjectName = ctx.subjectName ?? targetEvent.subjectName;
+          if (
+            targetEvent.weekday === ctx.weekday &&
+            targetEvent.startTime === ctx.startTime &&
+            targetEvent.endTime === ctx.endTime &&
+            targetEvent.subjectCode === nextSubjectCode &&
+            targetEvent.subjectName === nextSubjectName
+          ) return;
           const nextEvent: ScheduleEvent = {
             ...targetEvent,
             weekday: ctx.weekday,
             classDate: shiftDate(weekStart, ctx.weekday - 1),
             startTime: ctx.startTime,
             endTime: ctx.endTime,
-            subjectCode: ctx.subjectCode ?? targetEvent.subjectCode,
-            subjectName: ctx.subjectName ?? targetEvent.subjectName
+            subjectCode: nextSubjectCode,
+            subjectName: nextSubjectName
           };
+          captureSyncDraftUndo(`${targetEvent.subjectName} 수업 수정`);
           setStagedEventUpdates((prev) => ({ ...prev, [ctx.classId]: nextEvent }));
           setNotice(`${nextEvent.subjectName} ${ctx.startTime}-${ctx.endTime} 수정 사항을 작업본에 반영했습니다.`);
           setLessonAutosave({ state: "saved", message: `${nextEvent.subjectName} 수정 변경 대기 중` });
@@ -5981,6 +6078,7 @@ export default function SynchroSPage() {
     },
     [
       activeGroup,
+      captureSyncDraftUndo,
       createTimetableGroup,
       displayEvents,
       draftEvents,
@@ -5997,6 +6095,7 @@ export default function SynchroSPage() {
       selectedStudentId,
       selectedStudentLabel,
       studentScheduleInputTab,
+      syncDraftItems,
       students,
       recordConflictLogs,
       roleView,
@@ -7078,6 +7177,7 @@ export default function SynchroSPage() {
   const handleDeleteSingleSchedule = useCallback(
     async (event: ScheduleEvent) => {
       if (isSyncDraftEventId(event.id)) {
+        captureSyncDraftUndo(`${event.subjectName} 수업 삭제`);
         setSyncDraftItems((prev) => prev.filter((item) => item.id !== event.id));
         setNotice("싱크로 시간표 초안을 삭제했습니다.");
         return;
@@ -7098,6 +7198,7 @@ export default function SynchroSPage() {
       }
 
       if (roleView === "student" && studentScheduleInputTab === "sync") {
+        captureSyncDraftUndo(`${event.subjectName} 수업 삭제`);
         setStagedDeletedEventIds((prev) => (prev.includes(event.id) ? prev : [...prev, event.id]));
         setStagedEventUpdates((prev) => {
           const next = { ...prev };
@@ -7158,47 +7259,30 @@ export default function SynchroSPage() {
         void loadWeek({ silent: true });
       }
     },
-    [currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView, saveTimetableGroupSnapshot, studentScheduleInputTab, timetableGroups]
+    [captureSyncDraftUndo, currentTargetId, loadOverviewEvents, loadWeek, moveToLogin, removeClassFromGroups, roleView, saveTimetableGroupSnapshot, studentScheduleInputTab, timetableGroups]
   );
 
   const handleCopyTimetableRange = useCallback((selection: TimetableRangeSelection, mode: "copy" | "cut") => {
-    const selectedCellKeys = new Set(selection.cells.map((cell) => `${cell.weekday}-${cell.startTime}`));
-    const anchorColumn = DAYS.findIndex((day) => day.key === selection.anchor.weekday);
-    const anchorRow = TIME_SLOTS.indexOf(selection.anchor.startTime);
-    const copiedEvents: ScheduleEvent[] = [];
-    const items = selection.events.flatMap((event) => {
-      const sourceSlot = TIME_SLOTS.find((slot) => {
-        const start = timeToMinutes(slot);
-        return timeToMinutes(event.startTime) >= start && timeToMinutes(event.startTime) < start + 60;
-      });
-      if (!sourceSlot || !selectedCellKeys.has(`${event.weekday}-${sourceSlot}`)) return [];
-      const template = createLessonCardTemplateFromEvent(event);
-      const column = DAYS.findIndex((day) => day.key === event.weekday);
-      const row = TIME_SLOTS.indexOf(sourceSlot);
-      if (!template || column < 0 || row < 0) return [];
-      copiedEvents.push(event);
-      return [{
-        columnOffset: column - anchorColumn,
-        rowOffset: row - anchorRow,
-        template
-      }];
+    const clipboard = createTimetableRangeClipboard({
+      cells: selection.cells,
+      events: selection.events,
+      createTemplate: createLessonCardTemplateFromEvent
     });
-    if (items.length === 0) {
+    if (!clipboard) {
       setLessonAutosave({ state: "error", message: "선택한 범위에 복사할 수업이 없습니다." });
       return;
     }
     setCopiedLessonRange({
-      items,
-      rowCount: selection.rowCount,
-      columnCount: selection.columnCount,
+      ...clipboard,
       mode,
-      sourceEvents: mode === "cut" ? copiedEvents : []
+      sourceEvents: mode === "cut" ? clipboard.items.map((item) => item.sourceEvent) : []
     });
     setCopiedLessonTemplate(null);
     setCopiedTimetableEventKey(null);
+    setTimetableInteractionMode("input");
     setLessonAutosave({
       state: "idle",
-      message: `${selection.rowCount}행 × ${selection.columnCount}열에서 수업 ${items.length}개를 ${mode === "cut" ? "오려뒀습니다" : "복사했습니다"}.`
+      message: `${clipboard.rowCount}행 × ${clipboard.columnCount}열의 수업 ${clipboard.items.length}개를 ${mode === "cut" ? "오려뒀습니다" : "복사했습니다"}. 붙여넣을 시작 셀을 누르세요.`
     });
     setError(null);
   }, []);
@@ -7208,6 +7292,7 @@ export default function SynchroSPage() {
     if (uniqueEvents.length === 0) return;
     const draftIds = new Set(uniqueEvents.filter((event) => isSyncDraftEventId(event.id)).map((event) => event.id));
     const persistedIds = uniqueEvents.filter((event) => !isSyncDraftEventId(event.id) && !event.id.startsWith("draft-")).map((event) => event.id);
+    captureSyncDraftUndo(`선택 수업 ${uniqueEvents.length}개 삭제`);
     setSyncDraftItems((prev) => prev.filter((item) => !draftIds.has(item.id)));
     if (persistedIds.length > 0) {
       setStagedDeletedEventIds((prev) => Array.from(new Set([...prev, ...persistedIds])));
@@ -7220,7 +7305,7 @@ export default function SynchroSPage() {
     setNotice(`${uniqueEvents.length}개 수업을 작업본에서 삭제했습니다. 저장하기 전까지 서버에는 반영되지 않습니다.`);
     setLessonAutosave({ state: "saved", message: `선택 범위 수업 ${uniqueEvents.length}개 삭제 변경 대기 중` });
     setError(null);
-  }, []);
+  }, [captureSyncDraftUndo]);
 
   const handleCreateSpecialNote = useCallback(async () => {
     if (!currentTargetId) {
@@ -8124,6 +8209,7 @@ export default function SynchroSPage() {
         templates={lessonCardTemplates}
         selectedTemplate={copiedLessonTemplate}
         onCopy={(template) => {
+          setTimetableInteractionMode("input");
           setCopiedLessonTemplate(template);
           setCopiedLessonRange(null);
           setCopiedTimetableEventKey(null);
@@ -8986,6 +9072,48 @@ export default function SynchroSPage() {
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {roleView === "student" && studentScheduleInputTab === "sync" ? (
                   <>
+                    <div role="group" aria-label="시간표 편집 도구" className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                      <button
+                        type="button"
+                        aria-pressed={timetableInteractionMode === "input"}
+                        onClick={() => {
+                          setTimetableInteractionMode("input");
+                          setLessonAutosave({
+                            state: "idle",
+                            message: copiedLessonTemplate || copiedLessonRange
+                              ? "입력·붙여넣기 모드입니다. 붙여넣을 시작 셀을 누르세요."
+                              : "입력·붙여넣기 모드입니다. 빈 셀을 누르면 수업을 입력할 수 있습니다."
+                          });
+                        }}
+                        className={`sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-black transition-[background-color,box-shadow,color] duration-150 ease-out ${
+                          timetableInteractionMode === "input"
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-slate-600 hover:bg-white hover:text-slate-900"
+                        }`}
+                      >
+                        <ToolbarIcon name="paste" />
+                        입력·붙여넣기
+                      </button>
+                      <button
+                        type="button"
+                        disabled={timetableViewMode !== "detailed"}
+                        aria-pressed={timetableInteractionMode === "range"}
+                        onClick={() => {
+                          setTimetableInteractionMode("range");
+                          setLessonAutosave({ state: "idle", message: "범위 선택 모드입니다. 셀을 드래그한 뒤 복사·오려두기·삭제를 사용하세요." });
+                        }}
+                        title={timetableViewMode === "detailed" ? "셀을 드래그해 여러 수업을 선택합니다" : "상세 뷰에서 사용할 수 있습니다"}
+                        className={`sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-black transition-[background-color,box-shadow,color] duration-150 ease-out disabled:cursor-not-allowed disabled:opacity-45 ${
+                          timetableInteractionMode === "range"
+                            ? "bg-slate-900 text-white shadow-sm"
+                            : "text-slate-600 hover:bg-white hover:text-slate-900"
+                        }`}
+                      >
+                        <ToolbarIcon name="range" />
+                        범위 선택
+                      </button>
+                    </div>
+                    <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-slate-200" />
                     <button
                       type="button"
                       disabled={savingSyncDrafts || !selectedStudentId}
@@ -9004,12 +9132,23 @@ export default function SynchroSPage() {
                     </span>
                     <button
                       type="button"
+                      disabled={savingSyncDrafts || !syncDraftUndoState || syncDraftUndoState.scopeKey !== syncDraftScopeKey}
+                      onClick={handleUndoLastSyncDraftAction}
+                      aria-keyshortcuts="Meta+Z Control+Z"
+                      title={syncDraftUndoState ? `직전 작업 취소: ${syncDraftUndoState.label}` : "되돌릴 직전 작업이 없습니다"}
+                      className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <ToolbarIcon name="undo" />
+                      직전 작업 취소
+                    </button>
+                    <button
+                      type="button"
                       disabled={savingSyncDrafts || !hasPendingTimetableChanges}
                       onClick={handleResetSyncDrafts}
                       className="sync-pressable sync-focus inline-flex min-h-8 items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <ToolbarIcon name="undo" />
-                      변경 취소
+                      <ToolbarIcon name="reset" />
+                      전체 변경 취소
                     </button>
                     <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-slate-200" />
                   </>
@@ -9119,11 +9258,14 @@ export default function SynchroSPage() {
                   상세
                 </button>
                 <button
-                  type="button"
-                  onClick={() => setTimetableViewMode("summary")}
-                  className={`sync-pressable sync-focus rounded-full px-3 py-1.5 text-xs font-bold ${
-                    timetableViewMode === "summary" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"
-                  }`}
+                    type="button"
+                    onClick={() => {
+                      setTimetableInteractionMode("input");
+                      setTimetableViewMode("summary");
+                    }}
+                    className={`sync-pressable sync-focus rounded-full px-3 py-1.5 text-xs font-bold ${
+                      timetableViewMode === "summary" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"
+                    }`}
                 >
                   심플 뷰
                 </button>
@@ -9144,8 +9286,8 @@ export default function SynchroSPage() {
                     {roleView === "student" && selectedStudentOption ? (
                       <SchoolLogoBackdrop
                         student={selectedStudentOption}
-                        className="-bottom-16 -top-16 right-[12%] w-64 opacity-[0.065] saturate-[0.8]"
-                        imageClassName="scale-110 mix-blend-multiply"
+                        className="-bottom-16 -top-16 right-[12%] w-64 opacity-[0.14] saturate-[0.95]"
+                        imageClassName="scale-110 mix-blend-multiply drop-shadow-[0_1px_0_rgba(15,23,42,0.08)]"
                       />
                     ) : null}
                     <div className="relative z-10">
@@ -9210,6 +9352,7 @@ export default function SynchroSPage() {
                             setLessonAutosave({ state: "error", message: "이 수업은 복사할 수 없습니다." });
                             return;
                           }
+                          setTimetableInteractionMode("input");
                           setCopiedLessonTemplate(template);
                           setCopiedLessonRange(null);
                           setCopiedTimetableEventKey(`${event.id}-${event.classDate}-${event.startTime}`);
@@ -9221,21 +9364,18 @@ export default function SynchroSPage() {
                         }
                       : undefined
                   }
-                  rangeEditing={
+                  interactionMode={
                     !isInstructorReadOnly &&
                     roleView === "student" &&
                     studentScheduleInputTab === "sync" &&
                     timetableViewMode === "detailed" &&
                     !isDisplayedGroupInactive
+                      ? timetableInteractionMode
+                      : "input"
                   }
                   onRangeCopy={
                     !isInstructorReadOnly && roleView === "student" && studentScheduleInputTab === "sync"
                       ? handleCopyTimetableRange
-                      : undefined
-                  }
-                  onRangePaste={
-                    !isInstructorReadOnly && roleView === "student" && studentScheduleInputTab === "sync"
-                      ? pasteLessonClipboardAt
                       : undefined
                   }
                   onRangeDelete={
@@ -9251,6 +9391,7 @@ export default function SynchroSPage() {
                     roleView === "student" &&
                     studentScheduleInputTab === "sync" &&
                     timetableViewMode === "detailed" &&
+                    timetableInteractionMode === "input" &&
                     Boolean(copiedLessonTemplate || copiedLessonRange) &&
                     Boolean(selectedStudentId) &&
                     Boolean(selectedScheduleTagId) &&

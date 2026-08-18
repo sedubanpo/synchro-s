@@ -67,10 +67,11 @@ assert.equal(copiedFromTimetable?.durationMinutes, 180, "기존 수업의 실제
 assert.equal(copiedFromTimetable?.instructorId, usedMathEvent.instructorId, "기존 수업의 강사를 보존해야 합니다.");
 assert.equal(copiedFromTimetable?.classTypeCode, usedMathEvent.classTypeCode, "기존 수업의 유형을 보존해야 합니다.");
 
-const [pageSource, gridSource, paletteSource] = await Promise.all([
+const [pageSource, gridSource, paletteSource, rangeClipboardSource] = await Promise.all([
   readFile(path.join(projectRoot, "app/synchro-s/page.tsx"), "utf8"),
   readFile(path.join(projectRoot, "components/schedule/TimetableGrid.tsx"), "utf8"),
-  readFile(path.join(projectRoot, "components/schedule/LessonCardPalette.tsx"), "utf8")
+  readFile(path.join(projectRoot, "components/schedule/LessonCardPalette.tsx"), "utf8"),
+  readFile(path.join(projectRoot, "lib/timetableRangeClipboard.ts"), "utf8")
 ]);
 
 assert.match(paletteSource, /강사명 또는 과목명 검색/, "카드 검색창 안내가 있어야 합니다.");
@@ -78,7 +79,7 @@ assert.match(paletteSource, /SubjectMotif/, "과목별 반투명 배경 모티�
 assert.match(paletteSource, /ClassTypeSignal/, "수업 유형별 비색상 시각 신호가 있어야 합니다.");
 assert.match(paletteSource, /xl:h-\[clamp\(28rem,55vh,38rem\)\]/, "데스크톱 빠른 카드 목록은 충분한 화면 높이를 사용해야 합니다.");
 assert.doesNotMatch(paletteSource, /max-h-72/, "빠른 카드 목록이 짧은 고정 높이로 되돌아가면 안 됩니다.");
-assert.match(paletteSource, /기존 수업을 한 번 눌러 선택하고/, "기존 수업 셀 복사 안내가 있어야 합니다.");
+assert.match(paletteSource, /입력·붙여넣기[\s\S]*범위 선택/, "카드 입력과 범위 선택을 서로 다른 편집 도구로 안내해야 합니다.");
 assert.match(pageSource, /setSyncDraftItems\(\(prev\) => \[/, "카드 붙여넣기는 먼저 로컬 작업본에 추가되어야 합니다.");
 assert.match(pageSource, /recordHistory: false/, "수업 추가 단계에서 저장 기록을 중복 생성하지 않아야 합니다.");
 assert.match(pageSource, /method: "POST"[\s\S]*\/api\/save-history/, "저장하기 한 번에 최근 저장 기록을 한 건만 남겨야 합니다.");
@@ -97,15 +98,29 @@ assert.match(gridSource, /tabIndex=\{isEmpty && viewMode === "detailed" \? 0 : u
 assert.match(pageSource, /!selectedStudentId[\s\S]*!selectedScheduleTagId/, "학생과 태그가 없으면 카드 입력을 차단해야 합니다.");
 assert.match(gridSource, /setRangeAnchorKey/, "시간표 셀 범위 선택의 시작점을 보존해야 합니다.");
 assert.match(gridSource, /setRangeFocusKey/, "포인터 드래그로 시간표 선택 범위를 확장해야 합니다.");
+assert.match(pageSource, /role="group" aria-label="시간표 편집 도구"/, "입력·붙여넣기와 범위 선택을 명시적인 편집 도구 그룹으로 제공해야 합니다.");
+assert.match(pageSource, /setTimetableInteractionMode\("input"\)/, "카드나 범위를 복사하면 입력·붙여넣기 모드로 전환해야 합니다.");
+assert.match(gridSource, /const inputPasteArmed = !rangeEditing && pasteArmed/, "범위 선택과 붙여넣기가 동시에 활성화되면 안 됩니다.");
+assert.doesNotMatch(gridSource, /onDoubleClick=\{\(\) => \{[\s\S]*?rangeEditing[\s\S]*?onCellClick/, "범위 선택 모드의 빈 셀 더블클릭이 입력 동작으로 새면 안 됩니다.");
+assert.match(gridSource, /canMoveEvents = Boolean\(onEventMove && viewMode === "detailed" && !rangeEditing\)/, "범위 선택 모드에서는 수업 카드 드래그 이동을 비활성화해야 합니다.");
+assert.match(gridSource, /const canCopyEvent = !rangeEditing/, "범위 선택 모드에서는 카드 단일 복사 대신 범위 복사만 사용해야 합니다.");
+assert.match(gridSource, /onSave=\{!rangeEditing[\s\S]*onDelete=\{!rangeEditing/, "범위 선택 모드에서는 카드의 직접 저장·삭제 동작을 숨겨야 합니다.");
+assert.match(gridSource, /if \(rangeEditing && rangeDidDragRef\.current\)/, "입력 모드의 정상 클릭이 이전 드래그 상태 때문에 무시되면 안 됩니다.");
+assert.match(gridSource, /requestAnimationFrame[\s\S]*rangeDidDragRef\.current = false/, "드래그 종료 뒤 클릭 억제 상태를 다음 프레임에 해제해야 합니다.");
 assert.match(gridSource, /rowCount === 1 && columnCount === 1 && eventCount === 0[\s\S]*return null/, "빈 단일 셀 선택 요약은 숨겨야 합니다.");
 assert.match(gridSource, /선택 \{rowCount\}행 × \{columnCount\}열 · 수업 \{eventCount\}개/, "의미 있는 선택 요약은 시간표 상태 영역에 표시해야 합니다.");
 assert.doesNotMatch(gridSource, /top-\[49px\][\s\S]*rangeSelection\.rowCount/, "선택 요약이 시간표 셀 위에 떠 있으면 안 됩니다.");
 assert.match(gridSource, /role="menu"[\s\S]*시간표 선택 메뉴/, "우클릭 시 접근 가능한 시간표 선택 메뉴를 제공해야 합니다.");
-assert.match(gridSource, /오려두기[\s\S]*붙여넣기[\s\S]*선택 수업 삭제/, "컨텍스트 메뉴에 복사·오려두기·붙여넣기·삭제가 있어야 합니다.");
-assert.match(gridSource, /key === "x"[\s\S]*key === "v"/, "범위 오려두기와 붙여넣기 단축키를 처리해야 합니다.");
+assert.match(gridSource, /오려두기[\s\S]*선택 수업 삭제/, "범위 모드 컨텍스트 메뉴에는 복사·오려두기·삭제가 있어야 합니다.");
+assert.doesNotMatch(gridSource, /withCommand && key === "v"/, "범위 선택 모드가 붙여넣기 단축키를 가로채면 안 됩니다.");
 assert.match(pageSource, /type LessonRangeClipboard/, "시간표 범위의 상대 좌표를 보존하는 클립보드 모델이 있어야 합니다.");
-assert.match(pageSource, /columnOffset[\s\S]*rowOffset/, "범위 붙여넣기는 요일과 시간 간격을 보존해야 합니다.");
+assert.match(rangeClipboardSource, /columnOffset[\s\S]*rowOffset/, "범위 붙여넣기는 요일과 시간 간격을 보존해야 합니다.");
+assert.match(rangeClipboardSource, /Math\.min\(\.\.\.copyableEvents[\s\S]*anchorSlotIndex/, "빈 선행 셀이 아니라 실제 첫 수업을 복사 원점으로 삼아야 합니다.");
+assert.match(pageSource, /translateTimetableRangeClipboard\(copiedLessonRange, anchor\)/, "붙여넣기 전에 범위 전체 좌표를 원자적으로 변환해야 합니다.");
 assert.match(pageSource, /targetOccupied[\s\S]*빈 범위를 선택해 주세요/, "범위 붙여넣기는 기존 수업을 조용히 덮어쓰지 않아야 합니다.");
 assert.match(pageSource, /cutPersistedIds[\s\S]*setStagedDeletedEventIds/, "오려두기는 붙여넣기 성공 후 원본 삭제를 작업본에 기록해야 합니다.");
+assert.match(pageSource, /type SyncDraftUndoState[\s\S]*captureSyncDraftUndo/, "작업본 세 상태를 함께 복원하는 한 단계 실행 취소 스냅샷이 있어야 합니다.");
+assert.match(pageSource, /handleUndoLastSyncDraftAction[\s\S]*직전 작업 취소[\s\S]*전체 변경 취소/, "직전 작업 취소와 전체 변경 취소를 별도 명령으로 제공해야 합니다.");
+assert.match(pageSource, /event\.key\.toLowerCase\(\) !== "z"/, "입력 필드 밖에서 Cmd\/Ctrl+Z로 직전 작업을 취소할 수 있어야 합니다.");
 
 console.log("staged timetable editing verification passed");

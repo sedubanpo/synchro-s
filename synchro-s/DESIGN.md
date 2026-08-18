@@ -29,7 +29,7 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Import progress gradient: emerald `#34d399`, blue `#60a5fa`, violet `#a78bfa`.
 - Schedule tag tones reuse the existing blue, emerald, amber, rose, violet, and slate UI scales.
 - Recent save-history tag labels use the saved schedule-tag tone at pastel intensity; they are secondary metadata and must not compete with the student name.
-- School emblems may appear as oversized, clipped, color-retaining backdrops in student-owned surfaces. Keep opacity between `5%` and `9%`, soften saturation without removing school colors, preserve readable foreground contrast, and omit the backdrop when no emblem is registered.
+- School emblems may appear as oversized, clipped, color-retaining backdrops in student-owned surfaces. Recent-history cards keep opacity between `5%` and `9%`; the primary Student Timetable header uses `14%` opacity and `95%` saturation so the selected school's identity stays recognizable. Preserve readable foreground contrast and omit the backdrop when no emblem is registered.
 - Quick lesson cards tint the whole card by subject family. Instructor name is the dominant line; the written subject remains a compact rectangular label, never a speech-bubble treatment.
 - Quick lesson cards use quiet, code-native subject motifs behind content: manuscript for Korean, geometry for math, letterforms for English, scientific diagrams for science families, and a globe for social studies. Motifs stay below `10%` opacity and never replace the written subject label.
 - Class type is encoded with both text and a compact geometric signal: capacity dots for ratio lessons, a flowing track for regular multi lessons, and a starburst for special lectures. Capacity and optional operating memo remain readable metadata.
@@ -50,6 +50,8 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Timetable cell inner padding: `0.25rem`.
 - Multi-date timetable column minimum: `9.5rem`, preserving student names before horizontal scrolling.
 - Timetable range summaries belong to the grid's quiet top status row, never over timetable cells. Suppress the redundant `1 × 1 / 0 lessons` summary while preserving the selected-cell treatment and keyboard commands.
+- Student timetable editing exposes two mutually exclusive tools in the toolbar: `입력·붙여넣기` makes a cell click input or paste, while `범위 선택` reserves pointer drag for copy, cut, and delete. Copying a range returns to input mode so the next destination click is deterministic.
+- `직전 작업 취소` restores the last staged timetable command as one unit; `전체 변경 취소` remains the separate all-changes reset.
 - Minimum practical hit area: `2.5rem` when layout allows.
 - Instructor picker: one horizontally stable board with six fixed subject-family columns in `국어 → 수학 → 영어 → 사회 → 과학 → 기타` order. Keep a single outer scroll container, sticky family headings, Korean alphabetical name order, and explicit selected text.
 

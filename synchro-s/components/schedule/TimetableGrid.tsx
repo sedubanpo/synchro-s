@@ -21,6 +21,8 @@ export type TimetableRangeSelection = {
   columnCount: number;
 };
 
+export type TimetableInteractionMode = "input" | "range";
+
 export function TimetableSelectionSummary({
   rowCount,
   columnCount,
@@ -68,10 +70,9 @@ type TimetableGridProps = {
   onEventClick?: (event: ScheduleEvent) => void;
   onEventCopy?: (event: ScheduleEvent) => void;
   onRangeCopy?: (selection: TimetableRangeSelection, mode: "copy" | "cut") => void;
-  onRangePaste?: (anchor: TimetableCellContext) => void;
   onRangeDelete?: (selection: TimetableRangeSelection) => void;
   onRangeEdit?: (event: ScheduleEvent) => void;
-  rangeEditing?: boolean;
+  interactionMode?: TimetableInteractionMode;
   copiedEventKey?: string | null;
   onEventSave?: (event: ScheduleEvent) => Promise<void>;
   onEventDelete?: (event: ScheduleEvent) => Promise<void>;
@@ -249,10 +250,9 @@ export function TimetableGrid({
   onEventClick,
   onEventCopy,
   onRangeCopy,
-  onRangePaste,
   onRangeDelete,
   onRangeEdit,
-  rangeEditing = false,
+  interactionMode = "input",
   copiedEventKey = null,
   onEventSave,
   onEventDelete,
@@ -277,11 +277,14 @@ export function TimetableGrid({
   const dragPayloadRef = useRef<{ classId: string; durationMinutes: number } | null>(null);
   const dropHandledRef = useRef(false);
   const rangeDidDragRef = useRef(false);
+  const rangeResetFrameRef = useRef<number | null>(null);
+  const rangeEditing = interactionMode === "range";
+  const inputPasteArmed = !rangeEditing && pasteArmed;
   const progressByEventKey = new Map<string, { index: number; total: number }>();
   const eventMap = new Map<string, ScheduleEvent[]>();
   const activeDaySet = new Set<Weekday>();
   const daysOffSet = new Set(daysOff);
-  const canMoveEvents = Boolean(onEventMove && viewMode === "detailed");
+  const canMoveEvents = Boolean(onEventMove && viewMode === "detailed" && !rangeEditing);
 
   for (const event of events) {
     const overlappingSlots = getOverlappingHourSlots(event, timeSlots);
@@ -409,12 +412,20 @@ export function TimetableGrid({
       setDragOverCell(null);
       setDraggingKey(null);
       setRangeDragging(false);
+      if (rangeDidDragRef.current) {
+        if (rangeResetFrameRef.current !== null) window.cancelAnimationFrame(rangeResetFrameRef.current);
+        rangeResetFrameRef.current = window.requestAnimationFrame(() => {
+          rangeDidDragRef.current = false;
+          rangeResetFrameRef.current = null;
+        });
+      }
     };
 
     window.addEventListener("dragend", clearDragState);
     window.addEventListener("drop", clearDragState);
     window.addEventListener("mouseup", clearDragState);
     return () => {
+      if (rangeResetFrameRef.current !== null) window.cancelAnimationFrame(rangeResetFrameRef.current);
       window.removeEventListener("dragend", clearDragState);
       window.removeEventListener("drop", clearDragState);
       window.removeEventListener("mouseup", clearDragState);
@@ -441,6 +452,8 @@ export function TimetableGrid({
 
   useEffect(() => {
     if (rangeEditing) return;
+    rangeDidDragRef.current = false;
+    setRangeDragging(false);
     setRangeAnchorKey(null);
     setRangeFocusKey(null);
     setContextMenu(null);
@@ -528,10 +541,6 @@ export function TimetableGrid({
           event.preventDefault();
           event.stopPropagation();
           onRangeCopy(rangeSelection, "cut");
-        } else if (withCommand && key === "v" && onRangePaste) {
-          event.preventDefault();
-          event.stopPropagation();
-          onRangePaste(rangeSelection.anchor);
         } else if ((event.key === "Delete" || event.key === "Backspace") && onRangeDelete && rangeSelection.events.length > 0) {
           event.preventDefault();
           event.stopPropagation();
@@ -560,9 +569,6 @@ export function TimetableGrid({
           </button>
           <button type="button" role="menuitem" disabled={rangeSelection.events.length === 0} onClick={() => { onRangeCopy?.(rangeSelection, "cut"); setContextMenu(null); }} className="sync-focus flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-amber-50 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-40">
             <span>오려두기</span><kbd className="text-[10px] text-slate-400">⌘X</kbd>
-          </button>
-          <button type="button" role="menuitem" disabled={!pasteArmed} onClick={() => { onRangePaste?.(rangeSelection.anchor); setContextMenu(null); }} className="sync-focus flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
-            <span>붙여넣기</span><kbd className="text-[10px] text-slate-400">⌘V</kbd>
           </button>
           {rangeSelection.events.length === 1 ? (
             <button type="button" role="menuitem" onClick={() => { onRangeEdit?.(rangeSelection.events[0]); setContextMenu(null); }} className="sync-focus flex w-full items-center rounded-lg px-2.5 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-100">
@@ -747,7 +753,7 @@ export function TimetableGrid({
                   const isEmpty = cellEntries.length === 0;
                   const isDropTarget = dragOverCell === cellKey;
                   const isActiveDay = activeDaySet.has(day.key);
-                  const isPasteTarget = isEmpty && pasteArmed && activeCellKey === cellKey;
+                  const isPasteTarget = isEmpty && inputPasteArmed && activeCellKey === cellKey;
                   const isRangeSelected = selectedCellKeys.has(cellKey);
                   const classDate = dayDateOverrides[day.key];
                   const availabilityCell = availabilityCells[cellKey];
@@ -764,7 +770,7 @@ export function TimetableGrid({
                       tabIndex={isEmpty && viewMode === "detailed" ? 0 : undefined}
                       aria-label={
                         isEmpty && viewMode === "detailed"
-                          ? `${day.label}요일 ${formatTimeSlotRange(slot)} 빈 시간, ${pasteArmed ? "복사한 수업 붙여넣기" : "수업 입력"}`
+                          ? `${day.label}요일 ${formatTimeSlotRange(slot)} 빈 시간, ${rangeEditing ? "범위 선택" : inputPasteArmed ? "복사한 수업 붙여넣기" : "수업 입력"}`
                           : undefined
                       }
                       className={`border-b border-r align-top transition-[background-color,border-color,box-shadow] duration-150 ease-out ${rangeEditing ? "select-none" : ""} ${
@@ -794,25 +800,20 @@ export function TimetableGrid({
                           : undefined
                       }
                       onClick={() => {
-                        if (rangeDidDragRef.current) {
+                        if (rangeEditing && rangeDidDragRef.current) {
                           rangeDidDragRef.current = false;
                           return;
                         }
                         if (isEmpty && viewMode === "detailed") {
                           setActiveCellKey(cellKey);
-                          if (pasteArmed && onCellPaste) onCellPaste(cellContext);
+                          if (inputPasteArmed && onCellPaste) onCellPaste(cellContext);
                           else if (!rangeEditing) onCellClick(cellContext);
-                        }
-                      }}
-                      onDoubleClick={() => {
-                        if (isEmpty && viewMode === "detailed" && rangeEditing && !pasteArmed) {
-                          onCellClick(cellContext);
                         }
                       }}
                       onPointerDown={(event) => {
                         if (!rangeEditing || event.button !== 0) return;
                         const target = event.target as HTMLElement;
-                        if (target.closest("button,[data-timetable-event='true']")) return;
+                        if (target.closest("button")) return;
                         setRangeAnchorKey(event.shiftKey && rangeAnchorKey ? rangeAnchorKey : cellKey);
                         setRangeFocusKey(cellKey);
                         setRangeDragging(true);
@@ -847,16 +848,16 @@ export function TimetableGrid({
                         }
                       }}
                       onKeyDown={(event) => {
-                        if (!isEmpty || viewMode !== "detailed") return;
+                        if (!isEmpty || viewMode !== "detailed" || rangeEditing) return;
                         const wantsPaste = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v";
                         const wantsActivate = event.key === "Enter" || event.key === " ";
                         if (!wantsPaste && !wantsActivate) return;
                         event.preventDefault();
-                        if (pasteArmed && onCellPaste) onCellPaste(cellContext);
+                        if (inputPasteArmed && onCellPaste) onCellPaste(cellContext);
                         else if (wantsActivate) onCellClick(cellContext);
                       }}
                       onPaste={(event) => {
-                        if (!isEmpty || viewMode !== "detailed" || !pasteArmed || !onCellPaste) return;
+                        if (!isEmpty || viewMode !== "detailed" || !inputPasteArmed || !onCellPaste) return;
                         event.preventDefault();
                         onCellPaste(cellContext);
                       }}
@@ -949,7 +950,7 @@ export function TimetableGrid({
                               const isGroupedRegular = isInstructorRegularGroupEvent(event);
                               const isSyntheticSelfStudy = isSelfStudyEvent(event);
                               const canDragEvent = canMoveEvents && !isGroupedRegular && !isSyntheticSelfStudy;
-                              const canCopyEvent = Boolean(onEventCopy) && !isGroupedRegular && !isSyntheticSelfStudy && !event.id.startsWith("draft-");
+                              const canCopyEvent = !rangeEditing && Boolean(onEventCopy) && !isGroupedRegular && !isSyntheticSelfStudy && !event.id.startsWith("draft-");
                               const copyKey = `${event.id}-${event.classDate}-${event.startTime}`;
                               const isCopiedEvent = copiedEventKey === copyKey;
 
@@ -1021,14 +1022,17 @@ export function TimetableGrid({
                                     onEventCopy(event);
                                   }}
                                   onClick={(clickEvent) => {
+                                    if (rangeEditing) {
+                                      clickEvent.stopPropagation();
+                                      if (rangeDidDragRef.current) return;
+                                      setRangeAnchorKey(cellKey);
+                                      setRangeFocusKey(cellKey);
+                                      setActiveCellKey(cellKey);
+                                      setContextMenu(null);
+                                      return;
+                                    }
                                     if (canCopyEvent) {
                                       clickEvent.stopPropagation();
-                                      if (rangeEditing) {
-                                        setRangeAnchorKey(cellKey);
-                                        setRangeFocusKey(cellKey);
-                                        setActiveCellKey(cellKey);
-                                        setContextMenu(null);
-                                      }
                                       clickEvent.currentTarget.focus();
                                       return;
                                     }
@@ -1037,6 +1041,10 @@ export function TimetableGrid({
                                     onEventClick(event);
                                   }}
                                   onDoubleClick={(clickEvent) => {
+                                    if (rangeEditing) {
+                                      clickEvent.stopPropagation();
+                                      return;
+                                    }
                                     if (!onEventClick || isGroupedRegular || event.id.startsWith("draft-")) return;
                                     clickEvent.stopPropagation();
                                     onEventClick(event);
@@ -1046,9 +1054,9 @@ export function TimetableGrid({
                                     event={event}
                                     roleView={roleView}
                                     chainProgress={isGroupedRegular ? undefined : progressByEventKey.get(eventKey)}
-                                    showSaveAction={!isGroupedRegular && event.id.startsWith("draft-")}
-                                    onSave={!isGroupedRegular && !isSyntheticSelfStudy && onEventSave ? (item) => void onEventSave(item) : undefined}
-                                    onDelete={!isGroupedRegular && !isSyntheticSelfStudy && onEventDelete ? (item) => void onEventDelete(item) : undefined}
+                                    showSaveAction={!rangeEditing && !isGroupedRegular && event.id.startsWith("draft-")}
+                                    onSave={!rangeEditing && !isGroupedRegular && !isSyntheticSelfStudy && onEventSave ? (item) => void onEventSave(item) : undefined}
+                                    onDelete={!rangeEditing && !isGroupedRegular && !isSyntheticSelfStudy && onEventDelete ? (item) => void onEventDelete(item) : undefined}
                                     highlightedStudentName={roleView === "instructor" ? highlightedStudentName : null}
                                     onStudentHighlight={roleView === "instructor" ? (studentName) => {
                                       setHighlightedStudentName((current) =>

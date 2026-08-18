@@ -4,11 +4,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [pageSource, settingsSource, studentTabsSource, availabilityWorkspaceSource] = await Promise.all([
+const [pageSource, settingsSource, studentTabsSource, availabilityWorkspaceSource, lessonPaletteSource] = await Promise.all([
   readFile(path.join(projectRoot, "app/synchro-s/page.tsx"), "utf8"),
   readFile(path.join(projectRoot, "components/schedule/ScheduleTagManager.tsx"), "utf8"),
   readFile(path.join(projectRoot, "components/schedule/StudentScheduleTabs.tsx"), "utf8"),
-  readFile(path.join(projectRoot, "components/schedule/StudentAvailabilityWorkspace.tsx"), "utf8")
+  readFile(path.join(projectRoot, "components/schedule/StudentAvailabilityWorkspace.tsx"), "utf8"),
+  readFile(path.join(projectRoot, "components/schedule/LessonCardPalette.tsx"), "utf8")
 ]);
 
 const headerStart = pageSource.indexOf('<section className="sync-surface sticky top-0');
@@ -47,7 +48,7 @@ assert.match(pageSource, /aria-label="월간 시간표 달력"/, "최근 저장 
 assert.match(pageSource, /className="xl:hidden"/, "데스크톱 미만에서도 달력에 접근할 수 있어야 합니다.");
 assert.match(pageSource, /학생 시간표 빠른 수업 카드/, "학생용 빠른 수업 카드를 좌측 레일에 배치해야 합니다.");
 assert.match(pageSource, /showStudentLessonPalette \? "h-\[30rem\] shrink-0" : "min-h-\[30rem\] flex-1"/, "최근 저장 기록은 작은 노트북에서도 충분하면서 예측 가능한 높이를 가져야 합니다.");
-assert.match(pageSource, /학생 시간표 빠른 수업 카드" className="sync-surface h-\[30rem\]/, "빠른 수업 카드도 독립 스크롤 영역에서 충분한 고정 높이를 가져야 합니다.");
+assert.match(lessonPaletteSource, /xl:h-\[clamp\(28rem,55vh,38rem\)\]/, "빠른 수업 카드도 독립 스크롤 영역에서 충분한 화면 높이를 가져야 합니다.");
 assert.match(pageSource, /h-\[calc\(100vh-2rem\)\][\s\S]*?overflow-y-auto/, "길어진 좌측 패널은 하나의 명확한 세로 스크롤 소유자를 가져야 합니다.");
 assert.match(pageSource, /!viewerRoleResolved \|\| !isInstructorReadOnly/, "권한 확인 중에도 좌측 패널 자리를 먼저 예약해야 합니다.");
 assert.match(pageSource, /최근 저장 기록 불러오는 중/, "초기 좌측 패널에는 실제 크기의 로딩 상태를 제공해야 합니다.");
@@ -63,7 +64,7 @@ assert.match(rightPanelTopRegion, /<StudentScheduleTabs/, "학생 시간표 탭�
 assert.match(availabilityWorkspaceSource, /navigation\?: ReactNode/, "가능 일정 화면이 공용 탭 내비게이션을 받을 수 있어야 합니다.");
 assert.match(availabilityWorkspaceSource, /\{navigation\}/, "가능 일정 화면에서 공용 탭 내비게이션을 렌더링해야 합니다.");
 assert.ok(timetableViewStart >= 0 && timetableViewEnd > timetableViewStart, "시간표 보기 모드 영역을 찾을 수 있어야 합니다.");
-for (const label of ["새 시간표 만들기", "변경 취소"]) {
+for (const label of ["입력·붙여넣기", "범위 선택", "새 시간표 만들기", "직전 작업 취소", "전체 변경 취소"]) {
   assert.match(timetableViewRegion, new RegExp(label), `${label}를 시간표 보기 모드 도구와 나란히 배치해야 합니다.`);
 }
 assert.match(timetableViewRegion, /변경 \{pendingTimetableChangeCount\}건/, "변경 건수를 시간표 보기 모드에서 함께 표시해야 합니다.");
