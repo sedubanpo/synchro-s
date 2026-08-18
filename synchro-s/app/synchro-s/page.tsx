@@ -8366,7 +8366,7 @@ export default function SynchroSPage() {
           </div>
         </section>
         {showStudentLessonPalette ? (
-          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface h-[30rem] shrink-0 overflow-y-auto rounded-xl bg-white p-2">
+          <section aria-label="학생 시간표 빠른 수업 카드" className="sync-surface shrink-0 rounded-xl bg-white p-2">
             {renderLessonCardPalette()}
           </section>
         ) : null}

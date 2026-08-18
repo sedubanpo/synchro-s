@@ -76,6 +76,8 @@ const [pageSource, gridSource, paletteSource] = await Promise.all([
 assert.match(paletteSource, /강사명 또는 과목명 검색/, "카드 검색창 안내가 있어야 합니다.");
 assert.match(paletteSource, /SubjectMotif/, "과목별 반투명 배경 모티프가 있어야 합니다.");
 assert.match(paletteSource, /ClassTypeSignal/, "수업 유형별 비색상 시각 신호가 있어야 합니다.");
+assert.match(paletteSource, /xl:h-\[clamp\(28rem,55vh,38rem\)\]/, "데스크톱 빠른 카드 목록은 충분한 화면 높이를 사용해야 합니다.");
+assert.doesNotMatch(paletteSource, /max-h-72/, "빠른 카드 목록이 짧은 고정 높이로 되돌아가면 안 됩니다.");
 assert.match(paletteSource, /기존 수업을 한 번 눌러 선택하고/, "기존 수업 셀 복사 안내가 있어야 합니다.");
 assert.match(pageSource, /setSyncDraftItems\(\(prev\) => \[/, "카드 붙여넣기는 먼저 로컬 작업본에 추가되어야 합니다.");
 assert.match(pageSource, /recordHistory: false/, "수업 추가 단계에서 저장 기록을 중복 생성하지 않아야 합니다.");
@@ -95,6 +97,9 @@ assert.match(gridSource, /tabIndex=\{isEmpty && viewMode === "detailed" \? 0 : u
 assert.match(pageSource, /!selectedStudentId[\s\S]*!selectedScheduleTagId/, "학생과 태그가 없으면 카드 입력을 차단해야 합니다.");
 assert.match(gridSource, /setRangeAnchorKey/, "시간표 셀 범위 선택의 시작점을 보존해야 합니다.");
 assert.match(gridSource, /setRangeFocusKey/, "포인터 드래그로 시간표 선택 범위를 확장해야 합니다.");
+assert.match(gridSource, /rowCount === 1 && columnCount === 1 && eventCount === 0[\s\S]*return null/, "빈 단일 셀 선택 요약은 숨겨야 합니다.");
+assert.match(gridSource, /선택 \{rowCount\}행 × \{columnCount\}열 · 수업 \{eventCount\}개/, "의미 있는 선택 요약은 시간표 상태 영역에 표시해야 합니다.");
+assert.doesNotMatch(gridSource, /top-\[49px\][\s\S]*rangeSelection\.rowCount/, "선택 요약이 시간표 셀 위에 떠 있으면 안 됩니다.");
 assert.match(gridSource, /role="menu"[\s\S]*시간표 선택 메뉴/, "우클릭 시 접근 가능한 시간표 선택 메뉴를 제공해야 합니다.");
 assert.match(gridSource, /오려두기[\s\S]*붙여넣기[\s\S]*선택 수업 삭제/, "컨텍스트 메뉴에 복사·오려두기·붙여넣기·삭제가 있어야 합니다.");
 assert.match(gridSource, /key === "x"[\s\S]*key === "v"/, "범위 오려두기와 붙여넣기 단축키를 처리해야 합니다.");

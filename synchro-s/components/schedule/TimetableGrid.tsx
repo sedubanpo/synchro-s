@@ -21,6 +21,28 @@ export type TimetableRangeSelection = {
   columnCount: number;
 };
 
+export function TimetableSelectionSummary({
+  rowCount,
+  columnCount,
+  eventCount
+}: {
+  rowCount: number;
+  columnCount: number;
+  eventCount: number;
+}) {
+  if (rowCount === 1 && columnCount === 1 && eventCount === 0) return null;
+
+  return (
+    <div className="flex min-h-9 items-center justify-end gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-bold text-slate-600" aria-live="polite">
+      <svg aria-hidden="true" viewBox="0 0 20 20" className="h-3.5 w-3.5 text-blue-600" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <rect x="3" y="3" width="14" height="14" rx="2" />
+        <path d="M10 3v14M3 10h14" />
+      </svg>
+      <span>선택 {rowCount}행 × {columnCount}열 · 수업 {eventCount}개</span>
+    </div>
+  );
+}
+
 export type TimetableAvailabilityCell = {
   status: "available" | "unavailable";
   source: "weekly" | "temporary" | "date-unavailable";
@@ -463,11 +485,19 @@ export function TimetableGrid({
   };
 
   return (
-    <div
-      data-timetable-grid="true"
-      tabIndex={rangeEditing ? 0 : undefined}
-      aria-label={rangeEditing ? "시간표 격자 편집" : undefined}
-      onKeyDownCapture={(event) => {
+    <div className={`sync-surface relative max-w-full overflow-hidden rounded-xl ${inactive ? "bg-slate-200" : "bg-white"}`}>
+      {rangeSelection ? (
+        <TimetableSelectionSummary
+          rowCount={rangeSelection.rowCount}
+          columnCount={rangeSelection.columnCount}
+          eventCount={rangeSelection.events.length}
+        />
+      ) : null}
+      <div
+        data-timetable-grid="true"
+        tabIndex={rangeEditing ? 0 : undefined}
+        aria-label={rangeEditing ? "시간표 격자 편집" : undefined}
+        onKeyDownCapture={(event) => {
         if (!rangeEditing || !rangeSelection) return;
         const key = event.key.toLowerCase();
         const withCommand = event.metaKey || event.ctrlKey;
@@ -512,15 +542,8 @@ export function TimetableGrid({
           setContextMenu(null);
         }
       }}
-      className={`sync-surface grid-scrollbar relative w-fit max-w-full overflow-auto rounded-xl ${inactive ? "bg-slate-200" : "bg-white"}`}
-    >
-      {rangeSelection ? (
-        <div className="pointer-events-none sticky left-20 top-[49px] z-30 flex h-0 justify-start overflow-visible pl-2 pt-2" aria-live="polite">
-          <span className="rounded-full border border-blue-200 bg-white/95 px-2.5 py-1 text-[10px] font-black text-blue-700 shadow-md backdrop-blur-sm">
-            {rangeSelection.rowCount}행 × {rangeSelection.columnCount}열 · 수업 {rangeSelection.events.length}개
-          </span>
-        </div>
-      ) : null}
+        className={`grid-scrollbar relative w-fit max-w-full overflow-auto ${inactive ? "bg-slate-200" : "bg-white"}`}
+      >
       {contextMenu && rangeSelection ? (
         <div
           role="menu"
@@ -1049,6 +1072,7 @@ export function TimetableGrid({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

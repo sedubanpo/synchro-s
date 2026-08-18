@@ -187,7 +187,10 @@ export function LessonCardPalette({
       {disabled ? (
         <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold leading-4 text-amber-800">{disabledReason ?? "학생과 시간표 분류를 먼저 선택해 주세요."}</p>
       ) : (
-        <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto pr-1" aria-label="수업 카드 검색 결과">
+        <div
+          className="mt-3 h-80 space-y-1.5 overflow-y-auto overscroll-contain pr-1 xl:h-[clamp(28rem,55vh,38rem)]"
+          aria-label="수업 카드 검색 결과"
+        >
           {visible.map((template) => {
             const selected = selectedTemplate?.key === template.key;
             const tone = getTone(template.subjectName);

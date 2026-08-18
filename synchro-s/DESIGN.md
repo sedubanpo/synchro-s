@@ -46,8 +46,10 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Dense control gap: `0.375rem`.
 - Panel padding: `0.75rem` to `1rem`.
 - Save-history rail width: `15.5rem` on supported desktop layouts, with a fixed footer for grouped-result pagination.
+- The desktop quick-lesson palette exposes a substantial independent card viewport (`clamp(28rem, 55vh, 38rem)`) inside the scrolling left rail; it must not collapse back to a short three-card strip.
 - Timetable cell inner padding: `0.25rem`.
 - Multi-date timetable column minimum: `9.5rem`, preserving student names before horizontal scrolling.
+- Timetable range summaries belong to the grid's quiet top status row, never over timetable cells. Suppress the redundant `1 × 1 / 0 lessons` summary while preserving the selected-cell treatment and keyboard commands.
 - Minimum practical hit area: `2.5rem` when layout allows.
 - Instructor picker: one horizontally stable board with six fixed subject-family columns in `국어 → 수학 → 영어 → 사회 → 과학 → 기타` order. Keep a single outer scroll container, sticky family headings, Korean alphabetical name order, and explicit selected text.
 
