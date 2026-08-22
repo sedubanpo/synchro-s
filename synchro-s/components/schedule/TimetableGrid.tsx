@@ -101,17 +101,17 @@ function isStrictDotClass(event: ScheduleEvent): boolean {
   return (
     normalized.includes("onetone") ||
     normalized.includes("onetoone") ||
-    normalized.includes("11") ||
+    normalized.includes("oneone") ||
     normalized.includes("1:1") ||
     normalized.includes("1대1") ||
     normalized.includes("twotone") ||
     normalized.includes("twotoone") ||
-    normalized.includes("21") ||
+    normalized.includes("twoone") ||
     normalized.includes("2:1") ||
     normalized.includes("2대1") ||
     normalized.includes("threetone") ||
     normalized.includes("threetoone") ||
-    normalized.includes("31") ||
+    normalized.includes("threeone") ||
     normalized.includes("3:1") ||
     normalized.includes("3대1")
   );
@@ -166,7 +166,11 @@ function normalizeChainToken(value: string): string {
 }
 
 function instructorRegularGroupKey(event: ScheduleEvent, slot: string): string {
-  return [event.weekday, slot, event.startTime, event.endTime].join("::");
+  // The grid cell is the visual unit in instructor view. Regular lessons can
+  // originate from differently sized source events (for example 13:00-15:00
+  // and 13:00-16:00), but they still belong in one regular group while they
+  // overlap the same displayed hour.
+  return [event.weekday, slot].join("::");
 }
 
 function mergeInstructorRegularGroup(base: ScheduleEvent, next: ScheduleEvent): ScheduleEvent {
@@ -188,7 +192,7 @@ function sortInstructorCellEntries(a: ScheduleEvent, b: ScheduleEvent): number {
   return a.studentNames.join("").localeCompare(b.studentNames.join(""), "ko");
 }
 
-function dedupeInstructorCellEntries(entries: ScheduleEvent[], slot: string): ScheduleEvent[] {
+export function groupInstructorCellEntries(entries: ScheduleEvent[], slot: string): ScheduleEvent[] {
   const seenStudents = new Set<string>();
   const regularGroups = new Map<string, ScheduleEvent>();
   const cleaned: ScheduleEvent[] = [];
@@ -504,6 +508,18 @@ export function TimetableGrid({
 
   return (
     <div className={`sync-surface relative max-w-full overflow-hidden rounded-xl ${inactive ? "bg-slate-200" : "bg-white"}`}>
+      {roleView === "instructor" && highlightedStudentName ? (
+        <div className="flex min-h-9 items-center justify-end gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5" aria-live="polite">
+          <span className="truncate text-[10px] font-black text-amber-950">{highlightedStudentName} 학생 강조 중</span>
+          <button
+            type="button"
+            onClick={() => setHighlightedStudentName(null)}
+            className="sync-pressable sync-focus min-h-7 rounded border border-amber-300 bg-white px-2 text-[10px] font-black text-amber-900 hover:bg-amber-100"
+          >
+            강조 해제
+          </button>
+        </div>
+      ) : null}
       {rangeSelection ? (
         <TimetableSelectionSummary
           rowCount={rangeSelection.rowCount}
@@ -759,7 +775,7 @@ export function TimetableGrid({
                 {renderDays.map((day) => {
                   const cellKey = `${day.key}-${slot}`;
                   const entries = eventMap.get(cellKey) ?? [];
-                  const cellEntries = roleView === "instructor" ? dedupeInstructorCellEntries(entries, slot) : entries;
+                  const cellEntries = roleView === "instructor" ? groupInstructorCellEntries(entries, slot) : entries;
                   const isEmpty = cellEntries.length === 0;
                   const isDropTarget = dragOverCell === cellKey;
                   const isActiveDay = activeDaySet.has(day.key);

@@ -162,9 +162,14 @@ export function ScheduleBlock({
     event.classTypeCode === "TWO_TO_ONE" ||
     event.classTypeLabel.includes("1:1") ||
     event.classTypeLabel.includes("2:1");
+  const isOneToOneClass =
+    event.classTypeCode === "ONE_TO_ONE" ||
+    event.classTypeLabel.includes("1:1");
   const oneToOneLabel = event.classTypeLabel.includes("2:1") ? "2:1" : "1:1";
   const blockClass = roleView === "instructor"
-    ? `${instructorTone.block} border shadow-sm`
+    ? isOneToOneClass
+      ? "border-2 border-amber-400 bg-blue-50 text-blue-950 shadow-[0_3px_10px_rgba(180,120,0,0.12)]"
+      : `${instructorTone.block} border shadow-sm`
     : isRoyalClass
     ? "border border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm"
     : `${tone.block} border shadow-sm`;
@@ -183,11 +188,23 @@ export function ScheduleBlock({
   const segmentOnClass = isRoyalClass ? "bg-emerald-500" : tone.segmentOn;
   const segmentOffClass = isRoyalClass ? "bg-emerald-200" : tone.segmentOff;
   const normalizedHighlight = highlightedStudentName ? normalizedStudentName(highlightedStudentName) : "";
+  const containsHighlightedStudent = Boolean(
+    normalizedHighlight && studentBadges.some((student) => normalizedStudentName(student.name) === normalizedHighlight)
+  );
   const classTypeLabel = event.badgeText.replace(/^\[|\]$/g, "").trim() || event.classTypeLabel;
 
   return (
-    <div className={`${blockClass} sync-schedule-block group relative rounded-lg px-1.5 py-1.5 transition-[box-shadow] duration-150 ease-out`}>
-      {isRoyalClass ? (
+    <div
+      data-instructor-highlight-match={roleView === "instructor" && normalizedHighlight ? String(containsHighlightedStudent) : undefined}
+      className={`${blockClass} sync-schedule-block group relative rounded-lg px-1.5 py-1.5 transition-[box-shadow,opacity,border-color] duration-150 ease-out ${
+        roleView === "instructor" && normalizedHighlight
+          ? containsHighlightedStudent
+            ? "border-amber-400 ring-2 ring-amber-300"
+            : "opacity-45"
+          : ""
+      }`}
+    >
+      {isRoyalClass && roleView !== "instructor" ? (
         <span className="absolute -top-1.5 -left-1.5 z-20 inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300 bg-amber-200 text-[11px] shadow-sm">
           👑
         </span>
@@ -236,7 +253,7 @@ export function ScheduleBlock({
 
       {roleView === "instructor" ? (
         <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex min-w-0 items-center justify-between gap-1">
+          <div className="flex min-w-0 items-center justify-between gap-1.5">
             <span
               data-schedule-type-badge="true"
               className={`inline-flex h-5 min-w-0 max-w-full items-center justify-center rounded px-1.5 py-0 text-[10px] font-extrabold leading-none ${textBadgeClass}`}
@@ -244,16 +261,11 @@ export function ScheduleBlock({
             >
               <span className="truncate">{classTypeLabel}</span>
             </span>
-            <div className="flex shrink-0 items-center gap-0.5" aria-hidden="true">
-              {Array.from({ length: totalSegments }).map((_, idx) => (
-                <span
-                  key={`seg-${idx + 1}`}
-                  className={`h-1.5 w-2 rounded-sm ${idx + 1 <= currentSegment ? segmentOnClass : segmentOffClass}`}
-                />
-              ))}
-            </div>
+            <span className="sync-tabular inline-flex h-5 shrink-0 items-center rounded bg-slate-900 px-1.5 text-[9px] font-black leading-none text-white">
+              {studentBadges.length}명
+            </span>
           </div>
-          <div className="grid min-w-0 grid-cols-3 gap-0.5">
+          <div className="flex min-w-0 flex-wrap gap-1">
             {studentBadges.map((student, index) => {
               const { id, name } = student;
               const isSelected = normalizedHighlight === normalizedStudentName(name);
@@ -270,18 +282,19 @@ export function ScheduleBlock({
                     clickEvent.stopPropagation();
                     if (canHighlight) onStudentHighlight?.(name);
                   }}
-                  className={`sync-focus inline-flex min-h-10 min-w-0 max-w-full flex-col items-start justify-center rounded-md border px-1 py-1 text-left transition-[background-color,border-color,box-shadow,color,transform] duration-150 ease-out ${
+                  aria-label={canHighlight ? (isSelected && secondary ? `${name}, ${secondary}, 전체 배치 강조 해제` : `${name} 학생의 전체 배치 강조`) : undefined}
+                  className={`sync-focus inline-flex min-h-8 min-w-0 max-w-full flex-col items-start justify-center rounded border px-1.5 py-1 text-left transition-[background-color,border-color,box-shadow,color,opacity,transform] duration-150 ease-out ${
                     isSelected
                       ? "border-amber-300 bg-amber-200 text-slate-950 shadow-sm ring-2 ring-amber-100"
                       : canHighlight
-                        ? `${studentBadgeClass} cursor-pointer hover:-translate-y-px hover:border-amber-300 hover:bg-amber-50 hover:text-slate-900 hover:shadow-sm active:translate-y-0`
+                        ? `${studentBadgeClass} cursor-pointer hover:-translate-y-px hover:border-amber-300 hover:bg-amber-50 hover:text-slate-900 hover:shadow-sm active:translate-y-0 ${normalizedHighlight ? "opacity-60" : ""}`
                         : `${studentBadgeClass} cursor-default`
                   }`}
                   title={canHighlight ? `${name} 학생의 전체 배치 강조` : undefined}
                 >
-                  <span className="w-full truncate text-[10px] font-black leading-3.5">{name}</span>
-                  {secondary ? (
-                    <span className={`mt-0.5 w-full truncate text-[8px] font-semibold leading-3 ${isSelected ? "text-amber-900" : "text-slate-500"}`} title={secondary}>
+                  <span className="max-w-full truncate text-[10px] font-black leading-3.5">{name}</span>
+                  {isSelected && secondary ? (
+                    <span className="mt-0.5 max-w-full truncate text-[8px] font-semibold leading-3 text-amber-900" title={secondary}>
                       {secondary}
                     </span>
                   ) : null}

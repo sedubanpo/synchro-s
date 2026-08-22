@@ -54,6 +54,8 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - `직전 작업 취소` restores the last staged timetable command as one unit; `전체 변경 취소` remains the separate all-changes reset.
 - Minimum practical hit area: `2.5rem` when layout allows.
 - Instructor picker: one horizontally stable board with six fixed subject-family columns in `국어 → 수학 → 영어 → 사회 → 과학 → 기타` order. Keep a single outer scroll container, sticky family headings, Korean alphabetical name order, and explicit selected text.
+- Instructor timetable cells group every `개별정규` placement that overlaps the same displayed hour into one compact type-and-count card, regardless of the source event's subject or full duration. Student names wrap as compact chips; school and grade stay hidden until that student is selected, while the same student is emphasized across the timetable and unrelated cards recede.
+- Dense instructor-timetable student chips use a `2rem` minimum height as a deliberate desktop comparison-grid exception; keyboard focus, full accessible names, and an explicit highlight-clear control remain available.
 
 ## Shape
 
