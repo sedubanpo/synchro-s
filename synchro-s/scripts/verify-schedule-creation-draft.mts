@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveSubjectOption } from "../lib/subjectResolver";
+import { buildProspectTimetableBannerProfile } from "../lib/scheduleCreationBanner";
 import { getOverlappingHourSlots } from "../lib/timetableSlots";
 
 const subjects = [
@@ -23,6 +24,15 @@ assert.deepEqual(
   "시간표 생성의 3시간 수업은 세 개 시간 행에 표시되어야 합니다."
 );
 
+const prospectBanner = buildProspectTimetableBannerProfile(
+  { id: "prospect-1", name: " 김학생 ", school: " 반포고 ", grade: "2" },
+  new Map([["반포고", "https://example.com/banpo.png"]])
+);
+assert.equal(prospectBanner.name, "김학생");
+assert.equal(prospectBanner.school, "반포고");
+assert.equal(prospectBanner.secondary, "반포고 · 2학년");
+assert.equal(prospectBanner.schoolIconUrl, "https://example.com/banpo.png");
+
 const root = process.cwd();
 const workspace = fs.readFileSync(path.join(root, "components/schedule/ScheduleCreationWorkspace.tsx"), "utf8");
 const modal = fs.readFileSync(path.join(root, "components/schedule/SyncScheduleDraftModal.tsx"), "utf8");
@@ -36,6 +46,9 @@ assert.ok(workspace.includes("hideEmptyDays={hideEmptyDays}"));
 assert.ok(workspace.includes("hideEmptyTimes={hideEmptyTimes}"));
 assert.ok(workspace.includes("빈 요일 숨기기"));
 assert.ok(workspace.includes("빈 시간 숨기기"));
+assert.ok(workspace.includes('aria-label="Student Timetable 대상 정보"'), "시간표 생성 격자 위에 Student Timetable 배너가 있어야 합니다.");
+assert.ok(workspace.includes("buildProspectTimetableBannerProfile"), "신규문의 학교 입력도 배너 프로필과 엠블럼에 연결되어야 합니다.");
+assert.ok(workspace.includes('mode === "resident" ? "재원생" : "신규문의 가안"'), "배너는 재원생과 신규문의 모드를 모두 표시해야 합니다.");
 assert.ok(modal.includes("if (accepted !== false) onClose()"), "검증 실패 시 입력창을 닫지 않아야 합니다.");
 assert.ok(workspace.includes("scheduleTagId: effectiveScheduleTagId"), "재원생 수업 저장 요청에도 선택 태그를 전달해야 합니다.");
 assert.ok(workspace.includes('event.note?.trim() || "시간표 생성"'), "빈 수업 메모는 저장 가능한 기본 메모로 정규화해야 합니다.");

@@ -1,16 +1,18 @@
 "use client";
 
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
-import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
+import { SchoolLogoBackdrop } from "@/components/schedule/SchoolEmblem";
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
+import { loadSchoolIconRegistry } from "@/lib/firebase/sharedIcons";
 import {
   filterProspectTimetableGroups,
   formatProspectSchoolGrade
 } from "@/lib/prospectTimetableGroups";
 import { resolveSubjectOption } from "@/lib/subjectResolver";
+import { buildProspectTimetableBannerProfile } from "@/lib/scheduleCreationBanner";
 import type { ClassTypeOption, ScheduleEvent, SelectOption, SubjectOption, Weekday } from "@/types/schedule";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -116,9 +118,11 @@ export function ScheduleCreationWorkspace({
   const [dayDateOverrides, setDayDateOverrides] = useState<Partial<Record<Weekday, string>>>({});
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   const [renamingGroupName, setRenamingGroupName] = useState("");
+  const [schoolIconRegistry, setSchoolIconRegistry] = useState<ReadonlyMap<string, string>>(() => new Map());
 
   const activeStudents = useMemo(() => students.filter((student) => student.isActive !== false), [students]);
   const effectiveScheduleTagId = scheduleTagId ?? scheduleTags.find((tag) => tag.isCurrent && tag.isActive)?.id ?? null;
+  const effectiveScheduleTag = scheduleTags.find((tag) => tag.id === effectiveScheduleTagId) ?? null;
   const filteredStudents = useMemo(() => {
     const token = studentSearch.replace(/\s+/g, "").toLowerCase();
     if (!token) return activeStudents;
@@ -131,6 +135,19 @@ export function ScheduleCreationWorkspace({
   const selectedProspect = prospects.find((prospect) => prospect.id === prospectId) ?? null;
   const targetName = mode === "resident" ? selectedStudent?.name ?? "" : prospectForm.name.trim();
   const targetId = mode === "resident" ? studentId : prospectId;
+  const timetableBannerProfile = useMemo<SelectOption | null>(() => {
+    if (mode === "resident") return selectedStudent;
+    return buildProspectTimetableBannerProfile(
+      {
+        id: prospectId || "prospect-draft",
+        name: prospectForm.name,
+        school: prospectForm.school,
+        grade: prospectForm.grade,
+        memo: prospectForm.memo
+      },
+      schoolIconRegistry
+    );
+  }, [mode, prospectForm, prospectId, schoolIconRegistry, selectedStudent]);
   const prospectById = useMemo(() => new Map(prospects.map((prospect) => [prospect.id, prospect])), [prospects]);
   const visibleGroups = useMemo(() => {
     if (mode === "prospect") {
@@ -150,6 +167,20 @@ export function ScheduleCreationWorkspace({
   useEffect(() => {
     if (!scheduleTagId && effectiveScheduleTagId) onScheduleTagChange(effectiveScheduleTagId);
   }, [effectiveScheduleTagId, onScheduleTagChange, scheduleTagId]);
+
+  useEffect(() => {
+    let active = true;
+    loadSchoolIconRegistry()
+      .then((registry) => {
+        if (active) setSchoolIconRegistry(registry);
+      })
+      .catch(() => {
+        // 학교 엠블럼은 장식이므로 시간표 생성 흐름을 막지 않습니다.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     setGroupName(`${weekStart} ${targetName || (mode === "resident" ? "재원생" : "신규문의")} 시간표`);
@@ -606,13 +637,39 @@ export function ScheduleCreationWorkspace({
               {effectiveScheduleTagId ? "선택한 태그로 새 시간표 버전을 저장합니다." : "저장할 시간표 태그를 먼저 선택해 주세요."}
             </p>
           </div>
+          <header
+            aria-label="Student Timetable 대상 정보"
+            className="sync-surface relative mb-3 flex min-h-[5.25rem] flex-wrap items-center justify-between gap-3 overflow-hidden rounded-xl bg-white px-4 py-3"
+          >
+            {timetableBannerProfile ? (
+              <SchoolLogoBackdrop
+                student={timetableBannerProfile}
+                className="-bottom-16 -top-16 right-[12%] w-64 opacity-[0.14] saturate-[0.95]"
+                imageClassName="scale-110 mix-blend-multiply drop-shadow-[0_1px_0_rgba(15,23,42,0.08)]"
+              />
+            ) : null}
+            <div className="relative z-10 min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Student Timetable</p>
+              <p className="sync-heading mt-1 text-xl font-black text-slate-950">
+                {timetableBannerProfile?.name ?? "대상을 선택해 주세요"}
+                {timetableBannerProfile?.secondary ? (
+                  <span className="ml-2 text-base font-extrabold text-slate-600">{timetableBannerProfile.secondary}</span>
+                ) : null}
+              </p>
+            </div>
+            <div className="relative z-10 flex flex-wrap items-center justify-end gap-2">
+              <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-600">
+                {mode === "resident" ? "재원생" : "신규문의 가안"}
+              </span>
+              <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black ${effectiveScheduleTag ? SCHEDULE_TAG_TONES[effectiveScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
+                #{effectiveScheduleTag?.name ?? "미분류"}
+              </span>
+            </div>
+          </header>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-1">
-            <div className="flex items-center gap-2">
-              {mode === "resident" && selectedStudent ? <SchoolEmblem student={selectedStudent} size="sm" /> : null}
-              <div>
-                <p className="text-sm font-black text-slate-900">{targetName || "대상 미선택"} 시간표 초안</p>
-                <p className="mt-1 text-xs font-semibold text-slate-500">빈칸을 눌러 수업을 추가하고, 블록의 삭제 버튼으로 제거할 수 있습니다.</p>
-              </div>
+            <div>
+              <p className="text-sm font-black text-slate-900">시간표 초안</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">빈칸을 눌러 수업을 추가하고, 블록의 삭제 버튼으로 제거할 수 있습니다.</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700">초안 {draftEvents.length}건</span>
