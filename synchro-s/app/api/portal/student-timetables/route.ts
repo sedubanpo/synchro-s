@@ -99,7 +99,11 @@ export async function GET(req: Request) {
     const nameCandidates = (students ?? []).filter((row: any) =>
       normalizedName && String(row.student_name ?? "").replace(/\s+/g, "").toLowerCase() === normalizedName
     );
-    const matched = exactIdentity.length === 1 ? exactIdentity[0] : null;
+    const matched = exactIdentity.length === 1
+      ? exactIdentity[0]
+      : nameCandidates.length === 1
+        ? nameCandidates[0]
+        : null;
     const candidates = (matched ? [matched] : nameCandidates).slice(0, 8).map((row: any) => ({
       id: row.id,
       name: row.student_name,
@@ -132,7 +136,7 @@ export async function GET(req: Request) {
 
     return withCors(req, {
       matchStatus: "matched",
-      student: { id: matched.id, name: matched.student_name, firebaseStudentId: matched.firebase_student_id },
+      student: { id: matched.id, name: matched.student_name, firebaseStudentId: matched.firebase_student_id ?? "" },
       candidates,
       groups: (groups ?? []).map((row: any) => mapGroup(row, tagNameById))
     });
