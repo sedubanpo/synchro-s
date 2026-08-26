@@ -127,17 +127,21 @@ export async function GET(req: Request) {
       .eq("target_id", matched.id)
       .order("created_at", { ascending: false });
     if (groupError) throw groupError;
-    const tagIds = Array.from(new Set((groups ?? []).map((row: any) => row.tag_id).filter(Boolean)));
-    const { data: tags, error: tagError } = tagIds.length
-      ? await supabase.from("schedule_tags").select("id,name").in("id", tagIds)
-      : { data: [], error: null };
+    const { data: tags, error: tagError } = await supabase
+      .from("schedule_tags")
+      .select("id,name,color_key,is_active,is_current")
+      .order("sort_order", { ascending: true });
     if (tagError) throw tagError;
     const tagNameById = new Map<string, string>((tags ?? []).map((tag: any) => [tag.id, tag.name]));
+    const currentTag = (tags ?? []).find((tag: any) => tag.is_active === true && tag.is_current === true) ?? null;
 
     return withCors(req, {
       matchStatus: "matched",
       student: { id: matched.id, name: matched.student_name, firebaseStudentId: matched.firebase_student_id ?? "" },
       candidates,
+      currentTag: currentTag
+        ? { id: currentTag.id, name: currentTag.name, colorKey: currentTag.color_key ?? null }
+        : null,
       groups: (groups ?? []).map((row: any) => mapGroup(row, tagNameById))
     });
   } catch (error) {
