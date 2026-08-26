@@ -13,7 +13,7 @@ function corsHeaders(req: Request): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : "https://sedubanpo.github.io",
     "Access-Control-Allow-Headers": "authorization, content-type",
-    "Access-Control-Allow-Methods": "GET, PATCH, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin"
   };
@@ -180,6 +180,57 @@ export async function PATCH(req: Request) {
       student: { id: student.id, name: student.student_name, firebaseStudentId: student.firebase_student_id },
       matchedBy: identity.fullName
     });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "UNAUTHORIZED") return withCors(req, { error: "Firebase 로그인이 필요합니다." }, 401);
+    if (message === "FORBIDDEN") return withCors(req, { error: "관리자 또는 실무자 계정만 연결할 수 있습니다." }, 403);
+    return withCors(req, { error: message }, 500);
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const { identity, supabase } = await requirePortalManager(req);
+    const payload = (await req.json()) as { matches?: Array<{ firebaseStudentId?: string; synchroStudentId?: string }> };
+    const matches = Array.isArray(payload.matches) ? payload.matches : [];
+    if (!matches.length) return withCors(req, { ok: true, matchedCount: 0, skippedCount: 0 });
+
+    const seen = new Set<string>();
+    let matchedCount = 0;
+    let skippedCount = 0;
+    for (const item of matches.slice(0, 300)) {
+      const firebaseStudentId = item.firebaseStudentId?.trim() ?? "";
+      const synchroStudentId = item.synchroStudentId?.trim() ?? "";
+      const key = `${firebaseStudentId}|${synchroStudentId}`;
+      if (!firebaseStudentId || !synchroStudentId || seen.has(key)) {
+        skippedCount += 1;
+        continue;
+      }
+      seen.add(key);
+      const { data: conflict, error: conflictError } = await supabase
+        .from("students")
+        .select("id")
+        .eq("firebase_student_id", firebaseStudentId)
+        .neq("id", synchroStudentId)
+        .maybeSingle();
+      if (conflictError) throw conflictError;
+      if (conflict) {
+        skippedCount += 1;
+        continue;
+      }
+      const { error } = await supabase
+        .from("students")
+        .update({
+          firebase_student_id: firebaseStudentId,
+          firebase_sync_status: "matched",
+          firebase_synced_at: new Date().toISOString()
+        })
+        .eq("id", synchroStudentId)
+        .is("firebase_student_id", null);
+      if (error) throw error;
+      matchedCount += 1;
+    }
+    return withCors(req, { ok: true, matchedCount, skippedCount, matchedBy: identity.fullName });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "UNAUTHORIZED") return withCors(req, { error: "Firebase 로그인이 필요합니다." }, 401);
