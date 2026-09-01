@@ -46,7 +46,8 @@
     "verify:timetable-range-editing": "node --import tsx scripts/verify-lesson-card-autosave.mts",
     "verify:student-timetable-editor": "node --import tsx scripts/verify-student-timetable-editor.mts",
     "verify:header-sidebar-layout": "node --import tsx scripts/verify-header-sidebar-layout.mts",
-    "verify:instructor-timetable-ui": "node --import tsx scripts/verify-instructor-timetable-ui.mts"
+    "verify:instructor-timetable-ui": "node --import tsx scripts/verify-instructor-timetable-ui.mts",
+    "verify:bulk-timetable-tag-copy": "node --import tsx scripts/verify-bulk-timetable-tag-copy.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

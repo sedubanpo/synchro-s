@@ -1,6 +1,7 @@
 "use client";
 
 import { InstructorAvailabilityWorkspace } from "@/components/schedule/InstructorAvailabilityWorkspace";
+import { BulkStudentTimetableCopyDialog } from "@/components/schedule/BulkStudentTimetableCopyDialog";
 import { HomeInstructorFolderDashboard } from "@/components/schedule/HomeInstructorFolderDashboard";
 import { SchoolEmblem, SchoolLogoBackdrop } from "@/components/schedule/SchoolEmblem";
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
@@ -790,7 +791,7 @@ function getGroupExpirationLabel(group: TimetableGroup): string {
 }
 
 function getTimetableGroupMonthKey(group: TimetableGroup): string {
-  return (group.weekStart || group.createdAt || "").slice(0, 7);
+  return group.weekStart ? shiftDate(group.weekStart, 3).slice(0, 7) : (group.createdAt || "").slice(0, 7);
 }
 
 function formatTimetableGroupMonthLabel(monthKey: string): string {
@@ -2768,7 +2769,7 @@ export default function SynchroSPage() {
         }),
     [currentTargetId, effectiveGroupIdSet, roleView, showActiveOnly, timetableGroups]
   );
-  const currentGroupMonthKey = useMemo(() => calendarMonth.slice(0, 7), [calendarMonth]);
+  const currentGroupMonthKey = useMemo(() => shiftDate(weekStart, 3).slice(0, 7), [weekStart]);
   const groupMonthSections = useMemo<TimetableGroupMonthSection[]>(() => {
     const groupsBySection = new Map<string, TimetableGroup[]>();
     for (const group of filteredGroups) {
@@ -4045,7 +4046,7 @@ export default function SynchroSPage() {
     [loadConflictLogs, mainTab, moveToLogin]
   );
 
-  const loadTimetableGroups = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadTimetableGroups = useCallback(async (opts?: { silent?: boolean; tagId?: string | null }) => {
     const requestId = ++timetableGroupsLoadRequestRef.current;
     if (!opts?.silent) setTimetableGroupsLoading(true);
 
@@ -4079,7 +4080,7 @@ export default function SynchroSPage() {
             ? "1"
             : "0",
         activeOnly: "1",
-        tagId: selectedScheduleTagId ?? ""
+        tagId: opts && "tagId" in opts ? opts.tagId ?? "" : selectedScheduleTagId ?? ""
       });
       setTimetableGroupExpirationSupported(true);
       const requests = [fetchGroups(activeQuery)];
@@ -4630,6 +4631,22 @@ export default function SynchroSPage() {
         const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error ?? "그룹 만료일 저장에 실패했습니다.");
       }
+    },
+    [moveToLogin]
+  );
+
+  const updateTimetableGroupWeekStart = useCallback(
+    async (groupId: string, nextWeekStart: string) => {
+      const res = await fetch("/api/schedules/groups", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "week", id: groupId, weekStart: nextWeekStart })
+      });
+      if (res.status === 401) {
+        moveToLogin();
+        return;
+      }
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, "기준 주차 저장에 실패했습니다."));
     },
     [moveToLogin]
   );
@@ -7761,6 +7778,22 @@ export default function SynchroSPage() {
     [loadTimetableGroups, updateTimetableGroupExpiration]
   );
 
+  const handlePersistGroupWeekStart = useCallback(
+    async (groupId: string, nextWeekStart: string, tagId: string | null) => {
+      try {
+        await updateTimetableGroupWeekStart(groupId, nextWeekStart);
+        const sectionKey = `${tagId ?? "untagged"}::${shiftDate(nextWeekStart, 3).slice(0, 7)}`;
+        setExpandedGroupMonths((prev) => ({ ...prev, [sectionKey]: true }));
+        await loadTimetableGroups();
+        setNotice(`기준 주차를 ${nextWeekStart}로 저장했습니다.`);
+      } catch (weekError) {
+        setError(weekError instanceof Error ? weekError.message : "기준 주차 저장에 실패했습니다.");
+        await loadTimetableGroups().catch(() => undefined);
+      }
+    },
+    [loadTimetableGroups, updateTimetableGroupWeekStart]
+  );
+
   useEffect(() => {
     void loadOptions()
       .catch((loadError) => {
@@ -9528,6 +9561,22 @@ export default function SynchroSPage() {
             <div className={`mt-2 rounded-md border px-2.5 py-2 text-[11px] font-black ${selectedScheduleTag ? SCHEDULE_TAG_TONES[selectedScheduleTag.colorKey] : SCHEDULE_TAG_TONES.slate}`}>
               현재 범위 · #{selectedScheduleTagLabel}
             </div>
+            {roleView === "student" && (viewerRole === "admin" || viewerRole === "coordinator") ? (
+              <div className="mt-2">
+                <BulkStudentTimetableCopyDialog
+                  tags={scheduleTags}
+                  students={students}
+                  currentTagId={selectedScheduleTagId}
+                  currentWeekStart={weekStart}
+                  onCompleted={async (message, destinationTagId) => {
+                    setSelectedScheduleTagId(destinationTagId);
+                    setSelectedGroupId(null);
+                    await loadTimetableGroups({ silent: true, tagId: destinationTagId });
+                    setNotice(message);
+                  }}
+                />
+              </div>
+            ) : null}
             <div className="mt-2">
               <button
                 type="button"
@@ -9745,6 +9794,24 @@ export default function SynchroSPage() {
                                     </div>
                                   </details>
                                 ) : null}
+                                <label
+                                  className={`mt-2 block text-[10px] font-semibold ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  기준 주차
+                                  <input
+                                    type="date"
+                                    value={group.weekStart}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onChange={(event) => void handlePersistGroupWeekStart(group.id, event.target.value, group.tagId ?? null)}
+                                    className={`sync-input mt-1 w-full rounded-md border px-2 py-1 text-[11px] font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 ${
+                                      isSelectedGroup ? "border-blue-200 bg-white text-slate-900" : "border-slate-200 bg-white text-slate-800"
+                                    }`}
+                                  />
+                                  <span className={`mt-1 block text-[10px] leading-4 ${isSelectedGroup ? "text-blue-100" : "text-slate-400"}`}>
+                                    월요일 기준 · 월 표시는 해당 주의 목요일 기준
+                                  </span>
+                                </label>
                                 <label className={`mt-2 block text-[10px] font-semibold ${isSelectedGroup ? "text-blue-100" : "text-slate-500"}`} onClick={(event) => event.stopPropagation()}>
                                   시간표 태그
                                   <select

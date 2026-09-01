@@ -4,6 +4,7 @@ import { fetchEventsForClassIdsInWeek } from "@/lib/server/scheduleService";
 import { fetchAllSupabaseRows } from "@/lib/server/supabasePagination";
 import { insertSaveHistory } from "@/lib/server/saveHistory";
 import { getStaffAttribution, type StaffAttribution } from "@/lib/server/staffAttribution";
+import { shiftSnapshotEventsToWeek } from "@/lib/timetableGroupBulkCopy";
 import { selectEffectiveStudentTimetableGroup } from "@/lib/timetableGroupSelection";
 import { NextResponse } from "next/server";
 
@@ -33,6 +34,11 @@ type GroupMutationPayload =
       action: "tag";
       id: string;
       tagId: string | null;
+    }
+  | {
+      action: "week";
+      id: string;
+      weekStart: string;
     };
 
 type GroupCreatePayload = {
@@ -68,6 +74,11 @@ function normalizeDateOrNull(value: unknown): string | null {
     throw new Error("expiresOn must be YYYY-MM-DD or null");
   }
   return value;
+}
+
+function isMonday(value: string): boolean {
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.getUTCDay() === 1;
 }
 
 type GroupActivityRow = {
@@ -585,6 +596,32 @@ export async function PATCH(req: Request) {
         p_group_id: payload.id,
         p_tag_id: payload.tagId ?? null
       });
+      if (error) throw error;
+      return NextResponse.json({ ok: true });
+    }
+
+    if (payload.action === "week") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.weekStart) || !isMonday(payload.weekStart)) {
+        return jsonError("기준 주차는 월요일 날짜로 선택해 주세요.", 400);
+      }
+      const { data: group, error: groupError } = await supabase
+        .from("timetable_groups")
+        .select("id,week_start,expires_on,snapshot_events")
+        .eq("id", payload.id)
+        .single();
+      if (groupError) throw groupError;
+      if (group.expires_on && group.expires_on < payload.weekStart) {
+        return jsonError("만료일보다 늦은 주차로 변경할 수 없습니다. 만료일을 먼저 수정해 주세요.", 400);
+      }
+      const snapshotEvents = shiftSnapshotEventsToWeek(
+        Array.isArray(group.snapshot_events) ? group.snapshot_events : [],
+        group.week_start,
+        payload.weekStart
+      );
+      const { error } = await supabase
+        .from("timetable_groups")
+        .update({ week_start: payload.weekStart, snapshot_events: snapshotEvents, updated_at: nowIso() })
+        .eq("id", payload.id);
       if (error) throw error;
       return NextResponse.json({ ok: true });
     }
