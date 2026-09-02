@@ -35,6 +35,17 @@ service cloud.firestore {
       );
     }
 
+    function isInstructor() {
+      return signedIn() && (
+        request.auth.token.role == 'INSTRUCTOR' ||
+        currentUserRole() == 'INSTRUCTOR'
+      );
+    }
+
+    function canWriteJikboStatus() {
+      return isStaffOrAdmin() || isInstructor();
+    }
+
     function isSelf(uid) {
       return signedIn() && request.auth.uid == uid;
     }
@@ -97,6 +108,59 @@ service cloud.firestore {
 
     function canUseMonthlyReport(studentId) {
       return isStaffOrAdmin() || hasStudentAccess(studentId) || hasStudentPermissionDoc(studentId);
+    }
+
+    function canWriteStudentGrade(studentId) {
+      return studentId is string &&
+        studentId != '' &&
+        (isStaffOrAdmin() || isInstructor() || hasStudentAccess(studentId) || hasStudentPermissionDoc(studentId));
+    }
+
+    function canSubmitLiveTimetableAttendance(data) {
+      return signedIn()
+        && data.reporterUid == request.auth.uid
+        && currentUserDoc().data.name is string
+        && data.reporterName == currentUserDoc().data.name
+        && data.studentId is string
+        && data.studentId != ''
+        && data.status in ['출석', '지각', '결석', '결석 예정', '시간 변동', '기타']
+        && data.note is string
+        && data.note.size() <= 500
+        && (isAdmin() || (isInstructor() && hasStudentPermissionDoc(data.studentId)));
+    }
+
+    function isValidLiveTimetableAttendanceCreate(data) {
+      return data.keys().hasOnly([
+          'reporterUid', 'reporterName', 'studentId', 'studentName', 'school',
+          'sheetName', 'dateKey', 'hour', 'room', 'subject', 'lessonType',
+          'status', 'note', 'teacherRevision', 'deskState', 'reportedAt',
+          'reportedAtMs', 'deskReply', 'deskRevision',
+          'deskHandledTeacherRevision', 'teacherSeenDeskRevision',
+          'createdAt', 'createdAtMs'
+        ])
+        && data.keys().hasAll([
+          'reporterUid', 'reporterName', 'studentId', 'studentName', 'school',
+          'sheetName', 'dateKey', 'hour', 'room', 'subject', 'lessonType',
+          'status', 'note', 'teacherRevision', 'deskState', 'reportedAt',
+          'reportedAtMs', 'deskReply', 'deskRevision',
+          'deskHandledTeacherRevision', 'teacherSeenDeskRevision',
+          'createdAt', 'createdAtMs'
+        ])
+        && data.reporterName is string && data.reporterName.size() > 0 && data.reporterName.size() <= 80
+        && data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 80
+        && data.school is string && data.school.size() <= 120
+        && data.sheetName is string && data.sheetName.size() > 0 && data.sheetName.size() <= 120
+        && data.dateKey is string && data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.hour is int && data.hour >= 0 && data.hour <= 23
+        && data.room is string && data.room.size() > 0 && data.room.size() <= 120
+        && data.subject is string && data.subject.size() <= 120
+        && data.lessonType is string && data.lessonType.size() <= 120
+        && data.reportedAt == request.time && data.reportedAtMs is number && data.reportedAtMs > 0
+        && data.createdAt == request.time && data.createdAtMs == data.reportedAtMs
+        && data.deskReply == ''
+        && data.deskRevision == 0
+        && data.deskHandledTeacherRevision == 0
+        && data.teacherSeenDeskRevision == 0;
     }
 
     function currentUserFieldMatches(value, field) {
@@ -162,7 +226,7 @@ service cloud.firestore {
     }
 
     match /studentIdentityMappings/{mappingId} {
-      allow get, list: if signedIn();
+      allow get, list: if isAdmin();
       allow create, update, delete: if isAdmin();
     }
 
@@ -181,6 +245,11 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /sharedIconAssets/{iconId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /legacySheetSyncJobs/{jobId} {
       allow get, list: if isAdmin();
       allow create, update, delete: if isAdmin();
@@ -193,12 +262,17 @@ service cloud.firestore {
 
     match /studentGrades/{gradeId} {
       allow get, list: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow create: if signedIn() && canWriteStudentGrade(request.resource.data.studentId);
+      allow update: if signedIn()
+        && canWriteStudentGrade(resource.data.studentId)
+        && request.resource.data.studentId == resource.data.studentId;
+      allow delete: if isAdmin();
     }
 
     match /studentGradeHistories/{historyId} {
       allow get, list: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow create: if signedIn() && canWriteStudentGrade(request.resource.data.studentId);
+      allow update, delete: if isAdmin();
     }
 
     match /studentLogs/{logId} {
@@ -226,6 +300,7 @@ service cloud.firestore {
             (isAdmin() || resource.data.createdById == request.auth.uid)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'content',
+              'contactMethod',
               'tags',
               'tagsText',
               'updatedAt',
@@ -267,7 +342,10 @@ service cloud.firestore {
         signedIn() &&
         (resource.data.instructorId == request.auth.uid || resource.data.instructorUid == request.auth.uid)
       );
-      allow list: if signedIn();
+      allow list: if isAdmin() || (
+        signedIn() &&
+        (resource.data.instructorId == request.auth.uid || resource.data.instructorUid == request.auth.uid)
+      );
       allow create: if signedIn() && (
         request.resource.data.instructorId == request.auth.uid ||
         request.resource.data.instructorUid == request.auth.uid
@@ -281,6 +359,123 @@ service cloud.firestore {
     }
 
     match /studentPermissions/{documentId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /liveTimetableAttendanceReports/{reportId} {
+      allow get, list: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+      allow create: if canSubmitLiveTimetableAttendance(request.resource.data)
+        && isValidLiveTimetableAttendanceCreate(request.resource.data)
+        && request.resource.data.teacherRevision == 1
+        && request.resource.data.deskState == 'NEW'
+        && request.resource.data.deskRevision == 0;
+      allow update: if (
+        canSubmitLiveTimetableAttendance(request.resource.data)
+        && request.resource.data.reporterUid == resource.data.reporterUid
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.sheetName == resource.data.sheetName
+        && request.resource.data.hour == resource.data.hour
+        && request.resource.data.room == resource.data.room
+        && request.resource.data.teacherRevision == resource.data.teacherRevision + 1
+        && request.resource.data.deskState == 'NEW'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'note',
+          'teacherRevision',
+          'deskState',
+          'reportedAt',
+          'reportedAtMs'
+        ])
+      ) || (
+        signedIn()
+        && resource.data.reporterUid == request.auth.uid
+        && request.resource.data.teacherSeenDeskRevision is int
+        && request.resource.data.teacherSeenDeskRevision >= resource.data.teacherSeenDeskRevision
+        && request.resource.data.teacherSeenDeskRevision <= resource.data.deskRevision
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherSeenDeskRevision'])
+      ) || (
+        isAdmin()
+        && request.resource.data.deskState in ['ACKNOWLEDGED', 'RESOLVED']
+        && request.resource.data.deskReply is string
+        && request.resource.data.deskReply.size() <= 500
+        && request.resource.data.deskRevision == resource.data.deskRevision + 1
+        && request.resource.data.deskHandledTeacherRevision == resource.data.teacherRevision
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'deskState',
+          'deskReply',
+          'deskRevision',
+          'deskHandledTeacherRevision',
+          'deskUpdatedByUid',
+          'deskUpdatedByName',
+          'deskUpdatedAt',
+          'deskUpdatedAtMs'
+        ])
+      );
+      allow delete: if false;
+
+      match /events/{eventId} {
+        allow get, list: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+        allow create: if (
+          request.resource.data.type == 'TEACHER_SUBMITTED'
+          && canSubmitLiveTimetableAttendance(request.resource.data)
+          && request.resource.data.keys().hasOnly([
+            'type', 'reporterUid', 'studentId', 'teacherRevision', 'status', 'note', 'createdAt', 'createdAtMs'
+          ])
+          && request.resource.data.teacherRevision is int
+          && request.resource.data.createdAtMs is number
+          && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.reporterUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.studentId == request.resource.data.studentId
+          && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.teacherRevision == request.resource.data.teacherRevision
+        ) || (
+          request.resource.data.type == 'DESK_REPLIED'
+          && isAdmin()
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'type', 'reporterUid', 'studentId', 'deskState', 'deskReply', 'deskRevision', 'actorUid', 'createdAt', 'createdAtMs'
+          ])
+          && request.resource.data.deskState in ['ACKNOWLEDGED', 'RESOLVED']
+          && request.resource.data.deskReply is string
+          && request.resource.data.deskReply.size() <= 500
+          && request.resource.data.deskRevision is int
+          && request.resource.data.createdAtMs is number
+          && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.reporterUid == request.resource.data.reporterUid
+          && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.studentId == request.resource.data.studentId
+          && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.deskRevision == request.resource.data.deskRevision
+        );
+        allow update, delete: if false;
+      }
+    }
+
+    match /liveTimetableAttendanceNotifications/{uid} {
+      allow get, list, create, update, delete: if false;
+
+      match /items/{reportId} {
+        allow get, list: if isAdmin() || isSelf(uid);
+        allow create, update: if (
+          isAdmin()
+          && request.resource.data.keys().hasOnly([
+            'reportId', 'reporterUid', 'deskRevision', 'deskState', 'seen', 'updatedAt', 'updatedAtMs'
+          ])
+          && request.resource.data.reportId == reportId
+          && request.resource.data.reporterUid == uid
+          && request.resource.data.deskRevision is int
+          && request.resource.data.deskState in ['ACKNOWLEDGED', 'RESOLVED']
+          && request.resource.data.seen == false
+          && request.resource.data.updatedAtMs is number
+        ) || (
+          isSelf(uid)
+          && resource.data.reporterUid == request.auth.uid
+          && request.resource.data.reporterUid == resource.data.reporterUid
+          && request.resource.data.reportId == resource.data.reportId
+          && request.resource.data.seen == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen', 'seenAt', 'seenAtMs'])
+        );
+        allow delete: if false;
+      }
+    }
+
+    match /consultationHiddenLinks/{documentId} {
       allow get, list: if signedIn();
       allow create, update, delete: if isAdmin();
     }
@@ -339,7 +534,13 @@ service cloud.firestore {
 
     match /jikboStatuses/{statusId} {
       allow get, list: if signedIn();
-      allow create, update, delete: if isStaffOrAdmin();
+      allow create, update, delete: if canWriteJikboStatus();
+    }
+
+    match /jikboChangeLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if canWriteJikboStatus();
+      allow update, delete: if isAdmin();
     }
 
     match /materials/{materialId} {
@@ -349,7 +550,12 @@ service cloud.firestore {
 
     match /materialOpenLogs/{logId} {
       allow get, list: if isAdmin();
-      allow create: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.openedById == request.auth.uid
+        && request.resource.data.materialRowNumber is string
+        && request.resource.data.link is string
+        && request.resource.data.openedAt is string
+        && request.resource.data.openedAtMs is number;
       allow update, delete: if isAdmin();
     }
 
