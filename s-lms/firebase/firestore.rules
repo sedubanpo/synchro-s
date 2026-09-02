@@ -367,14 +367,14 @@ service cloud.firestore {
     match /liveTimetableAttendanceReports/{reportId} {
       // The timetable transaction reads its deterministic report ID before the
       // first create. Permit only that missing-document probe; an existing
-      // report remains readable solely by its reporter or an administrator.
-      allow get: if isAdmin() || (
+      // report remains readable solely by its reporter or a desk operator.
+      allow get: if isStaffOrAdmin() || (
         signedIn() && (
           !exists(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)) ||
           resource.data.reporterUid == request.auth.uid
         )
       );
-      allow list: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+      allow list: if isStaffOrAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
       allow create: if canSubmitLiveTimetableAttendance(request.resource.data)
         && isValidLiveTimetableAttendanceCreate(request.resource.data)
         && request.resource.data.teacherRevision == 1
@@ -405,7 +405,7 @@ service cloud.firestore {
         && request.resource.data.teacherSeenDeskRevision <= resource.data.deskRevision
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherSeenDeskRevision'])
       ) || (
-        isAdmin()
+        isStaffOrAdmin()
         && request.resource.data.deskState in ['ACKNOWLEDGED', 'RESOLVED']
         && request.resource.data.deskReply is string
         && request.resource.data.deskReply.size() <= 500
@@ -425,7 +425,7 @@ service cloud.firestore {
       allow delete: if false;
 
       match /events/{eventId} {
-        allow get, list: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+        allow get, list: if isStaffOrAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
         allow create: if (
           request.resource.data.type == 'TEACHER_SUBMITTED'
           && canSubmitLiveTimetableAttendance(request.resource.data)
@@ -439,7 +439,7 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)).data.teacherRevision == request.resource.data.teacherRevision
         ) || (
           request.resource.data.type == 'DESK_REPLIED'
-          && isAdmin()
+          && isStaffOrAdmin()
           && request.resource.data.actorUid == request.auth.uid
           && request.resource.data.keys().hasOnly([
             'type', 'reporterUid', 'studentId', 'deskState', 'deskReply', 'deskRevision', 'actorUid', 'createdAt', 'createdAtMs'
@@ -461,9 +461,9 @@ service cloud.firestore {
       allow get, list, create, update, delete: if false;
 
       match /items/{reportId} {
-        allow get, list: if isAdmin() || isSelf(uid);
+        allow get, list: if isStaffOrAdmin() || isSelf(uid);
         allow create, update: if (
-          isAdmin()
+          isStaffOrAdmin()
           && request.resource.data.keys().hasOnly([
             'reportId', 'reporterUid', 'deskRevision', 'deskState', 'seen', 'updatedAt', 'updatedAtMs'
           ])
