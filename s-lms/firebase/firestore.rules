@@ -119,15 +119,13 @@ service cloud.firestore {
     function canSubmitLiveTimetableAttendance(data) {
       return signedIn()
         && data.reporterUid == request.auth.uid
-        && currentUserDoc().data.name is string
-        && data.reporterName == currentUserDoc().data.name
         && data.studentId is string
         && data.studentId != ''
         && exists(/databases/$(database)/documents/students/$(data.studentId))
         && data.status in ['출석', '지각', '결석', '결석 예정', '시간 변동', '기타']
         && data.note is string
         && data.note.size() <= 500
-        && (isAdmin() || isInstructor());
+        && (isStaffOrAdmin() || isInstructor());
     }
 
     function isValidLiveTimetableAttendanceCreate(data) {
@@ -147,6 +145,8 @@ service cloud.firestore {
           'deskHandledTeacherRevision', 'teacherSeenDeskRevision',
           'createdAt', 'createdAtMs'
         ])
+        && currentUserDoc().data.name is string
+        && data.reporterName == currentUserDoc().data.name
         && data.reporterName is string && data.reporterName.size() > 0 && data.reporterName.size() <= 80
         && data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 80
         && data.school is string && data.school.size() <= 120
