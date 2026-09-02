@@ -365,7 +365,16 @@ service cloud.firestore {
     }
 
     match /liveTimetableAttendanceReports/{reportId} {
-      allow get, list: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
+      // The timetable transaction reads its deterministic report ID before the
+      // first create. Permit only that missing-document probe; an existing
+      // report remains readable solely by its reporter or an administrator.
+      allow get: if isAdmin() || (
+        signedIn() && (
+          !exists(/databases/$(database)/documents/liveTimetableAttendanceReports/$(reportId)) ||
+          resource.data.reporterUid == request.auth.uid
+        )
+      );
+      allow list: if isAdmin() || (signedIn() && resource.data.reporterUid == request.auth.uid);
       allow create: if canSubmitLiveTimetableAttendance(request.resource.data)
         && isValidLiveTimetableAttendanceCreate(request.resource.data)
         && request.resource.data.teacherRevision == 1
