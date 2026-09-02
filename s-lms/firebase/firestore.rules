@@ -123,10 +123,11 @@ service cloud.firestore {
         && data.reporterName == currentUserDoc().data.name
         && data.studentId is string
         && data.studentId != ''
+        && exists(/databases/$(database)/documents/students/$(data.studentId))
         && data.status in ['출석', '지각', '결석', '결석 예정', '시간 변동', '기타']
         && data.note is string
         && data.note.size() <= 500
-        && (isAdmin() || (isInstructor() && hasStudentPermissionDoc(data.studentId)));
+        && (isAdmin() || isInstructor());
     }
 
     function isValidLiveTimetableAttendanceCreate(data) {
