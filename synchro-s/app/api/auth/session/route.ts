@@ -3,7 +3,7 @@ import { getSessionCookieName, verifySessionToken } from "@/lib/server/sessionTo
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get(getSessionCookieName())?.value;
   const session = verifySessionToken(token);
   if (!session) {

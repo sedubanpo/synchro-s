@@ -92,7 +92,8 @@ function routeError(error: unknown) {
 const SELECT_COLUMNS =
   "id,student_id,month_start,title,memo,weekly_availability,date_overrides,is_active,created_at,updated_at";
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase } = await requireAccess();
     const monthStart = normalizeMonthStart(new URL(req.url).searchParams.get("monthStart"));
@@ -110,7 +111,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase, profile } = await requireAccess();
     const payload = (await req.json()) as CreatePayload;
@@ -153,7 +155,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase } = await requireAccess();
     const payload = (await req.json()) as MutationPayload;

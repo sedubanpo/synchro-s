@@ -15,6 +15,7 @@ import {
   type EffectiveStudentTimetableGroup
 } from "@/lib/timetableGroupSelection";
 import { validateSchedulePayload } from "@/lib/validators";
+import { fetchAllSupabaseRows, fetchSupabaseRowsByIds } from "@/lib/server/supabasePagination";
 
 type SupabaseLike = {
   from: (table: string) => any;
@@ -190,7 +191,7 @@ async function loadEffectiveStudentTimetableGroupClassIds(
     return new Map();
   }
 
-  const createQuery = (includeExpiration: boolean) => {
+  const createQuery = (includeExpiration: boolean, ids: string[]) => {
     const query = supabase
       .from("timetable_groups")
       .select(
@@ -199,19 +200,19 @@ async function loadEffectiveStudentTimetableGroupClassIds(
           : "id,target_id,week_start,tag_id,is_active,class_ids,snapshot_events,created_at"
       )
       .eq("role_view", "student")
-      .in("target_id", uniqueStudentIds);
+      .in("target_id", ids);
     return scheduleTagId ? query.eq("tag_id", scheduleTagId) : query.is("tag_id", null);
   };
 
-  let { data, error } = await createQuery(true);
-  if (error && isMissingColumnError(error, "expires_on")) {
-    const fallback = await createQuery(false);
-    data = fallback.data;
-    error = fallback.error;
-  }
-
-  if (error) {
-    throw error;
+  const readGroups = (includeExpiration: boolean) => fetchSupabaseRowsByIds<ActiveStudentTimetableGroupRow>(uniqueStudentIds,
+    (ids, from, to) => createQuery(includeExpiration, ids).order("id").range(from, to)
+  );
+  let data: ActiveStudentTimetableGroupRow[];
+  try {
+    data = await readGroups(true);
+  } catch (error) {
+    if (!isMissingColumnError(error, "expires_on")) throw error;
+    data = await readGroups(false);
   }
 
   const studentsWithAnyGroup = new Set<string>();
@@ -1035,39 +1036,28 @@ export async function fetchWeeklySchedule(
     }
   }
 
-  const recurringQuery = supabase
+  const recurringQuery = () => supabase
     .from("classes")
     .select(CLASS_SELECT)
     .eq("schedule_mode", "recurring")
     .lte("active_from", weekEnd)
     .or(`active_to.is.null,active_to.gte.${weekStart}`);
 
-  const oneOffQuery = supabase
+  const oneOffQuery = () => supabase
     .from("classes")
     .select(CLASS_SELECT)
     .eq("schedule_mode", "one_off")
     .gte("class_date", weekStart)
     .lte("class_date", weekEnd);
 
-  if (params.view === "instructor" && params.instructorId) {
-    recurringQuery.eq("instructor_id", params.instructorId);
-    oneOffQuery.eq("instructor_id", params.instructorId);
-  }
-
-  if (studentClassIds && studentClassIds.length > 0) {
-    recurringQuery.in("id", studentClassIds);
-    oneOffQuery.in("id", studentClassIds);
-  }
-
-  const [recurringRes, oneOffRes] = await Promise.all([recurringQuery, oneOffQuery]);
-
-  if (recurringRes.error) throw recurringRes.error;
-  if (oneOffRes.error) throw oneOffRes.error;
-
-  const classRows = [
-    ...((recurringRes.data ?? []) as ClassRow[]),
-    ...((oneOffRes.data ?? []) as ClassRow[])
-  ];
+  const readClasses = (makeQuery: () => any) => fetchAllSupabaseRows<ClassRow>((from, to) => {
+    const query = makeQuery();
+    if (params.view === "instructor" && params.instructorId) query.eq("instructor_id", params.instructorId);
+    if (studentClassIds?.length) query.in("id", studentClassIds);
+    return query.order("id").range(from, to);
+  });
+  const [recurringRows, oneOffRows] = await Promise.all([readClasses(recurringQuery), readClasses(oneOffQuery)]);
+  const classRows = [...recurringRows, ...oneOffRows];
 
   if (classRows.length === 0) {
     return { weekStart, weekEnd, events: await prospectEventsPromise };
@@ -1075,26 +1065,20 @@ export async function fetchWeeklySchedule(
 
   const classIds = classRows.map((row) => row.id);
 
-  const [enrollmentRes, overrideRes] = await Promise.all([
-    supabase
+  const [enrollments, overrides] = await Promise.all([
+    fetchSupabaseRowsByIds<EnrollmentRow>(classIds, (ids, from, to) => supabase
       .from("class_enrollments")
       .select("class_id,student_id,students(id,student_name,is_active)")
-      .in("class_id", classIds),
-    supabase
+      .in("class_id", ids).order("id").range(from, to)),
+    fetchSupabaseRowsByIds<OverrideRow>(classIds, (ids, from, to) => supabase
       .from("class_overrides")
       .select(
         "class_id,override_date,action,override_instructor_id,override_start_time,override_end_time,override_status"
       )
-      .in("class_id", classIds)
+      .in("class_id", ids)
       .gte("override_date", weekStart)
-      .lte("override_date", weekEnd)
+      .lte("override_date", weekEnd).order("id").range(from, to))
   ]);
-
-  if (enrollmentRes.error) throw enrollmentRes.error;
-  if (overrideRes.error) throw overrideRes.error;
-
-  const enrollments = (enrollmentRes.data ?? []) as EnrollmentRow[];
-  const overrides = (overrideRes.data ?? []) as OverrideRow[];
   const activeGroupClassIdsByStudent = await loadEffectiveStudentTimetableGroupClassIds(
     supabase,
     enrollments.map((row) => row.student_id),

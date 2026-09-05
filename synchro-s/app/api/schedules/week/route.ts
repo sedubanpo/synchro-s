@@ -54,7 +54,7 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const weekStart = searchParams.get("weekStart");
-    const view = (searchParams.get("view") ?? "student") as RoleView;
+    let view = (searchParams.get("view") ?? "student") as RoleView;
     const scheduleTagId = searchParams.has("tagId") ? searchParams.get("tagId")?.trim() || null : undefined;
     let instructorId = searchParams.get("instructorId");
     let studentId = searchParams.get("studentId");
@@ -72,6 +72,8 @@ export async function GET(req: Request) {
     const profileStudentId = (profile as { student_id?: string | null }).student_id ?? null;
 
     if (profile.role === "instructor") {
+      view = "instructor";
+      studentId = null;
       instructorId =
         profileInstructorId ||
         (await findInstructorIdByUserId(supabase, user.id)) ||
@@ -82,6 +84,8 @@ export async function GET(req: Request) {
     }
 
     if (profile.role === "student") {
+      view = "student";
+      instructorId = null;
       studentId = profileStudentId || (await findStudentIdByUserId(supabase, user.id));
       if (!studentId) {
         return jsonError("No student profile linked to this account", 400);

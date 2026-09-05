@@ -40,7 +40,9 @@ type GroupRow = {
 };
 
 function isIsoDate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function isMonday(value: string): boolean {
@@ -53,7 +55,7 @@ function planToken(input: {
   destinationTagId: string;
   destinationWeekStart: string;
   studentIds: string[];
-  candidateSourceIds: string[];
+  candidateSources: BulkCopyGroup[];
   blockedStudentIds: string[];
 }): string {
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
@@ -83,12 +85,13 @@ export async function POST(req: Request) {
 
     const payload = (await req.json()) as BulkCopyPayload;
     if (payload.mode !== "preview" && payload.mode !== "execute") return jsonError("mode must be preview or execute", 400);
-    if (!payload.sourceTagId?.trim() || !payload.destinationTagId?.trim()) return jsonError("원본 태그와 대상 태그를 선택해 주세요.", 400);
+    if (typeof payload.sourceTagId !== "string" || typeof payload.destinationTagId !== "string" || !payload.sourceTagId.trim() || !payload.destinationTagId.trim()) return jsonError("원본 태그와 대상 태그를 선택해 주세요.", 400);
     if (payload.sourceTagId === payload.destinationTagId) return jsonError("원본 태그와 대상 태그는 달라야 합니다.", 400);
     if (!isIsoDate(payload.destinationWeekStart) || !isMonday(payload.destinationWeekStart)) {
       return jsonError("대상 기준 주차는 월요일 날짜로 선택해 주세요.", 400);
     }
-    const studentIds = Array.from(new Set((payload.studentIds ?? []).filter((id) => typeof id === "string" && id.trim()))).sort();
+    if (!Array.isArray(payload.studentIds)) return jsonError("재원생 목록 형식이 올바르지 않습니다.", 400);
+    const studentIds = Array.from(new Set(payload.studentIds.filter((id) => typeof id === "string" && id.trim()))).sort();
     if (studentIds.length === 0) return jsonError("복사할 재원생이 없습니다. 명단을 먼저 동기화해 주세요.", 400);
     if (studentIds.length > 2000) return jsonError("한 번에 처리할 수 있는 재원생은 2,000명까지입니다.", 400);
 
@@ -152,7 +155,7 @@ export async function POST(req: Request) {
       destinationTagId: payload.destinationTagId,
       destinationWeekStart: payload.destinationWeekStart,
       studentIds,
-      candidateSourceIds: plan.candidates.map((item) => item.sourceGroup.id).sort(),
+      candidateSources: plan.candidates.map((item) => item.sourceGroup).sort((a, b) => a.id.localeCompare(b.id)),
       blockedStudentIds: [...plan.destinationExists, ...plan.containsOneOff].map((item) => item.id).sort()
     });
     const preview = {

@@ -12,7 +12,8 @@ type MovePayload = {
   subjectCode?: string;
 };
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase, user, profile } = await getAuthenticatedProfile();
 

@@ -3371,7 +3371,9 @@ export default function SynchroSPage() {
     [events, notionInput, notionPreview, parsedNotionItems, selectedGroupId, timetableGroups]
   );
 
+  const optionsLoadRequestRef = useRef(0);
   const loadOptions = useCallback(async (opts?: { refreshSheets?: boolean }) => {
+    const requestId = ++optionsLoadRequestRef.current;
     const query = new URLSearchParams();
     if (opts?.refreshSheets) {
       query.set("refreshSheets", "1");
@@ -3383,6 +3385,7 @@ export default function SynchroSPage() {
       cache: "no-store",
       headers: await getFirebaseAuthHeaders(undefined, Boolean(opts?.refreshSheets))
     });
+    if (requestId !== optionsLoadRequestRef.current) return;
 
     if (res.status === 401) {
       moveToLogin();
@@ -3394,6 +3397,7 @@ export default function SynchroSPage() {
     }
 
     const data = (await res.json()) as OptionsResponse;
+    if (requestId !== optionsLoadRequestRef.current) return;
 
     setInstructors(data.instructors);
     setSuspendedInstructors(data.suspendedInstructors ?? []);
@@ -3436,6 +3440,7 @@ export default function SynchroSPage() {
     // 핵심 옵션을 먼저 노출한 뒤 레지스트리가 도착하면 학생 정보만 점진적으로 보강합니다.
     try {
       const schoolIcons = await loadSchoolIconRegistry(Boolean(opts?.refreshSheets));
+      if (requestId !== optionsLoadRequestRef.current) return;
       const decorate = (student: SelectOption): SelectOption => ({
         ...student,
         school: getSchoolName(student) || undefined,

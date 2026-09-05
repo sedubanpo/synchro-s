@@ -31,3 +31,20 @@ export async function fetchAllSupabaseRows<T>(
 
   return rows;
 }
+
+/** Bound IN-filter URL length and concurrency as well as the response row count. */
+export async function fetchSupabaseRowsByIds<T>(
+  ids: string[],
+  fetchPage: (ids: string[], from: number, to: number) => PromiseLike<SupabasePage<T>>
+): Promise<T[]> {
+  const uniqueIds = [...new Set(ids)];
+  const rows: T[] = [];
+  for (let offset = 0; offset < uniqueIds.length; offset += 400) {
+    const batches = Array.from({ length: Math.min(4, Math.ceil((uniqueIds.length - offset) / 100)) }, (_, index) =>
+      uniqueIds.slice(offset + index * 100, offset + (index + 1) * 100)
+    );
+    const results = await Promise.all(batches.map((batch) => fetchAllSupabaseRows<T>((from, to) => fetchPage(batch, from, to))));
+    results.forEach((result) => rows.push(...result));
+  }
+  return rows;
+}

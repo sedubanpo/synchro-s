@@ -417,12 +417,14 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const forceSheetRefresh = searchParams.get("refreshSheets") === "1" || searchParams.get("refreshSheets") === "true";
     const spreadsheetId = process.env.GOOGLE_SHEETS_SYNC_ID || DEFAULT_SPREADSHEET_ID;
-    const {
+    const [{
       teacherSubjectByName,
       teacherActiveByName,
       studentSchoolByName
-    } = await loadSheetMetaMapCached(spreadsheetId, forceSheetRefresh);
-    const firebaseRoster = await loadFirebaseRoster(getBearerIdToken(req), { forceRefresh: forceSheetRefresh });
+    }, firebaseRoster] = await Promise.all([
+      loadSheetMetaMapCached(spreadsheetId, forceSheetRefresh),
+      loadFirebaseRoster(getBearerIdToken(req), { forceRefresh: forceSheetRefresh })
+    ]);
     if (forceSheetRefresh && (profile.role === "admin" || profile.role === "coordinator") && !firebaseRoster.studentsAvailable) {
       return jsonError(
         `Firebase 학생 명단을 새로고침하지 못했습니다. 기존 Synchro-S 학생 명단은 유지되었습니다. (${firebaseRoster.studentError ?? firebaseRoster.error ?? "원인 미상"})`,

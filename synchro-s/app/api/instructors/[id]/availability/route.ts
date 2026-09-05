@@ -111,7 +111,8 @@ function isMissingLegacyColumn(error: unknown): boolean {
   return /['"]available_time_slots['"]/.test(message) || message.includes(" available_time_slots ");
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase, user, profile } = await getAuthenticatedProfile();
 

@@ -67,13 +67,17 @@ export function buildSessionToken(input: {
 
 export function verifySessionToken(token: string | undefined | null): SessionPayload | null {
   if (!token) return null;
-  const [body, signature] = token.split(".");
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [body, signature] = parts;
   if (!body || !signature) return null;
   const expected = sign(body);
-  if (signature.length !== expected.length) {
+  const signatureBytes = Buffer.from(signature);
+  const expectedBytes = Buffer.from(expected);
+  if (signatureBytes.length !== expectedBytes.length) {
     return null;
   }
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  if (!crypto.timingSafeEqual(signatureBytes, expectedBytes)) {
     return null;
   }
   try {
@@ -81,7 +85,7 @@ export function verifySessionToken(token: string | undefined | null): SessionPay
     if (!["admin", "coordinator", "instructor", "student"].includes(payload.role)) return null;
     if (!payload.fullName) return null;
     const now = Math.floor(Date.now() / 1000);
-    if (!payload.expiresAt || payload.expiresAt < now) return null;
+    if (!Number.isFinite(payload.expiresAt) || payload.expiresAt <= now) return null;
     return payload;
   } catch {
     return null;

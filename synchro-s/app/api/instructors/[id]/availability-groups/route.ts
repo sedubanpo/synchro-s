@@ -187,7 +187,8 @@ function authErrorResponse(error: unknown) {
   return jsonError(errorMessage(error), 500);
 }
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase } = await requireAvailabilityAccess(params.id);
     const monthStart = normalizeMonthStart(new URL(req.url).searchParams.get("monthStart"));
@@ -205,7 +206,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase, profile } = await requireAvailabilityAccess(params.id);
     const payload = (await req.json()) as GroupCreatePayload;
@@ -250,7 +252,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
+  const params = await pendingParams;
   try {
     const { supabase } = await requireAvailabilityAccess(params.id);
     const payload = (await req.json()) as GroupMutationPayload;

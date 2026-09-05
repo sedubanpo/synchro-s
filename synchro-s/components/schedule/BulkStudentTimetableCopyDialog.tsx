@@ -59,6 +59,14 @@ export function BulkStudentTimetableCopyDialog({
   const [error, setError] = useState("");
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    return () => { trigger?.focus(); };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,7 +87,10 @@ export function BulkStudentTimetableCopyDialog({
       if (event.key === "Escape" && !busy) setOpen(false);
       if (event.key === "Tab") {
         const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])") ?? [])];
-        if (focusable.length === 0) return;
+        if (focusable.length === 0) {
+          event.preventDefault();
+          return;
+        }
         const first = focusable[0];
         const last = focusable.at(-1)!;
         if (event.shiftKey && document.activeElement === first) {
@@ -101,7 +112,10 @@ export function BulkStudentTimetableCopyDialog({
   };
 
   const requestPreview = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setPreview(null);
     setError("");
     try {
       const response = await fetch("/api/schedules/groups/bulk-copy", {
@@ -119,14 +133,16 @@ export function BulkStudentTimetableCopyDialog({
       const payload = (await response.json()) as { preview: BulkCopyPreview };
       setPreview(payload.preview);
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : "일괄 복사 미리보기를 만들지 못했습니다.");
+      setError(previewError instanceof TypeError ? "서버에 연결하지 못했습니다. 연결 상태를 확인한 뒤 미리보기를 다시 눌러 주세요." : previewError instanceof Error ? previewError.message : "일괄 복사 미리보기를 만들지 못했습니다.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const executeCopy = async () => {
-    if (!preview) return;
+    if (!preview || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -150,8 +166,10 @@ export function BulkStudentTimetableCopyDialog({
         destinationTagId
       );
     } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : "전체 재원생 시간표 복사에 실패했습니다.");
+      setPreview(null);
+      setError(copyError instanceof TypeError ? "서버 응답을 확인하지 못했습니다. 미리보기를 다시 실행해 이미 복사된 시간표를 확인해 주세요." : copyError instanceof Error ? copyError.message : "전체 재원생 시간표 복사에 실패했습니다.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -159,6 +177,7 @@ export function BulkStudentTimetableCopyDialog({
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         disabled={sourceTags.length < 2 || activeTags.length === 0 || students.length === 0}

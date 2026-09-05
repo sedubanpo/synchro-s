@@ -7,7 +7,7 @@ export type AppUserRole = "admin" | "coordinator" | "instructor" | "student";
 
 export async function getAuthenticatedProfile() {
   const serverSupabase = await createSupabaseServerClient();
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const sheetSession = verifySessionToken(cookieStore.get(getSessionCookieName())?.value);
   if (sheetSession) {
     // Sheet session has no Supabase auth JWT, so use service-role client to avoid RLS empty reads.
