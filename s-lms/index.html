@@ -19495,6 +19495,12 @@
         return String(token || '').indexOf('firebase:') === 0;
       }
 
+window.SeduHubAdapter={
+ async signIn(token,uid){const state=await initializeFirebasePasswordAuthState_();await state.auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+  const credential=await state.auth.signInWithCustomToken(token);if(credential.user.uid!==uid)throw Error('Identity mismatch');
+  await completeFirebaseLogin_(state,credential.user,'');
+ },async signOut(){const state=await initializeFirebasePasswordAuthState_();await state.auth.signOut();clearStoredSession();resetFirebaseDirectState_();APP_STATE.token='';APP_STATE.user=null;showLoginOnly();}
+};
       function restoreFirebaseStoredSession_() {
         return initializeFirebasePasswordAuthState_().then(function(state) {
           return waitForFirebaseCurrentUser_(state.auth, 1600).then(function(user) {
@@ -50777,5 +50783,6 @@
         return escapeHtml(value);
       }
     </script>
-  </body>
+  <script type="module" src="hub-start.mjs"></script>
+</body>
 </html>
