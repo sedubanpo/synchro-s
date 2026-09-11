@@ -4918,8 +4918,9 @@ export default function SynchroSPage() {
     setNotice("새 싱크로 시간표를 시작했습니다. 기존 저장본은 변경되지 않습니다.");
   }, [hasPendingTimetableChanges]);
 
+  const syncDraftSaveInFlightRef = useRef(false);
   const handleSaveSyncDraftsToServer = useCallback(async () => {
-    if (savingSyncDrafts) return;
+    if (savingSyncDrafts || syncDraftSaveInFlightRef.current) return;
     if (!selectedScheduleTagId) {
       setError("학생 시간표를 저장하려면 상단에서 분류(태그)를 먼저 선택해 주세요.");
       return;
@@ -5014,6 +5015,7 @@ export default function SynchroSPage() {
       return;
     }
 
+    syncDraftSaveInFlightRef.current = true;
     setSavingSyncDrafts(true);
     setImportProgress({
       active: true,
@@ -5219,23 +5221,21 @@ export default function SynchroSPage() {
       const nextClassIds = Array.from(new Set([...existingClassIds, ...importedClassIds]));
       const savedCount = importedEvents.length + selfStudyEvents.length + Object.keys(stagedEventUpdates).length + stagedDeletedEventIds.length;
 
-      const targetGroup = selectedGroup ?? activeGroup;
-      if (targetGroup) {
-        await saveTimetableGroupSnapshot(targetGroup.id, nextClassIds, nextSnapshot);
-        setSelectedGroupId(targetGroup.id);
-        setTimetableGroups((prev) => prev.map((group) => group.id === targetGroup.id ? { ...group, classIds: nextClassIds, snapshotEvents: nextSnapshot } : group));
-      } else {
-        const created = await createTimetableGroup({
-          name: `${weekStart} ${currentTargetLabel} 시간표`,
-          roleView: "student",
-          targetId: currentTargetId,
-          weekStart,
-          classIds: nextClassIds,
-          snapshotEvents: nextSnapshot,
-          isActive: true
-        });
-        if (created?.id) setSelectedGroupId(created.id);
+      // Saving the editor commits a new version, never overwrites the source
+      // snapshot. POST activates the new version and retires its same-tag peer.
+      const created = await createTimetableGroup({
+        name: `${new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" })} ${currentTargetLabel} 시간표`,
+        roleView: "student",
+        targetId: currentTargetId,
+        weekStart,
+        classIds: nextClassIds,
+        snapshotEvents: nextSnapshot,
+        isActive: true
+      });
+      if (!created?.id || !created.isActive) {
+        throw new Error("새 시간표의 저장·활성화를 확인하지 못했습니다. 저장된 시간표 목록을 확인해 주세요.");
       }
+      setSelectedGroupId(created.id);
       setIsCreatingNewSyncTimetable(false);
 
       const historyRes = await fetch("/api/save-history", {
@@ -5250,7 +5250,7 @@ export default function SynchroSPage() {
       setStagedDeletedEventIds([]);
       setSyncDraftUndoState(null);
       await Promise.all([loadWeek({ silent: true }), loadSaveHistory(), loadOverviewEvents(), loadScheduleReviews()]);
-      setNotice(`싱크로 시간표 저장 완료: 반영 ${savedCount}건${conflictDetails.length > 0 ? ` / 충돌 ${conflictDetails.length}건` : ""}${historySaved ? "" : " · 최근 저장 기록은 새로고침 시 다시 확인해 주세요."}`);
+      setNotice(`새 시간표 버전을 저장하고 활성화했습니다. 이전 저장본은 기록으로 보존됩니다. 반영 ${savedCount}건${conflictDetails.length > 0 ? ` / 충돌 ${conflictDetails.length}건` : ""}${historySaved ? "" : " · 최근 저장 기록은 새로고침 시 다시 확인해 주세요."}`);
 
       if (conflictDetails.length > 0) {
         setConflictDialog({
@@ -5269,6 +5269,7 @@ export default function SynchroSPage() {
       });
     } finally {
       importingNotionRef.current = false;
+      syncDraftSaveInFlightRef.current = false;
       setSavingSyncDrafts(false);
       setImportProgress((prev) => ({ ...prev, active: false, label: "" }));
     }
@@ -5291,8 +5292,6 @@ export default function SynchroSPage() {
     pendingTimetableChangeCount,
     recordConflictLogs,
     savingSyncDrafts,
-    saveTimetableGroupSnapshot,
-    selectedGroup,
     selectedStudentId,
     selectedStudentLabel,
     selectedScheduleTagId,
