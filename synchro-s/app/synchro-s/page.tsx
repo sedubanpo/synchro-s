@@ -17,6 +17,8 @@ import { ScheduleModal } from "@/components/schedule/ScheduleModal";
 import { ScheduleTagManager, SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
+import { DayVisibilityControl } from "@/components/schedule/DayVisibilityControl";
+import { SaveProgress } from "@/components/schedule/SaveProgress";
 import {
   TimetableGrid,
   type TimetableAvailabilityCell,
@@ -1668,7 +1670,7 @@ export default function SynchroSPage() {
   const [hideEmptyDays, setHideEmptyDays] = useState(false);
   const [hideEmptyTimes, setHideEmptyTimes] = useState(false);
   const [hiddenTimeSlots, setHiddenTimeSlots] = useState<string[]>([]);
-  const [hiddenTimeSlotsReady, setHiddenTimeSlotsReady] = useState(false);
+  const [hiddenDays, setHiddenDays] = useState<Weekday[]>([]);
   const [subjectSettingsOpen, setSubjectSettingsOpen] = useState(false);
   const [subjectSettingsLoading, setSubjectSettingsLoading] = useState(false);
   const [subjectSettingsSaving, setSubjectSettingsSaving] = useState(false);
@@ -7817,21 +7819,22 @@ export default function SynchroSPage() {
     setSelectedScheduleTagId(saved || null);
   }, []);
 
+  // Report-only visibility never becomes timetable data or a durable preference.
   useEffect(() => {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem("synchro-s-hidden-time-slots-v1") ?? "[]");
-      setHiddenTimeSlots(Array.isArray(saved) ? TIME_SLOTS.filter((slot) => saved.includes(slot)) : []);
-    } catch {
-      setHiddenTimeSlots([]);
-    } finally {
-      setHiddenTimeSlotsReady(true);
-    }
-  }, []);
+    setHiddenTimeSlots([]);
+    setHiddenDays([]);
+  }, [mainTab, selectedStudentId, selectedInstructorId, selectedGroupId, weekStart, selectedScheduleTagId, showIntroPage, studentScheduleInputTab, instructorWorkspaceTab]);
 
   useEffect(() => {
-    if (!hiddenTimeSlotsReady) return;
-    window.localStorage.setItem("synchro-s-hidden-time-slots-v1", JSON.stringify(hiddenTimeSlots));
-  }, [hiddenTimeSlots, hiddenTimeSlotsReady]);
+    const restoreReportVisibility = () => {
+      if (document.visibilityState === "visible") {
+        setHiddenTimeSlots([]);
+        setHiddenDays([]);
+      }
+    };
+    document.addEventListener("visibilitychange", restoreReportVisibility);
+    return () => document.removeEventListener("visibilitychange", restoreReportVisibility);
+  }, []);
 
   useEffect(() => {
     const refreshToday = () => setTodayISO(formatDateISOInKST(new Date()));
@@ -9375,6 +9378,7 @@ export default function SynchroSPage() {
                   hideEmptyDays={hideEmptyDays}
                   hideEmptyTimes={hideEmptyTimes}
                   hiddenTimeSlots={hiddenTimeSlots}
+                  hiddenDays={hiddenDays}
                   daysOff={roleView === "instructor" ? selectedInstructorDaysOff : []}
                   viewMode={timetableViewMode}
                   inactive={isDisplayedGroupInactive}
@@ -9548,6 +9552,7 @@ export default function SynchroSPage() {
             hiddenTimeSlots={hiddenTimeSlots}
             onChange={setHiddenTimeSlots}
           />
+          <DayVisibilityControl className="mt-3" hiddenDays={hiddenDays} onChange={setHiddenDays} />
 
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-semibold text-slate-500">월간 수업 현황</p>
@@ -11125,6 +11130,7 @@ export default function SynchroSPage() {
                   hideEmptyDays={hideEmptyDays}
                   hideEmptyTimes={hideEmptyTimes}
                   hiddenTimeSlots={hiddenTimeSlots}
+                  hiddenDays={hiddenDays}
                   daysOff={selectedInstructorDaysOff}
                   viewMode="summary"
                   onEventMove={undefined}
@@ -11148,6 +11154,7 @@ export default function SynchroSPage() {
                 hiddenTimeSlots={hiddenTimeSlots}
                 onChange={setHiddenTimeSlots}
               />
+              <DayVisibilityControl className="mt-3" hiddenDays={hiddenDays} onChange={setHiddenDays} />
               <button
                 type="button"
                 onClick={() => setShowIntroPage(false)}
@@ -11205,27 +11212,7 @@ export default function SynchroSPage() {
       ) : null}
 
       {importProgress.active ? (
-        <div className="fixed inset-0 z-[340] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/70 bg-[linear-gradient(145deg,rgba(255,255,255,0.72),rgba(219,234,254,0.65),rgba(167,243,208,0.45))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.28)] backdrop-blur-2xl">
-            <p className="text-base font-extrabold text-slate-800">시간표 저장 중...</p>
-            <p className="mt-1 text-xs font-semibold text-slate-600">{importProgress.label || "데이터를 처리하고 있습니다."}</p>
-            <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-white/60">
-              <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,#34d399,#60a5fa,#a78bfa)] transition-[width] duration-300 ease-out"
-                style={{
-                  width: `${Math.max(
-                    6,
-                    importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0
-                  )}%`
-                }}
-              />
-            </div>
-            <p className="mt-2 text-right text-sm font-bold text-slate-700">
-              {importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0}% (
-              {importProgress.done}/{importProgress.total})
-            </p>
-          </div>
-        </div>
+        <SaveProgress done={importProgress.done} total={importProgress.total} label={importProgress.label} />
       ) : null}
 
       {deleteGroupDialog.open ? (

@@ -23,7 +23,7 @@ const grid = fs.readFileSync(path.join(root, "components/schedule/TimetableGrid.
 const creation = fs.readFileSync(path.join(root, "components/schedule/ScheduleCreationWorkspace.tsx"), "utf8");
 const control = fs.readFileSync(path.join(root, "components/schedule/TimeSlotVisibilityControl.tsx"), "utf8");
 
-assert.ok(page.includes("synchro-s-hidden-time-slots-v1"), "시간대 숨김 선택은 브라우저에 저장되어야 합니다.");
+assert.ok(!page.includes("synchro-s-hidden-time-slots-v1"), "보고용 숨김은 브라우저에 영구 저장되면 안 됩니다.");
 assert.ok(page.includes("<TimeSlotVisibilityControl"), "강사·학생 시간표 우측 패널에 숨김 컨트롤이 있어야 합니다.");
 assert.ok(page.includes("hiddenTimeSlots={hiddenTimeSlots}"), "강사·학생 시간표에 숨김 상태가 전달되어야 합니다.");
 assert.ok(creation.includes("<TimeSlotVisibilityControl"), "시간표 생성 우측 패널에 숨김 컨트롤이 있어야 합니다.");

@@ -25,6 +25,7 @@ for (const deletingAll of [false, true]) {
     hasPendingTimetableChanges: true, pendingTimetableChangeCount: deletingAll ? 2 : 1,
     syncDraftItems: [], stagedEventUpdates: {}, stagedDeletedEventIds: deletingAll ? ["c1", "c2"] : ["c2"],
     displayEvents: deletingAll ? [] : [{ id: "c1", startTime: "10:00" }],
+    hiddenDays: [1, 2, 3, 4, 5, 6, 7], hiddenTimeSlots: ["10:00", "11:00"],
     importingNotionRef: { current: false }, subjects: [], instructors: [], classTypes: [], students: [],
     effectiveStudentGroupByTargetId: new Map(),
     isSyncDraftEventId: (id: string) => id.startsWith("draft-"),

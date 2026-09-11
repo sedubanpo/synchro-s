@@ -80,6 +80,7 @@ export function TimeSlotVisibilityControl({
       <div className="mx-3 mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pb-3 pt-3">
         <p className="text-[10px] font-semibold leading-4 text-slate-500">
           표와 캡처에서만 숨겨지며 저장 데이터는 유지됩니다.
+          화면을 다시 열면 전체 표시됩니다.
         </p>
         {hiddenCount > 0 ? (
           <button

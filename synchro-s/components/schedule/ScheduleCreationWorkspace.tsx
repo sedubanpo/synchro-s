@@ -3,6 +3,7 @@
 import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/components/schedule/SyncScheduleDraftModal";
 import { SchoolLogoBackdrop } from "@/components/schedule/SchoolEmblem";
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
+import { DayVisibilityControl } from "@/components/schedule/DayVisibilityControl";
 import { TimetableGrid } from "@/components/schedule/TimetableGrid";
 import { SCHEDULE_TAG_TONES, type ScheduleTag } from "@/components/schedule/ScheduleTagManager";
 import { DAYS, TIME_SLOTS } from "@/lib/constants";
@@ -94,8 +95,18 @@ export function ScheduleCreationWorkspace({
   headerActions
 }: Props) {
   const [mode, setMode] = useState<TargetMode>("resident");
+  const [hiddenDays, setHiddenDays] = useState<Weekday[]>([]);
   const [studentId, setStudentId] = useState("");
   const [prospectId, setProspectId] = useState("");
+  useEffect(() => {
+    setHiddenDays([]);
+    onHiddenTimeSlotsChange([]);
+  }, [mode, studentId, prospectId, weekStart, scheduleTagId, onHiddenTimeSlotsChange]);
+  useEffect(() => {
+    const restore = () => { if (!document.hidden) setHiddenDays([]); };
+    document.addEventListener("visibilitychange", restore);
+    return () => document.removeEventListener("visibilitychange", restore);
+  }, []);
   const [prospectForm, setProspectForm] = useState({ name: "", school: "", grade: "", memo: "" });
   const [groupName, setGroupName] = useState("");
   const [draftEvents, setDraftEvents] = useState<ScheduleEvent[]>([]);
@@ -714,6 +725,7 @@ export function ScheduleCreationWorkspace({
             hideEmptyDays={hideEmptyDays}
             hideEmptyTimes={hideEmptyTimes}
             hiddenTimeSlots={hiddenTimeSlots}
+            hiddenDays={hiddenDays}
             viewMode="detailed"
             onCellClick={(cell) => setModalCell(cell)}
             onEventDelete={async (event) => setDraftEvents((prev) => prev.filter((item) => item.id !== event.id))}
@@ -722,6 +734,7 @@ export function ScheduleCreationWorkspace({
       </div>
 
       <aside className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <DayVisibilityControl className="mb-3" hiddenDays={hiddenDays} onChange={setHiddenDays} />
         <TimeSlotVisibilityControl
           className="mb-4"
           timeSlots={TIME_SLOTS}

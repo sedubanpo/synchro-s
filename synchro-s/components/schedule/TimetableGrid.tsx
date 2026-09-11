@@ -60,6 +60,7 @@ type TimetableGridProps = {
   hideEmptyDays?: boolean;
   hideEmptyTimes?: boolean;
   hiddenTimeSlots?: string[];
+  hiddenDays?: Weekday[];
   viewMode?: TimetableViewMode;
   onCellClick: (ctx: TimetableCellContext) => void;
   onCellPaste?: (ctx: TimetableCellContext) => void;
@@ -248,6 +249,7 @@ export function TimetableGrid({
   hideEmptyDays = false,
   hideEmptyTimes = false,
   hiddenTimeSlots = [],
+  hiddenDays = [],
   viewMode = "detailed",
   onCellClick,
   onCellPaste,
@@ -349,8 +351,9 @@ export function TimetableGrid({
     }
   }
 
-  const visibleDays = hideEmptyDays ? days.filter((day) => activeDaySet.has(day.key)) : days;
-  const renderDays = visibleDays.length > 0 ? visibleDays : days;
+  const manuallyVisibleDays = days.filter((day) => !hiddenDays.includes(day.key));
+  const visibleDays = hideEmptyDays ? manuallyVisibleDays.filter((day) => activeDaySet.has(day.key)) : manuallyVisibleDays;
+  const renderDays = visibleDays.length > 0 ? visibleDays : manuallyVisibleDays;
   const manuallyVisibleTimeSlots = getVisibleTimeSlots(timeSlots, hiddenTimeSlots);
   const visibleTimeSlots = hideEmptyTimes
     ? manuallyVisibleTimeSlots.filter((slot) => renderDays.some((day) => (eventMap.get(`${day.key}-${slot}`) ?? []).length > 0))

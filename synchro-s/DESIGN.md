@@ -26,7 +26,7 @@ Synchro-S is a dense academy operations console. The interface should feel calm,
 - Class-type planning tones: blue for `1:1`, violet for `2:1`, rose for `3:1`, amber for `개별정규`.
 - Instructor picker subject tones: rose for Korean, blue for math, purple for English, emerald for science, amber for social studies, and slate for uncategorized instructors. Every tone is paired with a written subject-family badge so color is never the only cue.
 - Full timetable lesson cards reuse those subject-family tones while retaining the written subject label; `1:1` keeps its gold border and type badge over the subject tint.
-- Import progress gradient: emerald `#34d399`, blue `#60a5fa`, violet `#a78bfa`.
+- Save progress uses the primary blue on a white surface; the estimated fill remains below completion until the server returns. Report-only day/time visibility is reset on navigation and never serialized into lesson data.
 - Schedule tag tones reuse the existing blue, emerald, amber, rose, violet, and slate UI scales.
 - Recent save-history tag labels use the saved schedule-tag tone at pastel intensity; they are secondary metadata and must not compete with the student name.
 - School emblems may appear as oversized, clipped, color-retaining backdrops in student-owned surfaces. Recent-history cards keep opacity between `5%` and `9%`; primary Student Timetable headers in both student editing and schedule creation use `14%` opacity and `95%` saturation so the selected or entered school's identity stays recognizable. Preserve readable foreground contrast and omit the backdrop when no emblem is registered.
