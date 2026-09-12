@@ -20,6 +20,7 @@ import { SyncScheduleDraftModal, type SyncScheduleDraftInput } from "@/component
 import { TimeSlotVisibilityControl } from "@/components/schedule/TimeSlotVisibilityControl";
 import { DayVisibilityControl } from "@/components/schedule/DayVisibilityControl";
 import { SaveProgress } from "@/components/schedule/SaveProgress";
+import { ScheduleConflictDialog } from "@/components/schedule/ScheduleConflictDialog";
 import {
   TimetableGrid,
   type TimetableAvailabilityCell,
@@ -5049,6 +5050,7 @@ export default function SynchroSPage() {
             endTime: updatedEvent.endTime,
             weekStart,
             studentId: selectedStudentId,
+            scheduleTagId: selectedScheduleTagId,
             subjectCode: updatedEvent.subjectCode
           })
         });
@@ -5422,7 +5424,8 @@ export default function SynchroSPage() {
         weekday: snapshot.restoreMove.weekday,
         startTime: snapshot.restoreMove.startTime,
         weekStart: snapshot.restoreMove.weekStart,
-        studentId: snapshot.restoreMove.studentId
+        studentId: snapshot.restoreMove.studentId,
+        scheduleTagId: selectedScheduleTagId
       })
     });
 
@@ -5439,7 +5442,7 @@ export default function SynchroSPage() {
     }
 
     await loadWeek({ silent: true });
-  }, [loadWeek, moveToLogin, undoState]);
+  }, [loadWeek, moveToLogin, selectedScheduleTagId, undoState]);
 
   const handleCreate = useCallback(
     async (input: ScheduleFormInput) => {
@@ -5979,6 +5982,7 @@ export default function SynchroSPage() {
             endTime: ctx.endTime,
             weekStart,
             studentId: roleView === "student" ? selectedStudentId || undefined : undefined,
+            scheduleTagId: selectedScheduleTagId,
             subjectCode: ctx.subjectCode
           })
         });
@@ -6122,6 +6126,7 @@ export default function SynchroSPage() {
       saveTimetableGroupSnapshot,
       selectedGroup,
       selectedInstructorLabel,
+      selectedScheduleTagId,
       selectedStudentId,
       selectedStudentLabel,
       studentScheduleInputTab,
@@ -11356,32 +11361,8 @@ export default function SynchroSPage() {
       ) : null}
 
       {conflictDialog.open ? (
-        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-white/60 bg-[linear-gradient(160deg,rgba(255,255,255,0.66),rgba(254,226,226,0.58),rgba(219,234,254,0.55))] p-5 shadow-[0_24px_60px_rgba(15,23,42,0.32)] backdrop-blur-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-lg font-extrabold text-rose-700">{conflictDialog.title || "시간표 경고"}</p>
-              <button
-                type="button"
-                className="rounded-xl border border-white/70 bg-white/60 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-white/80"
-                onClick={() => setConflictDialog({ open: false, title: "", message: "" })}
-              >
-                닫기
-              </button>
-            </div>
-            <pre className="whitespace-pre-wrap rounded-2xl border border-white/60 bg-white/45 p-3 text-sm font-semibold leading-6 text-slate-800">
-              {conflictDialog.message}
-            </pre>
-            <div className="mt-4 text-right">
-              <button
-                type="button"
-                className="rounded-2xl border border-rose-200/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(244,114,182,0.48))] px-4 py-2 text-sm font-bold text-rose-900 shadow-[0_10px_28px_rgba(244,63,94,0.28)]"
-                onClick={() => setConflictDialog({ open: false, title: "", message: "" })}
-              >
-                확인
-              </button>
-            </div>
-          </div>
-        </div>
+        <ScheduleConflictDialog title={conflictDialog.title} message={conflictDialog.message}
+          onClose={() => setConflictDialog({ open: false, title: "", message: "" })} />
       ) : null}
 
       {selfStudyDraft ? (

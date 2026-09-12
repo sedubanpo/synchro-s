@@ -10,6 +10,7 @@ type MovePayload = {
   weekStart: string;
   studentId?: string;
   subjectCode?: string;
+  scheduleTagId?: string | null;
 };
 
 export async function PATCH(req: Request, { params: pendingParams }: { params: Promise<{ id: string }> }) {
@@ -30,6 +31,10 @@ export async function PATCH(req: Request, { params: pendingParams }: { params: P
     }
 
     const payload = (await req.json()) as MovePayload;
+    if (payload.scheduleTagId !== undefined && payload.scheduleTagId !== null &&
+        (typeof payload.scheduleTagId !== "string" || !payload.scheduleTagId.trim())) {
+      return jsonError("시간표 태그를 확인해 주세요.", 400);
+    }
     const result = await moveScheduleSlot(supabase, params.id, payload, user.id, {
       studentId: payload.studentId
     });

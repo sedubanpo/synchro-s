@@ -578,6 +578,7 @@ async function checkMoveConflictForWeek(
     instructorId: string;
     classTypeCode: string;
     weekStart: string;
+    scheduleTagId?: string | null;
     weekday: number;
     startTime: string;
     endTime: string;
@@ -588,7 +589,8 @@ async function checkMoveConflictForWeek(
   const weekly = await fetchWeeklySchedule(supabase, {
     weekStart: params.weekStart,
     view: "instructor",
-    instructorId: params.instructorId
+    instructorId: params.instructorId,
+    scheduleTagId: params.scheduleTagId
   });
 
   const overlaps = weekly.events.filter(
@@ -1366,7 +1368,7 @@ export async function updateScheduleStatus(
 export async function moveScheduleSlot(
   supabase: SupabaseLike,
   classId: string,
-  target: { weekday: number; weekStart: string; startTime: string; endTime?: string; subjectCode?: string },
+  target: { weekday: number; weekStart: string; startTime: string; endTime?: string; subjectCode?: string; scheduleTagId?: string | null },
   actorUserId: string,
   options?: { studentId?: string }
 ) {
@@ -1405,6 +1407,7 @@ export async function moveScheduleSlot(
     instructorId: classRow.instructor_id,
     classTypeCode: classRow.class_type_code,
     weekStart: target.weekStart,
+    scheduleTagId: target.scheduleTagId,
     weekday: target.weekday,
     startTime: target.startTime,
     endTime
