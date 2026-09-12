@@ -3,7 +3,7 @@
 import { TIME_SLOTS } from "@/lib/constants";
 import { SchoolEmblem } from "@/components/schedule/SchoolEmblem";
 import { HomeFullTimetableDialog } from "@/components/schedule/HomeFullTimetableDialog";
-import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
+import { homeEventOccupiesSlot, mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import { getSubjectColorClass } from "@/lib/subjectColors";
 import type { ScheduleEvent, Weekday } from "@/types/schedule";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -148,7 +148,7 @@ export function HomeInstructorFolderDashboard({
     () =>
       TIME_SLOTS.map((slot) => ({
         slot,
-        events: selectedInstructorEvents.filter((event) => event.startTime === slot)
+        events: selectedInstructorEvents.filter((event) => homeEventOccupiesSlot(event, slot))
       })),
     [selectedInstructorEvents]
   );

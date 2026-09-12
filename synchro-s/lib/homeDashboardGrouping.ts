@@ -1,4 +1,39 @@
 import type { ScheduleEvent } from "@/types/schedule";
+import { getOverlappingHourSlots } from "@/lib/timetableSlots";
+
+/** Half-open intervals: include every occupied row, but not the end boundary. */
+export function homeEventOccupiesSlot(event: ScheduleEvent, slot: string): boolean {
+  return getOverlappingHourSlots(event, [slot]).length > 0;
+}
+
+/** Unlike row occupancy, classroom collisions require actual minute overlap. */
+export function homeSchedulesOverlap(first: ScheduleEvent[], second: ScheduleEvent[]): boolean {
+  return first.some((a) => second.some((b) =>
+    a.weekday === b.weekday &&
+    toMinutes(a.startTime) < toMinutes(a.endTime) &&
+    toMinutes(b.startTime) < toMinutes(b.endTime) &&
+    toMinutes(a.startTime) < toMinutes(b.endTime) &&
+    toMinutes(b.startTime) < toMinutes(a.endTime)
+  ));
+}
+
+/** Input belongs to one resolved student; snapshot IDs are not lesson identity. */
+export function deduplicateHomeStudentEvents(events: ScheduleEvent[]): ScheduleEvent[] {
+  const unique = new Map<string, ScheduleEvent>();
+  for (const event of events) {
+    const key = JSON.stringify([
+      normalizePersonName(event.instructorName) || event.instructorId,
+      normalizeToken(event.subjectCode || event.subjectName),
+      normalizeToken(event.classTypeCode || event.classTypeLabel),
+      event.scheduleMode,
+      event.scheduleMode === "one_off" ? event.classDate : event.weekday,
+      event.startTime,
+      event.endTime
+    ]);
+    if (!unique.has(key)) unique.set(key, event);
+  }
+  return [...unique.values()];
+}
 
 function normalizeToken(value: string): string {
   return value.replace(/[\s_\-:()[\]·]/g, "").toLowerCase();

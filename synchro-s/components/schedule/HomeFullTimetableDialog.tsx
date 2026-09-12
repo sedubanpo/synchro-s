@@ -8,7 +8,7 @@ import {
   sanitizeHomeClassroomAssignments,
   type HomeClassroomAssignment
 } from "@/lib/homeFullTimetable";
-import { mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
+import { homeEventOccupiesSlot, homeSchedulesOverlap, mergeHomeInstructorEvents } from "@/lib/homeDashboardGrouping";
 import type { ScheduleEvent } from "@/types/schedule";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -348,8 +348,10 @@ export function HomeFullTimetableDialog({
   const collisionClassrooms = useMemo(() => {
     const collisions = new Set<string>();
     for (const [classroom, ids] of occupancy) {
-      const hasOverlap = TIME_SLOTS.some((slot) =>
-        ids.filter((id) => (mergedByInstructor.get(id) ?? []).some((event) => event.startTime === slot)).length > 1
+      const hasOverlap = ids.some((id, index) =>
+        ids.slice(index + 1).some((otherId) => homeSchedulesOverlap(
+          mergedByInstructor.get(id) ?? [], mergedByInstructor.get(otherId) ?? []
+        ))
       );
       if (hasOverlap) collisions.add(classroom);
     }
@@ -559,7 +561,7 @@ export function HomeFullTimetableDialog({
                     const ids = occupancy.get(classroom) ?? [];
                     const placements = ids.flatMap((id) => {
                       const instructor = dayInstructorSummaries.find((item) => item.id === id);
-                      return (mergedByInstructor.get(id) ?? []).filter((event) => event.startTime === slot).map((event) => ({ instructor, event }));
+                      return (mergedByInstructor.get(id) ?? []).filter((event) => homeEventOccupiesSlot(event, slot)).map((event) => ({ instructor, event }));
                     });
                     return (
                       <div key={`${slot}-${classroom}`} className="min-h-20 border-r border-slate-300 bg-white p-1.5">

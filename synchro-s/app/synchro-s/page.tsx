@@ -7,6 +7,7 @@ import { SchoolEmblem, SchoolLogoBackdrop } from "@/components/schedule/SchoolEm
 import { ScheduleCreationWorkspace } from "@/components/schedule/ScheduleCreationWorkspace";
 import { LessonCardPalette, type LessonAutosaveState } from "@/components/schedule/LessonCardPalette";
 import {
+  deduplicateHomeStudentEvents,
   findInteriorScheduleGapEvents,
   mergeHomeInstructorEvents,
   mergeScheduleStudentRosters
@@ -2194,7 +2195,9 @@ export default function SynchroSPage() {
         });
       });
     }
-    return [...byStudent.values()].sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
+    return [...byStudent.values()]
+      .map((item) => ({ ...item, events: deduplicateHomeStudentEvents(item.events) }))
+      .sort((a, b) => b.events.length - a.events.length || a.name.localeCompare(b.name, "ko"));
   }, [homeTodayEvents, students]);
   const currentTargetId = roleView === "student" ? selectedStudentId : selectedInstructorId;
   const currentTargetLabel = roleView === "student" ? selectedStudentLabel : selectedInstructorLabel;

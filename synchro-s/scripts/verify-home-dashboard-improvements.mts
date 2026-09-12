@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  homeEventOccupiesSlot,
+  homeSchedulesOverlap,
+  deduplicateHomeStudentEvents,
   findInteriorScheduleGapEvents,
   mergeHomeInstructorEvents,
   mergeScheduleStudentRosters
@@ -36,6 +39,24 @@ function event(overrides: Partial<ScheduleEvent>): ScheduleEvent {
     ...overrides
   };
 }
+
+const longLesson = event({ startTime: "15:00", endTime: "17:00" });
+assert.equal(homeSchedulesOverlap([longLesson], [event({ startTime: "16:00", endTime: "18:00" })]), true);
+assert.equal(homeSchedulesOverlap([longLesson], [event({ startTime: "17:00", endTime: "18:00" })]), false);
+assert.equal(homeSchedulesOverlap([event({ startTime: "15:00", endTime: "15:30" })], [event({ startTime: "15:30", endTime: "16:00" })]), false);
+assert.deepEqual(["14:00", "15:00", "16:00", "17:00"].filter((slot) => homeEventOccupiesSlot(longLesson, slot)), ["15:00", "16:00"]);
+assert.deepEqual(["15:00", "16:00", "17:00", "18:00"].filter((slot) => homeEventOccupiesSlot(event({ startTime: "15:30", endTime: "17:30" }), slot)), ["15:00", "16:00", "17:00"]);
+assert.equal(homeEventOccupiesSlot(event({ startTime: "17:00", endTime: "17:00" }), "17:00"), false);
+assert.equal(homeEventOccupiesSlot(event({ startTime: "23:00", endTime: "24:00" }), "23:00"), true);
+assert.equal(deduplicateHomeStudentEvents([longLesson, { ...longLesson, id: "copy", classDate: "2026-08-01" }]).length, 1);
+for (const difference of [
+  { instructorName: "다른강사" }, { subjectCode: "MATH" }, { classTypeCode: "ONE_TO_ONE" },
+  { endTime: "18:00" }, { startTime: "16:00" }, { weekday: 7 as const }
+]) assert.equal(deduplicateHomeStudentEvents([longLesson, { ...longLesson, ...difference }]).length, 2);
+assert.equal(deduplicateHomeStudentEvents([
+  { ...longLesson, scheduleMode: "one_off", classDate: "2026-09-12" },
+  { ...longLesson, scheduleMode: "one_off", classDate: "2026-09-13" }
+]).length, 2);
 
 const merged = mergeHomeInstructorEvents([
   event({ id: "biology-group", studentIds: ["student-1", "student-2"], studentNames: ["류우석", "김도현"] }),
@@ -157,6 +178,10 @@ const history = fs.readFileSync(path.join(root, "lib/server/saveHistory.ts"), "u
 const prospectRoute = fs.readFileSync(path.join(root, "app/api/schedule-creation/prospects/route.ts"), "utf8");
 const dashboard = fs.readFileSync(path.join(root, "components/schedule/HomeInstructorFolderDashboard.tsx"), "utf8");
 const fullTimetable = fs.readFileSync(path.join(root, "components/schedule/HomeFullTimetableDialog.tsx"), "utf8");
+assert.match(dashboard, /homeEventOccupiesSlot\(event, slot\)/);
+assert.match(fullTimetable, /homeEventOccupiesSlot\(event, slot\)/);
+assert.match(fullTimetable, /homeSchedulesOverlap\(/);
+assert.match(page, /events: deduplicateHomeStudentEvents\(item.events\)/);
 
 assert.match(page, /!scheduleTagSelectionReady \|\| overviewLoading \|\| timetableGroupsLoading/, "초기 홈은 태그 선택이 끝난 뒤 그룹을 표시해야 합니다.");
 assert.match(page, /mergeScheduleReviewEvents\(snapshot, \[\.\.\.linkedLiveEvents, \.\.\.interiorGapEvents\]\)/, "홈 전체 시간표는 부분 스냅샷의 누락 시간대를 연결된 실시간 수업으로 보충해야 합니다.");
