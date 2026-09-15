@@ -359,6 +359,8 @@ try {
   assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "박민식")?.active, false);
   assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "김경민")?.active, false);
   assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "김광수")?.active, true);
+  assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "김광수")?.subject, "수학", "Account-management department must survive normalization.");
+  assert.equal(studentRoster.instructorAccounts.find((account) => account.name === "김경민")?.subject, "화학");
 } finally {
   globalThis.fetch = originalFetch;
 }
@@ -369,6 +371,7 @@ assert.doesNotMatch(syncRoute, /docs\.google\.com|source:\s*["']sheets["']/, "Ma
 assert.match(syncRoute, /Firebase 인증 상태를 확인할 수 없습니다/, "Missing Firebase authentication must have an actionable error.");
 
 const optionsRoute = fs.readFileSync(path.join(repoRoot, "app/api/schedules/options/route.ts"), "utf8");
+assert.equal((optionsRoute.match(/secondary: resolveFirebaseInstructorAccount\([^)]*\)\?\.subject \|\| teacherSubjectByName/g) ?? []).length, 3, "Every role's instructor options must prioritize the account department over legacy sheet metadata.");
 assert.doesNotMatch(
   optionsRoute,
   /activeStudentNames|activeTeacherNames/,

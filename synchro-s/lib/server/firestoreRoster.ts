@@ -38,6 +38,7 @@ export type FirebaseStudentRosterItem = {
 export type FirebaseInstructorAccountItem = {
   uid: string;
   name: string;
+  subject?: string;
   instructorIds: string[];
   status: string;
   active: boolean;
@@ -259,6 +260,7 @@ function normalizeInstructorAccount(
   return {
     uid,
     name,
+    subject: asString(profile.department) || asString(user.department) || undefined,
     instructorIds,
     status,
     active: isFirebaseInstructorAccountActive(user, profile)

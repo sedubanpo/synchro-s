@@ -542,7 +542,7 @@ export async function GET(req: Request) {
         return {
           id: row.id,
           name: row.instructor_name,
-          secondary: teacherSubjectByName.get(normalizeName(row.instructor_name)),
+          secondary: resolveFirebaseInstructorAccount(row)?.subject || teacherSubjectByName.get(normalizeName(row.instructor_name)),
           isActive,
           daysOff: (row.days_off ?? []).filter((value) => Number.isInteger(value) && value >= 1 && value <= 7),
           availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, row.available_time_slots),
@@ -625,7 +625,7 @@ export async function GET(req: Request) {
         {
           id: resolvedInstructor.id,
           name: resolvedInstructor.instructor_name,
-          secondary: teacherSubjectByName.get(normalizeName(resolvedInstructor.instructor_name)),
+          secondary: resolveFirebaseInstructorAccount(resolvedInstructor)?.subject || teacherSubjectByName.get(normalizeName(resolvedInstructor.instructor_name)),
           isActive: true,
           daysOff: (resolvedInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
           availableTimeSlots: flattenAvailableTimeSlots(resolvedByDay, resolvedInstructor.available_time_slots),
@@ -715,7 +715,7 @@ export async function GET(req: Request) {
             {
               id: defaultInstructor.id,
               name: defaultInstructor.instructor_name,
-              secondary: teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name)),
+              secondary: resolveFirebaseInstructorAccount(defaultInstructor)?.subject || teacherSubjectByName.get(normalizeName(defaultInstructor.instructor_name)),
               isActive: defaultInstructor.is_active !== false,
               daysOff: (defaultInstructor.days_off ?? []).filter((value: number) => Number.isInteger(value) && value >= 1 && value <= 7),
               availableTimeSlots: flattenAvailableTimeSlots(availableTimeSlotsByDay, defaultInstructor.available_time_slots),

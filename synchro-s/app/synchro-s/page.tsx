@@ -5072,11 +5072,13 @@ export default function SynchroSPage() {
         }
       }
 
-      if (stagedDeletedEventIds.length > 0) {
+      // Self-study lives in the snapshot, not in the UUID-backed classes table.
+      const deletedClassIds = stagedDeletedEventIds.filter((id) => !isSelfStudyEventId(id));
+      if (deletedClassIds.length > 0) {
         const deleteRes = await fetch("/api/schedules/group", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ classIds: stagedDeletedEventIds, roleView: "student", targetId: selectedStudentId })
+          body: JSON.stringify({ classIds: deletedClassIds, roleView: "student", targetId: selectedStudentId })
         });
         if (deleteRes.status === 401) {
           moveToLogin();
@@ -7253,25 +7255,27 @@ export default function SynchroSPage() {
             group.targetId === currentTargetId &&
             (group.classIds.includes(event.id) || (group.snapshotEvents ?? []).some((item) => item.id === event.id))
         );
-        const res = await fetch("/api/schedules/group", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            classIds: [event.id],
-            roleView,
-            targetId: currentTargetId
-          })
-        });
+        if (!isSelfStudyEventId(event.id)) {
+          const res = await fetch("/api/schedules/group", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              classIds: [event.id],
+              roleView,
+              targetId: currentTargetId
+            })
+          });
 
-        if (res.status === 401) {
-          moveToLogin();
-          return;
-        }
+          if (res.status === 401) {
+            moveToLogin();
+            return;
+          }
 
-        if (!res.ok) {
-          const payload = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(payload.error ?? "개별 삭제에 실패했습니다.");
-          return;
+          if (!res.ok) {
+            const payload = (await res.json().catch(() => ({}))) as { error?: string };
+            setError(payload.error ?? "개별 삭제에 실패했습니다.");
+            return;
+          }
         }
 
         removeClassFromGroups(event.id);

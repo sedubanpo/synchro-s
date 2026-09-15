@@ -1092,7 +1092,7 @@ export function TimetableGrid({
                                     chainProgress={isGroupedRegular ? undefined : progressByEventKey.get(eventKey)}
                                     showSaveAction={!rangeEditing && !isGroupedRegular && event.id.startsWith("draft-")}
                                     onSave={!rangeEditing && !isGroupedRegular && !isSyntheticSelfStudy && onEventSave ? (item) => void onEventSave(item) : undefined}
-                                    onDelete={!rangeEditing && !isGroupedRegular && !isSyntheticSelfStudy && onEventDelete ? (item) => void onEventDelete(item) : undefined}
+                                    onDelete={!rangeEditing && !isGroupedRegular && (!isSyntheticSelfStudy || roleView === "student") && onEventDelete ? (item) => void onEventDelete(item) : undefined}
                                     highlightedStudentName={roleView === "instructor" ? highlightedStudentName : null}
                                     onStudentHighlight={roleView === "instructor" ? (studentName) => {
                                       setHighlightedStudentName((current) =>
