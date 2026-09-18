@@ -2468,19 +2468,31 @@ export default function SynchroSPage() {
     if (activeStudentGroups.length === 0) return selectedScheduleTagId ? [] : liveInstructorEvents;
 
     const merged = activeStudentGroups.flatMap((group) => {
-      const snapshot = (group.snapshotEvents ?? []).flatMap((event) => {
+      const snapshot = group.snapshotEvents ?? [];
+      // Match the student view: a persisted snapshot records this student's
+      // participation, not the full duration of the shared underlying class.
+      // Resolve the source before filtering by instructor so reassigned lessons
+      // cannot reappear under their previous instructor through live fallback.
+      const hasSavedSnapshot = snapshot.length > 0 && !snapshot.some((event) => event.id.startsWith("draft-"));
+      const sourceEvents = hasSavedSnapshot
+        ? snapshot
+        : liveInstructorEvents.filter((event) => group.classIds.includes(event.id));
+      return sourceEvents.flatMap((event) => {
         if (!isForSelectedInstructor(event)) return [];
         const scopedEvent = scopeScheduleEventToStudent(event, group.targetId);
         return scopedEvent && isForActiveStudent(scopedEvent) ? [scopedEvent] : [];
       });
-      const liveLinked = liveInstructorEvents.flatMap((event) => {
-        if (!group.classIds.includes(event.id)) return [];
-        const scopedEvent = scopeScheduleEventToStudent(event, group.targetId);
-        return scopedEvent ? [scopedEvent] : [];
-      });
-      return mergeScheduleReviewEvents(snapshot, liveLinked);
     });
-    const mergedWithLiveFallback = selectedScheduleTagId ? merged : [...merged, ...liveInstructorEvents];
+    // Untagged students without a saved group still use live schedules. Scope
+    // mixed rosters so that fallback never widens another student's snapshot.
+    const ungroupedLiveEvents = selectedScheduleTagId ? [] : liveInstructorEvents.flatMap((event) =>
+      event.studentIds.flatMap((studentId) => {
+        if (effectiveStudentGroupByTargetId.has(studentId)) return [];
+        const scopedEvent = scopeScheduleEventToStudent(event, studentId);
+        return scopedEvent && isForActiveStudent(scopedEvent) ? [scopedEvent] : [];
+      })
+    );
+    const mergedWithLiveFallback = [...merged, ...ungroupedLiveEvents];
 
     const dedup = new Map<string, ScheduleEvent>();
     for (const event of mergedWithLiveFallback) {
@@ -2616,7 +2628,7 @@ export default function SynchroSPage() {
       return onlyActiveRosterEvents(overviewDisplayEvents);
     }
     if (roleView === "instructor") {
-      // 강사 탭은 활성 학생 기준 실시간 수업 + 활성 학생 그룹 스냅샷을 함께 반영한다.
+      // 강사 탭도 학생 화면과 동일한 저장본의 참여 시간을 기준으로 표시한다.
       return filterInstructorStudent(onlyActiveRosterEvents(activeStudentEventsForInstructor));
     }
 
