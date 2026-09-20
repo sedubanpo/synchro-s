@@ -1,3 +1,4 @@
+import { readSessionCookie } from '@/lib/server/hubSession';
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { cookies } from "next/headers";
@@ -8,7 +9,7 @@ export type AppUserRole = "admin" | "coordinator" | "instructor" | "student";
 export async function getAuthenticatedProfile() {
   const serverSupabase = await createSupabaseServerClient();
   const cookieStore = await cookies();
-  const sheetSession = verifySessionToken(cookieStore.get(getSessionCookieName())?.value);
+  const sheetSession = verifySessionToken(readSessionCookie(cookieStore,getSessionCookieName()));
   if (sheetSession) {
     // Sheet session has no Supabase auth JWT, so use service-role client to avoid RLS empty reads.
     const adminSupabase = createSupabaseAdminClient();

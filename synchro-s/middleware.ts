@@ -1,3 +1,4 @@
+import { isCrossOriginMutation } from './lib/server/hubSession';
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -8,6 +9,7 @@ type CookieToSet = {
 };
 
 export async function middleware(request: NextRequest) {
+  if(isCrossOriginMutation(request))return NextResponse.json({error:'허용되지 않은 요청입니다.'},{status:403});
   let response = NextResponse.next({
     request: {
       headers: request.headers

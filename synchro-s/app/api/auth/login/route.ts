@@ -1,3 +1,4 @@
+import { HUB_SESSION_COOKIE, hubCookieOptions } from '@/lib/server/hubSession';
 import { errorMessage, jsonError } from "@/lib/http";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -10,6 +11,7 @@ type LoginPayload = {
   id?: string;
   password?: string;
   idToken?: string;
+  hubEmbedded?: boolean;
 };
 
 const MANAGER_NAME_ALLOWLIST = new Set(["에스에듀", "안종성", "홍성우", "김용찬"]);
@@ -79,13 +81,14 @@ export async function POST(req: Request) {
       });
 
       response.cookies.set({
-        name: getSessionCookieName(),
+        name: payload.hubEmbedded === true ? HUB_SESSION_COOKIE : getSessionCookieName(),
         value: token,
         httpOnly: true,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
         path: "/",
-        maxAge: 60 * 60 * 12
+        maxAge: 60 * 60 * 12,
+        ...(payload.hubEmbedded === true ? hubCookieOptions() : {})
       });
 
       return response;

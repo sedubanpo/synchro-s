@@ -1,3 +1,4 @@
+import { HUB_SESSION_COOKIE, hubCookieOptions } from '@/lib/server/hubSession';
 import { getSessionCookieName } from "@/lib/server/sessionToken";
 import { NextResponse } from "next/server";
 
@@ -12,5 +13,6 @@ export async function POST() {
     path: "/",
     maxAge: 0
   });
+  response.cookies.set({name:HUB_SESSION_COOKIE,value:'',...hubCookieOptions(),maxAge:0});
   return response;
 }
