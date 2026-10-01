@@ -3,6 +3,7 @@ import { canManageSchedules, getAuthenticatedProfile } from "@/lib/server/auth";
 import { fetchRecentSaveHistory, insertSaveHistory } from "@/lib/server/saveHistory";
 import { getStaffAttribution } from "@/lib/server/staffAttribution";
 import { NextResponse } from "next/server";
+import { canReadGlobalSaveHistory } from "@/lib/server/securityBoundary";
 
 export async function GET() {
   try {
@@ -16,6 +17,9 @@ export async function GET() {
       return jsonError("Authenticated but no app profile or role mapping in public.users", 403);
     }
 
+    // Do not infer ownership from target_name: duplicate/renamed people exist.
+    // Non-managers keep the UI contract but receive no global staff history.
+    if (!canReadGlobalSaveHistory(profile.role)) return NextResponse.json({ items: [] });
     const items = await fetchRecentSaveHistory(supabase, 120);
     return NextResponse.json({ items });
   } catch (error) {

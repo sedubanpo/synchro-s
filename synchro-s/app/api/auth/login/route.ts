@@ -6,6 +6,7 @@ import { resolveSynchroFirebaseIdentity } from "@/lib/server/firebaseAuth";
 import { buildSessionToken, getSessionCookieName } from "@/lib/server/sessionToken";
 import { verifyTeacherSheetCredential } from "@/lib/server/sheetAuth";
 import { NextResponse } from "next/server";
+import { requireServerDatabaseClient } from "@/lib/server/securityBoundary";
 
 type LoginPayload = {
   id?: string;
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
     const payload = (await req.json()) as LoginPayload;
     if (payload.idToken) {
       const identity = await resolveSynchroFirebaseIdentity(payload.idToken);
-      const supabase = createSupabaseAdminClient() ?? (await createSupabaseServerClient());
+      const supabase = requireServerDatabaseClient(createSupabaseAdminClient());
       let instructorId = identity.instructorId;
       let studentId = identity.studentId;
 
